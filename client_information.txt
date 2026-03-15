@@ -7,9 +7,11 @@ Welcome everyone, to Yappa! as of today we do have a few new wonderful features 
 - Added an info tab to the settings where changes can be logged (like the ones you're reading :D) & build information can be obtained for debugging & error logging purposes.
 - Fixed graphical issues with resizing channel list
 - Added the ability to double click on a Voice Deck to join it.
-- Added visiual updates relating to server owners.
+- Added visual updates relating to server owners.
 - Added YUID (Yappa User ID) system, to lay the foundation for cross-server user identification & nicknames and/or username changes.
 - Fixed minor bugs relating to double-clicking to join a call.
 - Fixed minor bugs relating to mic/audio muting.
 - Fixed minor bugs relating to typing messages.
 - Fixed minor bugs relating to chat scrolling when a message is recieved.
+- Added profile settings panel.
+- Added image cropping utility.
