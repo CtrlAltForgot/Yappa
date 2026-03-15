@@ -1,0 +1,10 @@
+port: 7880
+log_level: info
+
+rtc:
+  tcp_port: 7881
+  udp_port: 7882
+  use_external_ip: true
+
+keys:
+  lk_vuBPBZwzO87clTkKwx9FV0vx: An2ZH9DNQHpTsqqREi7saCZEjeiYpBSB1VKumNuuX4B7kfuC

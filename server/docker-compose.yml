@@ -1,0 +1,22 @@
+services:
+  yappa-livekit:
+    image: livekit/livekit-server:latest
+    container_name: yappa-livekit
+    network_mode: host
+    command: --config /etc/livekit/livekit.yaml
+    volumes:
+      - ./livekit.yaml:/etc/livekit/livekit.yaml:ro
+    restart: unless-stopped
+
+  newchat-node:
+    build: .
+    container_name: newchat-node
+    depends_on:
+      - yappa-livekit
+    ports:
+      - "${PORT:-4100}:4100"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
