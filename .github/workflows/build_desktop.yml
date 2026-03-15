@@ -7,218 +7,180 @@ on:
       - main
       - master
       - client
-    tags:
-      - 'v*'
-
-concurrency:
-  group: desktop-build-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   build-linux:
-    name: Build Linux AppImage
+    name: Build Linux single-file package
     runs-on: ubuntu-latest
-
-    defaults:
-      run:
-        working-directory: client
-        shell: bash
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Read app version
-        id: meta
+        id: version
+        shell: bash
         run: |
-          version=$(grep '^version:' pubspec.yaml | head -n1 | sed 's/^version:[[:space:]]*//')
-          if [ -z "$version" ]; then
-            version="0.0.0+0"
-          fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "version_safe=${version//+/\-}" >> "$GITHUB_OUTPUT"
+          APP_VERSION=$(grep '^version:' client/pubspec.yaml | awk '{print $2}')
+          SAFE_VERSION=${APP_VERSION//+/-}
+          echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "safe_version=$SAFE_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
-          cache: true
 
       - name: Install Linux build dependencies
+        shell: bash
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            clang cmake curl file fuse libgtk-3-dev liblzma-dev ninja-build pkg-config
+            clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev zip makeself
 
       - name: Enable Linux desktop
+        working-directory: client
         run: flutter config --enable-linux-desktop
 
       - name: Get dependencies
+        working-directory: client
         run: flutter pub get
 
       - name: Build Linux release
+        working-directory: client
         run: flutter build linux --release
 
-      - name: Install linuxdeploy
-        uses: miurahr/install-linuxdeploy-action@v1
-        with:
-          plugins: appimage
-
-      - name: Package AppImage
+      - name: Package Linux .run installer
+        shell: bash
         run: |
-          mkdir -p dist
-          APPDIR="$RUNNER_TEMP/Yappa.AppDir"
-          rm -rf "$APPDIR"
-          mkdir -p "$APPDIR/usr/bin"
-          cp -r build/linux/x64/release/bundle/* "$APPDIR/usr/bin/"
-          cp macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_512.png "$APPDIR/yappa.png"
-
-          cat > "$APPDIR/AppRun" <<'EOF'
-          #!/bin/sh
-          HERE="$(dirname "$(readlink -f "$0")")"
-          exec "$HERE/usr/bin/Yappa" "$@"
-          EOF
-          sed -i 's/^          //' "$APPDIR/AppRun"
-          chmod +x "$APPDIR/AppRun"
-
-          cat > "$APPDIR/Yappa.desktop" <<'EOF'
-          [Desktop Entry]
-          Type=Application
-          Name=Yappa
-          Exec=Yappa
-          Icon=yappa
-          Categories=Network;Chat;
-          Terminal=false
-          StartupNotify=true
-          EOF
-          sed -i 's/^          //' "$APPDIR/Yappa.desktop"
-
-          linuxdeploy \
-            --appdir "$APPDIR" \
-            --desktop-file "$APPDIR/Yappa.desktop" \
-            --icon-file "$APPDIR/yappa.png" \
-            --output appimage
-
-          mv ./*.AppImage "dist/Yappa-${{ steps.meta.outputs.version_safe }}-linux-x64.AppImage"
+          mkdir -p client/dist
+          rm -rf client/dist/linux-package
+          mkdir -p client/dist/linux-package
+          cp -r client/build/linux/x64/release/bundle/* client/dist/linux-package/
+          makeself --nox11 \
+            client/dist/linux-package \
+            client/dist/Yappa-${{ steps.version.outputs.safe_version }}-linux-x64.run \
+            "Yappa ${{ steps.version.outputs.app_version }}" \
+            ./yappa
 
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
-          name: yappa-linux-appimage
-          path: client/dist/Yappa-${{ steps.meta.outputs.version_safe }}-linux-x64.AppImage
+          name: Yappa-linux-x64
+          path: client/dist/Yappa-${{ steps.version.outputs.safe_version }}-linux-x64.run
           if-no-files-found: error
 
   build-windows:
     name: Build Windows Setup EXE
     runs-on: windows-latest
 
-    defaults:
-      run:
-        working-directory: client
-        shell: bash
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Read app version
-        id: meta
+        id: version
+        shell: pwsh
         run: |
-          version=$(grep '^version:' pubspec.yaml | head -n1 | sed 's/^version:[[:space:]]*//')
-          if [ -z "$version" ]; then
-            version="0.0.0+0"
-          fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "version_safe=${version//+/\-}" >> "$GITHUB_OUTPUT"
+          $line = (Get-Content client/pubspec.yaml | Where-Object { $_ -match '^version:' } | Select-Object -First 1)
+          $appVersion = $line.Split(':')[1].Trim()
+          $safeVersion = $appVersion.Replace('+', '-')
+          "app_version=$appVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "safe_version=$safeVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
-          cache: true
 
       - name: Enable Windows desktop
+        working-directory: client
         run: flutter config --enable-windows-desktop
 
       - name: Get dependencies
+        working-directory: client
         run: flutter pub get
 
       - name: Build Windows release
+        working-directory: client
         run: flutter build windows --release
 
       - name: Ensure dist directory exists
-        run: mkdir -p dist
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force -Path client/dist | Out-Null
 
       - name: Compile Inno Setup installer
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.7
         with:
           path: client/packaging/windows/yappa.iss
-          options: >-
-            /DMyAppVersion=${{ steps.meta.outputs.version }}
-            /DMyOutputBaseFilename=Yappa-Setup-${{ steps.meta.outputs.version_safe }}-windows-x64
+
+      - name: Rename installer
+        shell: pwsh
+        run: |
+          $source = "client/dist/Yappa-Setup.exe"
+          if (!(Test-Path $source)) {
+            throw "Expected installer not found at $source"
+          }
+          $target = "client/dist/Yappa-Setup-${{ steps.version.outputs.safe_version }}-windows-x64.exe"
+          Move-Item -Force $source $target
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
-          name: yappa-windows-installer
-          path: client/dist/Yappa-Setup-${{ steps.meta.outputs.version_safe }}-windows-x64.exe
+          name: Yappa-windows-x64
+          path: client/dist/Yappa-Setup-${{ steps.version.outputs.safe_version }}-windows-x64.exe
           if-no-files-found: error
 
   build-macos:
     name: Build macOS DMG
     runs-on: macos-latest
 
-    defaults:
-      run:
-        working-directory: client
-        shell: bash
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Read app version
-        id: meta
+        id: version
+        shell: bash
         run: |
-          version=$(grep '^version:' pubspec.yaml | head -n1 | sed 's/^version:[[:space:]]*//')
-          if [ -z "$version" ]; then
-            version="0.0.0+0"
-          fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "version_safe=${version//+/\-}" >> "$GITHUB_OUTPUT"
+          APP_VERSION=$(grep '^version:' client/pubspec.yaml | awk '{print $2}')
+          SAFE_VERSION=${APP_VERSION//+/-}
+          echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "safe_version=$SAFE_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
-          cache: true
 
       - name: Enable macOS desktop
+        working-directory: client
         run: flutter config --enable-macos-desktop
 
       - name: Get dependencies
+        working-directory: client
         run: flutter pub get
 
       - name: Build macOS release
+        working-directory: client
         run: flutter build macos --release
 
       - name: Package DMG
+        shell: bash
         run: |
-          mkdir -p dist
-          STAGE="$RUNNER_TEMP/yappa-dmg"
-          rm -rf "$STAGE"
-          mkdir -p "$STAGE"
-          cp -R build/macos/Build/Products/Release/Yappa.app "$STAGE/"
+          mkdir -p client/dist/dmg-root
+          rm -rf client/dist/dmg-root/*
+          cp -R client/build/macos/Build/Products/Release/yappa.app client/dist/dmg-root/
           hdiutil create \
             -volname "Yappa" \
-            -srcfolder "$STAGE" \
+            -srcfolder client/dist/dmg-root \
             -ov \
             -format UDZO \
-            "dist/Yappa-${{ steps.meta.outputs.version_safe }}-macos.dmg"
+            client/dist/Yappa-${{ steps.version.outputs.safe_version }}-macos.dmg
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
-          name: yappa-macos-dmg
-          path: client/dist/Yappa-${{ steps.meta.outputs.version_safe }}-macos.dmg
+          name: Yappa-macos
+          path: client/dist/Yappa-${{ steps.version.outputs.safe_version }}-macos.dmg
           if-no-files-found: error

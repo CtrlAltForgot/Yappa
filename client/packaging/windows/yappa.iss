@@ -1,42 +1,33 @@
-#ifndef MyAppVersion
-  #define MyAppVersion "1.0.0"
-#endif
-
-#ifndef MyOutputBaseFilename
-  #define MyOutputBaseFilename "Yappa-Setup"
-#endif
-
 #define MyAppName "Yappa"
-#define MyAppPublisher "Yappa"
 #define MyAppExeName "yappa.exe"
 
 [Setup]
-AppId={{9A74D7CF-6527-4A4D-9DA0-7E7F0A177D0A}
+AppId={{0B789598-14E4-4BF0-A624-474F4FD686E1}
 AppName={#MyAppName}
-AppVersion={#MyAppVersion}
-AppPublisher={#MyAppPublisher}
+AppVersion=1.0.0
+AppPublisher=Yappa
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
-PrivilegesRequired=lowest
-ArchitecturesAllowed=x64compatible
-ArchitecturesInstallIn64BitMode=x64compatible
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
-SetupIconFile=client\windows\runner\resources\app_icon.ico
+OutputDir=..\..\dist
+OutputBaseFilename=Yappa-Setup
+SetupIconFile=..\..\..\windows\runner\resources\app_icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
-OutputDir=client\dist
-OutputBaseFilename={#MyOutputBaseFilename}
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+PrivilegesRequired=lowest
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"; Flags: unchecked
+Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional icons:"; Flags: unchecked
 
 [Files]
-Source: "client\build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\..\build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
