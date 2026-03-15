@@ -31,13 +31,10 @@ jobs:
       - name: Read app version
         id: meta
         run: |
-          version=$(python3 - <<'PY'
-import pathlib, re
-text = pathlib.Path('pubspec.yaml').read_text(encoding='utf-8')
-match = re.search(r'^version:\s*([^\s]+)', text, re.MULTILINE)
-print(match.group(1) if match else '0.0.0+0')
-PY
-)
+          version=$(grep '^version:' pubspec.yaml | head -n1 | sed 's/^version:[[:space:]]*//')
+          if [ -z "$version" ]; then
+            version="0.0.0+0"
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "version_safe=${version//+/\-}" >> "$GITHUB_OUTPUT"
 
@@ -77,22 +74,24 @@ PY
           cp macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_512.png "$APPDIR/yappa.png"
 
           cat > "$APPDIR/AppRun" <<'EOF'
-#!/bin/sh
-HERE="$(dirname "$(readlink -f "$0")")"
-exec "$HERE/usr/bin/Yappa" "$@"
-EOF
+          #!/bin/sh
+          HERE="$(dirname "$(readlink -f "$0")")"
+          exec "$HERE/usr/bin/Yappa" "$@"
+          EOF
+          sed -i 's/^          //' "$APPDIR/AppRun"
           chmod +x "$APPDIR/AppRun"
 
           cat > "$APPDIR/Yappa.desktop" <<'EOF'
-[Desktop Entry]
-Type=Application
-Name=Yappa
-Exec=Yappa
-Icon=yappa
-Categories=Network;Chat;
-Terminal=false
-StartupNotify=true
-EOF
+          [Desktop Entry]
+          Type=Application
+          Name=Yappa
+          Exec=Yappa
+          Icon=yappa
+          Categories=Network;Chat;
+          Terminal=false
+          StartupNotify=true
+          EOF
+          sed -i 's/^          //' "$APPDIR/Yappa.desktop"
 
           linuxdeploy \
             --appdir "$APPDIR" \
@@ -125,13 +124,10 @@ EOF
       - name: Read app version
         id: meta
         run: |
-          version=$(python3 - <<'PY'
-import pathlib, re
-text = pathlib.Path('pubspec.yaml').read_text(encoding='utf-8')
-match = re.search(r'^version:\s*([^\s]+)', text, re.MULTILINE)
-print(match.group(1) if match else '0.0.0+0')
-PY
-)
+          version=$(grep '^version:' pubspec.yaml | head -n1 | sed 's/^version:[[:space:]]*//')
+          if [ -z "$version" ]; then
+            version="0.0.0+0"
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "version_safe=${version//+/\-}" >> "$GITHUB_OUTPUT"
 
@@ -184,13 +180,10 @@ PY
       - name: Read app version
         id: meta
         run: |
-          version=$(python3 - <<'PY'
-import pathlib, re
-text = pathlib.Path('pubspec.yaml').read_text(encoding='utf-8')
-match = re.search(r'^version:\s*([^\s]+)', text, re.MULTILINE)
-print(match.group(1) if match else '0.0.0+0')
-PY
-)
+          version=$(grep '^version:' pubspec.yaml | head -n1 | sed 's/^version:[[:space:]]*//')
+          if [ -z "$version" ]; then
+            version="0.0.0+0"
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "version_safe=${version//+/\-}" >> "$GITHUB_OUTPUT"
 
