@@ -4,7 +4,8 @@ set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 APP_DIR="$SCRIPT_DIR"
 DESKTOP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
-DESKTOP_FILE="$DESKTOP_DIR/chat.yappa.client.desktop"
+APP_ID="chat.yappa.client"
+DESKTOP_FILE="$DESKTOP_DIR/${APP_ID}.desktop"
 ICON_FILE="$APP_DIR/assets/yappa_logo.png"
 EXEC_FILE="$APP_DIR/Yappa"
 LAUNCHER_FILE="$APP_DIR/run-yappa.sh"
@@ -28,6 +29,7 @@ Categories=Network;Chat;
 StartupNotify=true
 StartupWMClass=Yappa
 X-GNOME-UsesNotifications=true
+DBusActivatable=false
 EOF
 
 chmod 644 "$DESKTOP_FILE"
