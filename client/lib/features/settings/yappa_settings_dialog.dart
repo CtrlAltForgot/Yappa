@@ -1259,11 +1259,11 @@ class _VideoSettingsTabState extends State<_VideoSettingsTab> {
     String backendSummary() {
       switch (backend) {
         case YappaLinuxScreenShareBackend.auto:
-          return 'Yappa decides based on the current Linux session.';
+          return 'Yappa uses the native Linux share flow first and keeps an X11 fallback ready when needed.';
         case YappaLinuxScreenShareBackend.nativePortal:
           return 'Always use the native Linux screen capture path.';
         case YappaLinuxScreenShareBackend.x11Only:
-          return 'Only allow screen sharing when the app is actually running in an X11 session.';
+          return 'Only allow screen sharing when the app is actually running in an X11 session, using the legacy X11 capture path.';
         case YappaLinuxScreenShareBackend.disableOnWayland:
           return 'Block screen sharing entirely when Yappa is running in Wayland.';
       }
@@ -1312,9 +1312,9 @@ class _VideoSettingsTabState extends State<_VideoSettingsTab> {
               const SizedBox(height: 14),
               Text(
                 detectedSession == 'Wayland'
-                    ? 'Wayland can show duplicate system share dialogs on some KDE setups because the desktop portal owns the final chooser.'
+                    ? 'Wayland uses the desktop portal chooser directly, so the system picker is expected to own the final share selection.'
                     : detectedSession == 'X11'
-                        ? 'X11 is the best environment to test Linux screen sharing when the Wayland portal path feels unstable.'
+                        ? 'X11 now uses the native Linux share flow in Auto mode first, with a legacy X11 fallback only when Yappa needs it.'
                         : 'Yappa could not confidently detect the desktop session, so Auto will fall back to the safest built-in path.',
                 style: TextStyle(
                   color: NewChatColors.textMuted,
@@ -1421,12 +1421,12 @@ class _VideoSettingsTabState extends State<_VideoSettingsTab> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '• It can auto-detect Wayland or X11 and decide whether Yappa should try screen sharing.',
+                '• It can auto-detect Wayland or X11 and choose the safest Linux screen share path.',
                 style: TextStyle(color: NewChatColors.textMuted, height: 1.45),
               ),
               const SizedBox(height: 8),
               Text(
-                '• It can block screen share on Wayland so you never hit the duplicate chooser there.',
+                '• It can keep Auto mode on the native Linux chooser while still leaving an X11 fallback available when the portal path fails.',
                 style: TextStyle(color: NewChatColors.textMuted, height: 1.45),
               ),
               const SizedBox(height: 8),
@@ -1845,7 +1845,7 @@ class _InfoSettingsTabState extends State<_InfoSettingsTab> {
   );
   static const String _fallbackBuild = String.fromEnvironment(
     'YAPPA_BUILD',
-    defaultValue: '0312261857',
+    defaultValue: '0317261606',
   );
 
   Future<_ClientInfoPayload> _load() async {

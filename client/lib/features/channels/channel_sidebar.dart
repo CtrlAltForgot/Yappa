@@ -865,62 +865,85 @@ class _ChannelSidebarState extends State<ChannelSidebar> {
             child: Column(
               children: [
                 Expanded(
-                  child: ListView(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    children: [
-                      const _SectionLabel(label: 'TEXT FEEDS'),
-                      for (final channel in textChannels)
-                        _ChannelTile(
-                          channel: channel,
-                          displayName: _channelLabel(channel),
-                          glyph: _channelGlyphById[channel.id],
-                          selected: channel.id == widget.selectedChannelId,
-                          muted: _isMuted(channel),
-                          onTap: () => widget.onChannelSelected(channel.id),
-                          onSecondaryTapDown: (details) {
-                            _showChannelContextMenu(
-                              details: details,
-                              channel: channel,
-                            );
-                          },
-                        ),
-                      const SizedBox(height: 12),
-                      const _SectionLabel(label: 'VOICE DECKS'),
-                      for (final channel in voiceChannels)
-                        _VoiceDeckTile(
-                          channel: channel,
-                          displayName: _channelLabel(channel),
-                          glyph: _channelGlyphById[channel.id],
-                          selected: channel.id == widget.selectedChannelId,
-                          muted: _isMuted(channel),
-                          onTap: () => _handleVoiceDeckTap(channel.id),
-                          onSecondaryTapDown: (details) {
-                            _showChannelContextMenu(
-                              details: details,
-                              channel: channel,
-                            );
-                          },
-                          state: _voiceStateForChannel(channel.id),
-                          members: _membersForVoiceDeck(channel.id),
-                          elapsedLabel: _formatElapsed(
-                            _voiceStateForChannel(channel.id)?.activeSince,
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      return CustomScrollView(
+                        slivers: [
+                          SliverList(
+                            delegate: SliverChildListDelegate([
+                              const _SectionLabel(label: 'TEXT FEEDS'),
+                              for (final channel in textChannels)
+                                _ChannelTile(
+                                  channel: channel,
+                                  displayName: _channelLabel(channel),
+                                  glyph: _channelGlyphById[channel.id],
+                                  selected:
+                                      channel.id == widget.selectedChannelId,
+                                  muted: _isMuted(channel),
+                                  onTap: () =>
+                                      widget.onChannelSelected(channel.id),
+                                  onSecondaryTapDown: (details) {
+                                    _showChannelContextMenu(
+                                      details: details,
+                                      channel: channel,
+                                    );
+                                  },
+                                ),
+                              const SizedBox(height: 12),
+                              const _SectionLabel(label: 'VOICE DECKS'),
+                              for (final channel in voiceChannels)
+                                _VoiceDeckTile(
+                                  channel: channel,
+                                  displayName: _channelLabel(channel),
+                                  glyph: _channelGlyphById[channel.id],
+                                  selected:
+                                      channel.id == widget.selectedChannelId,
+                                  muted: _isMuted(channel),
+                                  onTap: () => _handleVoiceDeckTap(channel.id),
+                                  onSecondaryTapDown: (details) {
+                                    _showChannelContextMenu(
+                                      details: details,
+                                      channel: channel,
+                                    );
+                                  },
+                                  state: _voiceStateForChannel(channel.id),
+                                  members: _membersForVoiceDeck(channel.id),
+                                  elapsedLabel: _formatElapsed(
+                                    _voiceStateForChannel(channel.id)
+                                        ?.activeSince,
+                                  ),
+                                  currentUserId: widget.currentUserId,
+                                  voiceMemberVolumeForUserId:
+                                      _voiceMemberVolumeFor,
+                                  onVoiceMemberSecondaryTapDown:
+                                      (member, details) =>
+                                          _showVoiceMemberContextMenu(
+                                            details: details,
+                                            member: member,
+                                          ),
+                                  resolveAvatarUrl: _resolvedAssetUrl,
+                                ),
+                              if (widget.canOpenAdminPanel)
+                                const SizedBox(height: 18),
+                            ]),
                           ),
-                          currentUserId: widget.currentUserId,
-                          voiceMemberVolumeForUserId: _voiceMemberVolumeFor,
-                          onVoiceMemberSecondaryTapDown: (member, details) =>
-                              _showVoiceMemberContextMenu(
-                                details: details,
-                                member: member,
+                          if (widget.canOpenAdminPanel)
+                            SliverFillRemaining(
+                              hasScrollBody: false,
+                              fillOverscroll: true,
+                              child: _ChannelListAdminContextRegion(
+                                onSecondaryTapDown: _showBlankAreaMenu,
                               ),
-                          resolveAvatarUrl: _resolvedAssetUrl,
-                        ),
-                      if (widget.canOpenAdminPanel)
-                        const SizedBox(height: 18),
-                      if (widget.canOpenAdminPanel)
-                        _BlankAreaContextTarget(
-                          onSecondaryTapDown: _showBlankAreaMenu,
-                        ),
-                    ],
+                            )
+                          else
+                            SliverToBoxAdapter(
+                              child: SizedBox(
+                                height: constraints.maxHeight > 0 ? 12 : 0,
+                              ),
+                            ),
+                        ],
+                      );
+                    },
                   ),
                 ),
                 if (widget.bottomDock != null) ...[
@@ -939,41 +962,21 @@ class _ChannelSidebarState extends State<ChannelSidebar> {
   }
 }
 
-class _BlankAreaContextTarget extends StatelessWidget {
+class _ChannelListAdminContextRegion extends StatelessWidget {
   final ValueChanged<TapDownDetails> onSecondaryTapDown;
 
-  const _BlankAreaContextTarget({
+  const _ChannelListAdminContextRegion({
     required this.onSecondaryTapDown,
   });
 
   @override
   Widget build(BuildContext context) {
     return MouseRegion(
-      cursor: SystemMouseCursors.click,
+      cursor: SystemMouseCursors.contextMenu,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onSecondaryTapDown: onSecondaryTapDown,
-        child: Container(
-          height: 160,
-          margin: const EdgeInsets.symmetric(horizontal: 12),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(
-              color: NewChatColors.outline.withValues(alpha: 0.18),
-            ),
-            color: Colors.transparent,
-          ),
-          child: Center(
-            child: Text(
-              'Right click to create a channel or category',
-              style: TextStyle(
-                color: NewChatColors.textMuted.withValues(alpha: 0.72),
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        ),
+        child: const SizedBox.expand(),
       ),
     );
   }

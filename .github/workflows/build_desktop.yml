@@ -47,16 +47,35 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libpipewire-0.3-dev xdg-desktop-portal xdg-desktop-portal-gtk
           cd client
           flutter build linux --release
 
       - name: Package Linux ZIP
         if: matrix.os == 'ubuntu-latest'
+        shell: bash
         run: |
-          mkdir -p client/dist
-          cd client/build/linux/x64/release
-          zip -r ../../../../dist/Yappa-${{ steps.version.outputs.safe_version }}-linux-x64.zip bundle
+          set -euo pipefail
+          VERSION_DIR=client/dist/Yappa-${{ steps.version.outputs.safe_version }}-linux-x64
+          rm -rf "$VERSION_DIR"
+          mkdir -p "$VERSION_DIR"
+
+          cp -R client/build/linux/x64/release/bundle/. "$VERSION_DIR"/
+          mkdir -p "$VERSION_DIR/assets"
+          cp client/assets/branding/yappa_logo.png "$VERSION_DIR/assets/yappa_logo.png"
+          cp client/packaging/linux/run-yappa.sh "$VERSION_DIR/run-yappa.sh"
+          chmod +x "$VERSION_DIR/run-yappa.sh"
+
+          cat > "$VERSION_DIR/README-Linux.txt" <<'EOF'
+          Launch Yappa on Linux with ./run-yappa.sh
+
+          The launcher registers a per-user desktop entry for better portal integration,
+          then starts the bundled Yappa binary. This improves screen sharing reliability
+          on Linux desktops that rely on xdg-desktop-portal.
+          EOF
+
+          cd client/dist
+          zip -r Yappa-${{ steps.version.outputs.safe_version }}-linux-x64.zip Yappa-${{ steps.version.outputs.safe_version }}-linux-x64
 
       - name: Upload Linux artifact
         if: matrix.os == 'ubuntu-latest'
