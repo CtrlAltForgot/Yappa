@@ -2,54 +2,20 @@ name: Build Yappa Desktop
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
 
 jobs:
-  build-linux:
-    name: Build (linux-x64)
-    runs-on: ubuntu-latest
-    container:
-      image: fedora:43
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
 
     steps:
-      - name: Install system dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          dnf -y update
-          dnf -y install \
-            bash \
-            coreutils \
-            curl \
-            file \
-            findutils \
-            git \
-            gzip \
-            tar \
-            unzip \
-            which \
-            xz \
-            zip \
-            clang \
-            cmake \
-            gcc-c++ \
-            make \
-            ninja-build \
-            pkgconf-pkg-config \
-            gtk3-devel \
-            libstdc++-devel \
-            pipewire-devel \
-            libXdamage-devel \
-            libXcomposite-devel \
-            libXrandr-devel \
-            libXext-devel \
-            libXfixes-devel \
-            libdrm-devel \
-            mesa-libgbm-devel \
-            mesa-libEGL-devel \
-            wayland-devel
-
       - name: Checkout repo
         uses: actions/checkout@v4
 
@@ -58,7 +24,7 @@ jobs:
         shell: bash
         run: |
           VERSION="1.0.0"
-          SAFE_VERSION=$(echo "$VERSION" | tr '+' '-')
+          SAFE_VERSION="${VERSION//+/-}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "safe_version=$SAFE_VERSION" >> "$GITHUB_OUTPUT"
 
@@ -67,184 +33,101 @@ jobs:
         with:
           channel: stable
 
-      - name: Flutter doctor
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-latest'
         shell: bash
         run: |
-          flutter --version
-          flutter config --enable-linux-desktop
-          flutter doctor -v
+          sudo apt-get update
+          sudo apt-get install -y             clang             cmake             ninja-build             pkg-config             libgtk-3-dev             libpipewire-0.3-dev             xdg-desktop-portal             xdg-desktop-portal-gtk
 
-      - name: Install Dart dependencies
+      - name: Install dependencies
         shell: bash
         run: |
           cd client
           flutter pub get
 
-      - name: Build Linux release bundle
+      - name: Build Linux
+        if: matrix.os == 'ubuntu-latest'
         shell: bash
         run: |
           cd client
           flutter build linux --release
 
-      - name: Package Linux tarball
+      - name: Package Linux
+        if: matrix.os == 'ubuntu-latest'
         shell: bash
         run: |
           set -euo pipefail
           VERSION_DIR="client/dist/Yappa-${{ steps.version.outputs.safe_version }}-linux-x64"
-          ARCHIVE_PATH="client/dist/Yappa-${{ steps.version.outputs.safe_version }}-linux-x64.tar.gz"
-
           rm -rf "$VERSION_DIR"
           mkdir -p "$VERSION_DIR"
 
-          cp -a client/build/linux/x64/release/bundle/. "$VERSION_DIR"/
+          cp -R client/build/linux/x64/release/bundle/. "$VERSION_DIR"/
           mkdir -p "$VERSION_DIR/assets"
           cp client/assets/branding/yappa_logo.png "$VERSION_DIR/assets/yappa_logo.png"
           cp client/packaging/linux/run-yappa.sh "$VERSION_DIR/run-yappa.sh"
           chmod +x "$VERSION_DIR/run-yappa.sh"
-          chmod +x "$VERSION_DIR/Yappa"
 
-          flutter --version > "$VERSION_DIR/build-info-linux.txt"
-          echo >> "$VERSION_DIR/build-info-linux.txt"
-          echo '--- uname -a ---' >> "$VERSION_DIR/build-info-linux.txt"
-          uname -a >> "$VERSION_DIR/build-info-linux.txt"
-          echo >> "$VERSION_DIR/build-info-linux.txt"
-          echo '--- /etc/os-release ---' >> "$VERSION_DIR/build-info-linux.txt"
-          cat /etc/os-release >> "$VERSION_DIR/build-info-linux.txt"
-          echo >> "$VERSION_DIR/build-info-linux.txt"
-          echo '--- rpm -qa | sort ---' >> "$VERSION_DIR/build-info-linux.txt"
-          rpm -qa | sort >> "$VERSION_DIR/build-info-linux.txt"
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("client/dist/Yappa-${{ steps.version.outputs.safe_version }}-linux-x64/README-Linux.txt")
+          path.write_text(
+              "Launch Yappa on Linux with ./run-yappa.sh\n\n"
+              "The launcher does three important things on every start:\n"
+              "1. Registers a per-user desktop entry for Yappa\n"
+              "2. Imports DISPLAY / WAYLAND_DISPLAY / XDG_CURRENT_DESKTOP into the D-Bus activation environment\n"
+              "3. Starts Yappa with GTK_USE_PORTAL=1\n\n"
+              "On Linux, the screen-share picker is provided by xdg-desktop-portal.\n"
+              "When portal integration is working, the user simply approves the share target in the desktop dialog.\n\n"
+              "If screen sharing still fails, the host system is usually missing a working ScreenCast portal backend\n"
+              "for the current desktop session.\n",
+              encoding="utf-8",
+          )
+          PY
 
-          ldd "$VERSION_DIR/Yappa" > "$VERSION_DIR/ldd-Yappa.txt" || true
-          if [[ -d "$VERSION_DIR/lib" ]]; then
-            while IFS= read -r -d '' sofile; do
-              {
-                echo "===== $sofile ====="
-                ldd "$sofile" || true
-                echo
-              } >> "$VERSION_DIR/ldd-libs.txt"
-            done < <(find "$VERSION_DIR/lib" -maxdepth 1 -type f -name '*.so*' -print0 | sort -z)
-          fi
-
-          cat > "$VERSION_DIR/README-Linux.txt" <<'EOF'
-Yappa Linux package
-===================
-
-Important:
-- Extract this package with tar so file permissions and symlinks stay intact.
-- Launch Yappa with ./run-yappa.sh
-- Do not launch the raw ./Yappa binary first.
-
-Example:
-  tar -xzf Yappa-1.0.0-linux-x64.tar.gz
-  cd Yappa-1.0.0-linux-x64
-  ./run-yappa.sh
-
-This launcher:
-1. Registers a per-user desktop entry
-2. Imports the desktop session variables into the D-Bus activation environment
-3. Starts Yappa with GTK_USE_PORTAL=1
-
-Diagnostic files included:
-- build-info-linux.txt
-- ldd-Yappa.txt
-- ldd-libs.txt
-EOF
-
-          rm -f "$ARCHIVE_PATH"
-          tar -C client/dist -czf "$ARCHIVE_PATH" "Yappa-${{ steps.version.outputs.safe_version }}-linux-x64"
-          sha256sum "$ARCHIVE_PATH" > "${ARCHIVE_PATH}.sha256"
+          cd client/dist
+          tar -czf "Yappa-${{ steps.version.outputs.safe_version }}-linux-x64.tar.gz" "Yappa-${{ steps.version.outputs.safe_version }}-linux-x64"
 
       - name: Upload Linux artifact
+        if: matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@v4
         with:
           name: Yappa-linux-x64
-          path: |
-            client/dist/Yappa-${{ steps.version.outputs.safe_version }}-linux-x64.tar.gz
-            client/dist/Yappa-${{ steps.version.outputs.safe_version }}-linux-x64.tar.gz.sha256
-
-  build-windows:
-    name: Build (windows-x64)
-    runs-on: windows-latest
-
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Set version
-        id: version
-        shell: bash
-        run: |
-          VERSION="1.0.0"
-          SAFE_VERSION=$(echo "$VERSION" | tr '+' '-')
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "safe_version=$SAFE_VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-
-      - name: Install dependencies
-        shell: bash
-        run: |
-          cd client
-          flutter pub get
+          path: client/dist/Yappa-${{ steps.version.outputs.safe_version }}-linux-x64.tar.gz
 
       - name: Build Windows
+        if: matrix.os == 'windows-latest'
         shell: bash
         run: |
           cd client
           flutter build windows --release
 
-      - name: Package Windows ZIP
+      - name: Package Windows
+        if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path client/dist
+          New-Item -ItemType Directory -Force -Path client/dist | Out-Null
           Compress-Archive `
             -Path client/build/windows/x64/runner/Release/* `
-            -DestinationPath client/dist/Yappa-${{ steps.version.outputs.safe_version }}-windows-x64.zip
+            -DestinationPath client/dist/Yappa-${{ steps.version.outputs.safe_version }}-windows-x64.zip `
+            -Force
 
       - name: Upload Windows artifact
+        if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
           name: Yappa-windows-x64
           path: client/dist/Yappa-${{ steps.version.outputs.safe_version }}-windows-x64.zip
 
-  build-macos:
-    name: Build (macos)
-    runs-on: macos-latest
-
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Set version
-        id: version
-        shell: bash
-        run: |
-          VERSION="1.0.0"
-          SAFE_VERSION=$(echo "$VERSION" | tr '+' '-')
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "safe_version=$SAFE_VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-
-      - name: Install dependencies
-        shell: bash
-        run: |
-          cd client
-          flutter pub get
-
       - name: Build macOS
+        if: matrix.os == 'macos-latest'
         shell: bash
         run: |
           cd client
           flutter build macos --release
 
-      - name: Package macOS ZIP
+      - name: Package macOS
+        if: matrix.os == 'macos-latest'
         shell: bash
         run: |
           mkdir -p client/dist
@@ -252,6 +135,7 @@ EOF
           zip -r ../../../../../dist/Yappa-${{ steps.version.outputs.safe_version }}-macos.zip Yappa.app
 
       - name: Upload macOS artifact
+        if: matrix.os == 'macos-latest'
         uses: actions/upload-artifact@v4
         with:
           name: Yappa-macos
