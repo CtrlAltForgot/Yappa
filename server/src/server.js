@@ -1510,26 +1510,17 @@ if (yuidClaim && yuidClaim !== yuidVerification.yuid) {
       );
     }
 
-    if (user.yuid && user.yuid !== yuidVerification.yuid) {
-      return apiError(
-        res,
-        409,
-        'account_yuid_mismatch',
-        'This account is already bound to a different YUID.',
-      );
-    }
+    const presentedYuid = yuidVerification.yuid;
+    const presentedYuidPublicKey = yuidVerification.yuidPublicKey;
+    const currentYuid = String(user.yuid || '').trim();
+    const currentYuidPublicKey = String(user.yuid_public_key || '').trim();
+    const needsInitialBinding = currentYuid.isEmpty || currentYuidPublicKey.isEmpty;
+    const needsRebind =
+      (!needsInitialBinding && currentYuid !== presentedYuid) ||
+      (!needsInitialBinding && currentYuidPublicKey !== presentedYuidPublicKey);
 
-    if (user.yuid_public_key && user.yuid_public_key !== yuidVerification.yuidPublicKey) {
-      return apiError(
-        res,
-        409,
-        'account_yuid_key_mismatch',
-        'This account is already bound to a different YUID key.',
-      );
-    }
-
-    if (!user.yuid) {
-      const existingYuidUser = getUserByYuid(db, yuidVerification.yuid);
+    if (needsInitialBinding || needsRebind) {
+      const existingYuidUser = getUserByYuid(db, presentedYuid);
       if (existingYuidUser && Number(existingYuidUser.id) !== Number(user.id)) {
         return apiError(
           res,
@@ -1539,15 +1530,34 @@ if (yuidClaim && yuidClaim !== yuidVerification.yuid) {
         );
       }
 
+      const existingYuidKeyUser = db
+        .prepare('SELECT id FROM users WHERE yuid_public_key = ? LIMIT 1')
+        .get(presentedYuidPublicKey);
+      if (existingYuidKeyUser && Number(existingYuidKeyUser.id) !== Number(user.id)) {
+        return apiError(
+          res,
+          409,
+          'yuid_key_already_bound',
+          'This YUID key is already bound to another account on this node.',
+        );
+      }
+
+      const reboundAt = nowIso();
       user = {
         ...user,
         ...bindUserYuid(db, user.id, {
-          yuid: yuidVerification.yuid,
-          yuidPublicKey: yuidVerification.yuidPublicKey,
-          boundAt: nowIso(),
-          lastSeenAt: nowIso(),
+          yuid: presentedYuid,
+          yuidPublicKey: presentedYuidPublicKey,
+          boundAt: reboundAt,
+          lastSeenAt: reboundAt,
         }),
       };
+
+      if (needsRebind) {
+        console.log(
+          `[auth] Rebound YUID for @${user.username} on successful password login.`,
+        );
+      }
     } else {
       touchUserYuid(db, user.id, nowIso());
     }

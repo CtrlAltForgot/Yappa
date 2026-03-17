@@ -69,9 +69,16 @@ jobs:
           cat > "$VERSION_DIR/README-Linux.txt" <<'EOF'
           Launch Yappa on Linux with ./run-yappa.sh
 
-          The launcher registers a per-user desktop entry for better portal integration,
-          then starts the bundled Yappa binary. This improves screen sharing reliability
-          on Linux desktops that rely on xdg-desktop-portal.
+          The launcher does three important things on every start:
+          1. Registers a per-user desktop entry for Yappa
+          2. Imports DISPLAY / WAYLAND_DISPLAY / XDG_CURRENT_DESKTOP into the D-Bus activation environment
+          3. Starts Yappa with GTK_USE_PORTAL=1
+
+          On Linux, the screen-share picker is provided by xdg-desktop-portal.
+          When portal integration is working, the user simply approves the share target in the desktop dialog.
+
+          If screen sharing still fails, the host system is usually missing a working ScreenCast portal backend
+          for the current desktop session.
           EOF
 
           cd client/dist

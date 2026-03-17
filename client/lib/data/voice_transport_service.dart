@@ -470,16 +470,29 @@ class VoiceTransportService extends ChangeNotifier {
     }
 
     try {
-      final started = _isLinuxDesktop
-          ? await _enableLinuxScreenShare(
-              localParticipant,
-              preferredTarget: preferredTarget,
-            )
-          : await _enableStandardScreenShare(localParticipant);
+      if (_useLegacyLinuxDesktopPicker) {
+        final selectedSource = await _pickLinuxDesktopSource(preferredTarget);
+        if (selectedSource == null) {
+          _refreshSnapshotFromRoom(clearError: true);
+          return false;
+        }
 
-      if (!started) {
-        _refreshSnapshotFromRoom(clearError: true);
-        return false;
+        final track = await livekit.LocalVideoTrack.createScreenShareTrack(
+          livekit.ScreenShareCaptureOptions(
+            sourceId: selectedSource.id,
+            maxFrameRate: 15.0,
+          ),
+        );
+
+        await localParticipant.publishVideoTrack(track);
+      } else {
+        await localParticipant.setScreenShareEnabled(
+          true,
+          captureScreenAudio: false,
+          screenShareCaptureOptions: const livekit.ScreenShareCaptureOptions(
+            maxFrameRate: 15.0,
+          ),
+        );
       }
 
       _refreshSnapshotFromRoom(clearError: true);
@@ -502,92 +515,21 @@ class VoiceTransportService extends ChangeNotifier {
   bool get _isLinuxDesktop =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.linux;
 
-  Future<bool> _enableStandardScreenShare(
-    livekit.LocalParticipant localParticipant,
-  ) async {
-    await localParticipant.setScreenShareEnabled(
-      true,
-      captureScreenAudio: false,
-      screenShareCaptureOptions: const livekit.ScreenShareCaptureOptions(
-        maxFrameRate: 15.0,
-      ),
-    );
-
-    return true;
-  }
-
-  Future<bool> _enableLinuxScreenShare(
-    livekit.LocalParticipant localParticipant, {
-    required VoiceScreenShareTarget preferredTarget,
-  }) async {
-    final backend = YappaVideoPreferences.linuxScreenShareBackend;
-    final blockMessage = YappaVideoPreferences.linuxScreenShareBlockMessage();
-
-    if (blockMessage != null) {
-      throw StateError(blockMessage);
+  bool get _useLegacyLinuxDesktopPicker {
+    if (!_isLinuxDesktop) {
+      return false;
     }
 
-    final shouldTryNativeFirst = switch (backend) {
-      YappaLinuxScreenShareBackend.auto => true,
-      YappaLinuxScreenShareBackend.nativePortal => true,
-      YappaLinuxScreenShareBackend.x11Only => false,
-      YappaLinuxScreenShareBackend.disableOnWayland =>
-        !YappaVideoPreferences.isWaylandSession,
-    };
-
-    final allowLegacyX11Fallback = switch (backend) {
-      YappaLinuxScreenShareBackend.auto => YappaVideoPreferences.isX11Session,
-      YappaLinuxScreenShareBackend.nativePortal => false,
-      YappaLinuxScreenShareBackend.x11Only => YappaVideoPreferences.isX11Session,
-      YappaLinuxScreenShareBackend.disableOnWayland => false,
-    };
-
-    Object? nativeFailure;
-
-    if (shouldTryNativeFirst) {
-      try {
-        return await _enableStandardScreenShare(localParticipant);
-      } catch (error) {
-        nativeFailure = error;
-
-        if (!allowLegacyX11Fallback || !_canFallbackFromLinuxPortalError(error)) {
-          rethrow;
-        }
-      }
-    }
-
-    if (allowLegacyX11Fallback) {
-      final selectedSource = await _pickLinuxDesktopSource(preferredTarget);
-      if (selectedSource == null) {
+    switch (YappaVideoPreferences.linuxScreenShareBackend) {
+      case YappaLinuxScreenShareBackend.auto:
+        return YappaVideoPreferences.isX11Session;
+      case YappaLinuxScreenShareBackend.nativePortal:
         return false;
-      }
-
-      final track = await livekit.LocalVideoTrack.createScreenShareTrack(
-        livekit.ScreenShareCaptureOptions(
-          sourceId: selectedSource.id,
-          maxFrameRate: 15.0,
-        ),
-      );
-
-      await localParticipant.publishVideoTrack(track);
-      return true;
+      case YappaLinuxScreenShareBackend.x11Only:
+        return true;
+      case YappaLinuxScreenShareBackend.disableOnWayland:
+        return YappaVideoPreferences.isX11Session;
     }
-
-    if (nativeFailure != null) {
-      throw nativeFailure;
-    }
-
-    throw StateError('Screen sharing is unavailable for the current Linux session.');
-  }
-
-  bool _canFallbackFromLinuxPortalError(Object error) {
-    final message = error.toString().toLowerCase();
-    return message.contains('getdisplaymedia') ||
-        message.contains('source not found') ||
-        message.contains('portal') ||
-        message.contains('screencast') ||
-        message.contains('not supported') ||
-        message.contains('not implemented');
   }
 
   Future<DesktopCapturerSource?> _pickLinuxDesktopSource(

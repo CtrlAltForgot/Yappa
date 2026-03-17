@@ -73,7 +73,7 @@ class YappaVideoPreferences {
         return isWaylandSession
             ? 'Auto → Native portal capture'
             : isX11Session
-                ? 'Auto → Native portal capture (X11 fallback ready)'
+                ? 'Auto → X11-compatible capture'
                 : 'Auto → Native Linux capture';
       case YappaLinuxScreenShareBackend.nativePortal:
         return 'Native Linux portal capture';
