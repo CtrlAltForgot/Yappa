@@ -522,7 +522,6 @@ class VoiceTransportService extends ChangeNotifier {
 
     switch (YappaVideoPreferences.linuxScreenShareBackend) {
       case YappaLinuxScreenShareBackend.auto:
-        return YappaVideoPreferences.isX11Session;
       case YappaLinuxScreenShareBackend.nativePortal:
         return false;
       case YappaLinuxScreenShareBackend.x11Only:

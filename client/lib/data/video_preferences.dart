@@ -14,7 +14,7 @@ class YappaVideoPreferences {
       'yappa_linux_screen_share_backend';
 
   static YappaLinuxScreenShareBackend linuxScreenShareBackend =
-      YappaLinuxScreenShareBackend.auto;
+      YappaLinuxScreenShareBackend.nativePortal;
 
   static Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
@@ -22,7 +22,7 @@ class YappaVideoPreferences {
 
     linuxScreenShareBackend = YappaLinuxScreenShareBackend.values.firstWhere(
       (value) => value.name == savedBackend,
-      orElse: () => YappaLinuxScreenShareBackend.auto,
+      orElse: () => YappaLinuxScreenShareBackend.nativePortal,
     );
   }
 
@@ -70,11 +70,7 @@ class YappaVideoPreferences {
 
     switch (linuxScreenShareBackend) {
       case YappaLinuxScreenShareBackend.auto:
-        return isWaylandSession
-            ? 'Auto → Native portal capture'
-            : isX11Session
-                ? 'Auto → X11-compatible capture'
-                : 'Auto → Native Linux capture';
+        return 'Auto → Native Linux capture first';
       case YappaLinuxScreenShareBackend.nativePortal:
         return 'Native Linux portal capture';
       case YappaLinuxScreenShareBackend.x11Only:
