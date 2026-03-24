@@ -1035,6 +1035,80 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  Future<void> editMessage(ChatMessage target, String content) async {
+    final text = content.trim();
+    if (!hasActiveSession) {
+      return;
+    }
+
+    final server = _serverById(selectedServerId);
+    final token = _tokensByServerId[selectedServerId];
+    final channel = _channelById(target.channelId);
+
+    if (server == null || token == null || channel == null) {
+      return;
+    }
+
+    if (channel.type != ChannelType.text) {
+      return;
+    }
+
+    try {
+      final message = await _api.updateMessage(
+        baseUrl: server.address,
+        token: token,
+        channelId: channel.id,
+        messageId: target.id,
+        content: text,
+      );
+
+      _upsertMessage(message);
+      _lastError = null;
+      notifyListeners();
+      await _persist();
+    } catch (error) {
+      _lastError = error.toString();
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<void> deleteMessage(ChatMessage target) async {
+    if (!hasActiveSession) {
+      return;
+    }
+
+    final server = _serverById(selectedServerId);
+    final token = _tokensByServerId[selectedServerId];
+    final channel = _channelById(target.channelId);
+
+    if (server == null || token == null || channel == null) {
+      return;
+    }
+
+    if (channel.type != ChannelType.text) {
+      return;
+    }
+
+    try {
+      await _api.deleteMessage(
+        baseUrl: server.address,
+        token: token,
+        channelId: channel.id,
+        messageId: target.id,
+      );
+
+      _removeMessage(channel.id, target.id);
+      _lastError = null;
+      notifyListeners();
+      await _persist();
+    } catch (error) {
+      _lastError = error.toString();
+      notifyListeners();
+      rethrow;
+    }
+  }
+
   Future<ServerSettings?> ensureSelectedServerSettingsLoaded() async {
     if (!canManageSelectedServer) {
       return null;
@@ -1652,6 +1726,16 @@ class AppState extends ChangeNotifier {
         notifyListeners();
         _persist();
       },
+      onMessageUpdated: (message) {
+        _upsertMessage(message);
+        notifyListeners();
+        _persist();
+      },
+      onMessageDeleted: (channelId, messageId) {
+        _removeMessage(channelId, messageId);
+        notifyListeners();
+        _persist();
+      },
       onServerUpdated: (server, channels, voice) {
         _upsertServer(server);
         _replaceChannelsForServer(server.id, channels);
@@ -2124,6 +2208,15 @@ class AppState extends ChangeNotifier {
     }
 
     list.sort((a, b) => a.sentAt.compareTo(b.sentAt));
+  }
+
+  void _removeMessage(String channelId, String messageId) {
+    final list = _messagesByChannel[channelId];
+    if (list == null) {
+      return;
+    }
+
+    list.removeWhere((message) => message.id == messageId);
   }
 
   void _setBusy(bool value) {

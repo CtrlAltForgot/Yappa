@@ -78,6 +78,7 @@ function createBaseTables(db) {
     user_id INTEGER NOT NULL,
     content TEXT NOT NULL,
     created_at TEXT NOT NULL,
+    updated_at TEXT,
     FOREIGN KEY (channel_id) REFERENCES channels(id),
                                        FOREIGN KEY (user_id) REFERENCES users(id)
   );
@@ -162,6 +163,9 @@ function runMigrations(db) {
 
   if (!hasColumn(db, 'channels', 'created_at')) {
     db.exec('ALTER TABLE channels ADD COLUMN created_at TEXT');
+  }
+  if (!hasColumn(db, 'messages', 'updated_at')) {
+    db.exec('ALTER TABLE messages ADD COLUMN updated_at TEXT');
   }
 
   db.prepare(`

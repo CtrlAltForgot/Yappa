@@ -18,11 +18,20 @@ final RegExp _messageUrlRegex = RegExp(
   caseSensitive: false,
 );
 
+enum _MessageAction {
+  edit,
+  delete,
+}
+
 class MessageList extends StatelessWidget {
   final List<ChatMessage> messages;
   final List<Member> members;
   final ScrollController? controller;
   final Future<LinkPreview?> Function(String url)? previewLoader;
+  final String? currentUserId;
+  final bool canDeleteAnyMessage;
+  final ValueChanged<ChatMessage>? onEditMessage;
+  final ValueChanged<ChatMessage>? onDeleteMessage;
 
   const MessageList({
     super.key,
@@ -30,6 +39,10 @@ class MessageList extends StatelessWidget {
     this.members = const [],
     this.controller,
     this.previewLoader,
+    this.currentUserId,
+    this.canDeleteAnyMessage = false,
+    this.onEditMessage,
+    this.onDeleteMessage,
   });
 
   @override
@@ -52,6 +65,10 @@ class MessageList extends StatelessWidget {
           message: message,
           member: _resolveMemberForMessage(message),
           previewLoader: previewLoader,
+          currentUserId: currentUserId,
+          canDeleteAnyMessage: canDeleteAnyMessage,
+          onEditMessage: onEditMessage,
+          onDeleteMessage: onDeleteMessage,
         );
       },
       separatorBuilder: (context, index) => const SizedBox(height: 8),
@@ -85,11 +102,19 @@ class _MessageTile extends StatefulWidget {
   final ChatMessage message;
   final Member? member;
   final Future<LinkPreview?> Function(String url)? previewLoader;
+  final String? currentUserId;
+  final bool canDeleteAnyMessage;
+  final ValueChanged<ChatMessage>? onEditMessage;
+  final ValueChanged<ChatMessage>? onDeleteMessage;
 
   const _MessageTile({
     required this.message,
     required this.member,
     required this.previewLoader,
+    required this.currentUserId,
+    required this.canDeleteAnyMessage,
+    required this.onEditMessage,
+    required this.onDeleteMessage,
   });
 
   @override
@@ -97,6 +122,54 @@ class _MessageTile extends StatefulWidget {
 }
 
 class _MessageTileState extends State<_MessageTile> {
+  bool get _canEditMessage =>
+      widget.message.authorId.isNotEmpty &&
+      widget.message.authorId == widget.currentUserId &&
+      widget.onEditMessage != null;
+
+  bool get _canDeleteMessage =>
+      (_canEditMessage || widget.canDeleteAnyMessage) &&
+      widget.onDeleteMessage != null;
+
+  Future<void> _showContextMenu(TapDownDetails details) async {
+    if (!_canEditMessage && !_canDeleteMessage) {
+      return;
+    }
+
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final selected = await showMenu<_MessageAction>(
+      context: context,
+      color: NewChatColors.panel,
+      position: RelativeRect.fromRect(
+        Rect.fromPoints(details.globalPosition, details.globalPosition),
+        Offset.zero & overlay.size,
+      ),
+      items: [
+        if (_canEditMessage)
+          const PopupMenuItem<_MessageAction>(
+            value: _MessageAction.edit,
+            child: Text('Edit'),
+          ),
+        if (_canDeleteMessage)
+          const PopupMenuItem<_MessageAction>(
+            value: _MessageAction.delete,
+            child: Text('Delete'),
+          ),
+      ],
+    );
+
+    switch (selected) {
+      case _MessageAction.edit:
+        widget.onEditMessage?.call(widget.message);
+        break;
+      case _MessageAction.delete:
+        widget.onDeleteMessage?.call(widget.message);
+        break;
+      case null:
+        break;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final message = widget.message;
@@ -110,17 +183,25 @@ class _MessageTileState extends State<_MessageTile> {
         : '?';
     final detectedLinks = _extractUrls(message.content);
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: NewChatColors.panel,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: NewChatColors.outline),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onDoubleTap: _canEditMessage
+          ? () => widget.onEditMessage?.call(widget.message)
+          : null,
+      onSecondaryTapDown: (_canEditMessage || _canDeleteMessage)
+          ? _showContextMenu
+          : null,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: NewChatColors.panel,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: NewChatColors.outline),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
             width: 42,
             height: 42,
             decoration: BoxDecoration(
@@ -151,12 +232,28 @@ class _MessageTileState extends State<_MessageTile> {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Text(
-                      time,
-                      style: TextStyle(
-                        color: NewChatColors.textMuted,
-                        fontSize: 12,
-                      ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          time,
+                          style: TextStyle(
+                            color: NewChatColors.textMuted,
+                            fontSize: 12,
+                          ),
+                        ),
+                        if (message.isEdited) ...[
+                          const SizedBox(width: 8),
+                          Text(
+                            '(edited)',
+                            style: TextStyle(
+                              color: NewChatColors.textMuted.withValues(alpha: 0.8),
+                              fontSize: 12,
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ],
                 ),
@@ -192,7 +289,8 @@ class _MessageTileState extends State<_MessageTile> {
           ),
         ],
       ),
-    );
+    ),
+  );
   }
 
   String _formatTime(DateTime value) {

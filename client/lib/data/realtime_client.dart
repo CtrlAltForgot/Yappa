@@ -22,6 +22,10 @@ typedef RealtimePresenceCallback = void Function(
 );
 
 typedef RealtimeMessageCallback = void Function(ChatMessage message);
+typedef RealtimeMessageDeletedCallback = void Function(
+  String channelId,
+  String messageId,
+);
 
 typedef RealtimeServerUpdatedCallback = void Function(
   ChatServer server,
@@ -65,6 +69,8 @@ class RealtimeClient {
   final RealtimeHelloCallback onHello;
   final RealtimePresenceCallback onPresenceUpdate;
   final RealtimeMessageCallback onMessage;
+  final RealtimeMessageCallback onMessageUpdated;
+  final RealtimeMessageDeletedCallback onMessageDeleted;
   final RealtimeServerUpdatedCallback onServerUpdated;
   final RealtimeErrorCallback onError;
 
@@ -79,6 +85,8 @@ class RealtimeClient {
     required this.onHello,
     required this.onPresenceUpdate,
     required this.onMessage,
+    required this.onMessageUpdated,
+    required this.onMessageDeleted,
     required this.onServerUpdated,
     required this.onError,
     this.onVoiceOffer,
@@ -87,6 +95,11 @@ class RealtimeClient {
   });
 
   bool get isConnected => _socket?.connected == true;
+
+  ChatMessage _resolveRealtimeMessage(ChatMessage message, ChatServer server) {
+    final normalizedBase = server.address.replaceFirst(RegExp(r'/*$'), '');
+    return message.resolvedAgainst(normalizedBase);
+  }
 
   void connect({
     required ChatServer server,
@@ -170,9 +183,35 @@ class RealtimeClient {
       try {
         final map = _asMap(payload);
         final messageJson = _asMap(map['message']);
-        onMessage(ChatMessage.fromJson(messageJson));
+        onMessage(
+          _resolveRealtimeMessage(ChatMessage.fromJson(messageJson), server),
+        );
       } catch (error) {
         onError('Failed to parse realtime message: $error');
+      }
+    });
+
+    socket.on('message:update', (payload) {
+      try {
+        final map = _asMap(payload);
+        final messageJson = _asMap(map['message']);
+        onMessageUpdated(
+          _resolveRealtimeMessage(ChatMessage.fromJson(messageJson), server),
+        );
+      } catch (error) {
+        onError('Failed to parse realtime message update: $error');
+      }
+    });
+
+    socket.on('message:delete', (payload) {
+      try {
+        final map = _asMap(payload);
+        onMessageDeleted(
+          _readString(map['channelId']),
+          _readString(map['messageId']),
+        );
+      } catch (error) {
+        onError('Failed to parse realtime message delete: $error');
       }
     });
 

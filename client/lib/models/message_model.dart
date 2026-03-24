@@ -148,6 +148,7 @@ class ChatMessage {
   final String authorRole;
   final String content;
   final DateTime sentAt;
+  final DateTime? updatedAt;
   final List<ChatAttachment> attachments;
 
   const ChatMessage({
@@ -158,10 +159,12 @@ class ChatMessage {
     required this.authorRole,
     required this.content,
     required this.sentAt,
+    required this.updatedAt,
     this.attachments = const [],
   });
 
   bool get hasAttachments => attachments.isNotEmpty;
+  bool get isEdited => updatedAt != null;
 
   ChatMessage copyWith({
     String? id,
@@ -171,6 +174,7 @@ class ChatMessage {
     String? authorRole,
     String? content,
     DateTime? sentAt,
+    DateTime? updatedAt,
     List<ChatAttachment>? attachments,
   }) {
     return ChatMessage(
@@ -181,6 +185,7 @@ class ChatMessage {
       authorRole: authorRole ?? this.authorRole,
       content: content ?? this.content,
       sentAt: sentAt ?? this.sentAt,
+      updatedAt: updatedAt ?? this.updatedAt,
       attachments: attachments ?? this.attachments,
     );
   }
@@ -201,6 +206,7 @@ class ChatMessage {
         'authorRole': authorRole,
         'content': content,
         'sentAt': sentAt.toIso8601String(),
+        'updatedAt': updatedAt?.toIso8601String(),
         'attachments': attachments.map((item) => item.toJson()).toList(),
       };
 
@@ -227,6 +233,11 @@ class ChatMessage {
     final sentAt = rawTime == null
         ? DateTime.now()
         : (DateTime.tryParse(rawTime) ?? DateTime.now());
+    final rawUpdatedAt =
+        (json['updatedAt'] as String?) ?? (json['editedAt'] as String?);
+    final updatedAt = rawUpdatedAt == null || rawUpdatedAt.trim().isEmpty
+        ? null
+        : DateTime.tryParse(rawUpdatedAt);
 
     final attachmentsJson = (json['attachments'] as List? ?? const [])
         .whereType<Map>()
@@ -241,6 +252,7 @@ class ChatMessage {
       authorRole: authorRole,
       content: (json['content'] as String?) ?? '',
       sentAt: sentAt,
+      updatedAt: updatedAt,
       attachments: attachmentsJson,
     );
   }

@@ -482,6 +482,13 @@ class _ShellScreenState extends State<ShellScreen> {
                                 return widget.appState
                                     .uploadAttachmentFile(file);
                               },
+                              onEditMessage: (message, content) {
+                                return widget.appState.editMessage(message, content);
+                              },
+                              onDeleteMessage: (message) {
+                                return widget.appState.deleteMessage(message);
+                              },
+                              canDeleteAnyMessage: widget.appState.isSelectedServerOwner,
                               onLoadLinkPreview:
                                   widget.appState.fetchLinkPreviewForSelectedServer,
                             ),

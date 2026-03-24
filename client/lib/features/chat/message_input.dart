@@ -15,6 +15,11 @@ class MessageInput extends StatefulWidget {
   final Future<void> Function(String content, List<String> attachmentIds)?
       onSendWithAttachments;
   final Future<ChatAttachment> Function(File file)? onUploadAttachment;
+  final String? editingMessageId;
+  final String? editingContent;
+  final String? editingAuthorName;
+  final Future<void> Function(String messageId, String content)? onEdit;
+  final VoidCallback? onCancelEdit;
   final bool dragHandlingEnabled;
 
   const MessageInput({
@@ -23,6 +28,11 @@ class MessageInput extends StatefulWidget {
     required this.onSend,
     this.onSendWithAttachments,
     this.onUploadAttachment,
+    this.editingMessageId,
+    this.editingContent,
+    this.editingAuthorName,
+    this.onEdit,
+    this.onCancelEdit,
     this.dragHandlingEnabled = true,
   });
 
@@ -36,6 +46,7 @@ class _SubmitMessageIntent extends Intent {
 
 class MessageInputState extends State<MessageInput> {
   late final TextEditingController _controller;
+  late final FocusNode _focusNode;
   final List<ChatAttachment> _pendingAttachments = [];
   bool _isUploading = false;
   bool _isSending = false;
@@ -46,16 +57,41 @@ class MessageInputState extends State<MessageInput> {
   void initState() {
     super.initState();
     _controller = TextEditingController();
+    _focusNode = FocusNode();
+  }
+
+  @override
+  void didUpdateWidget(covariant MessageInput oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.editingMessageId != widget.editingMessageId) {
+      if (widget.editingMessageId == null) {
+        _controller.clear();
+      } else {
+        _pendingAttachments.clear();
+        final nextText = widget.editingContent ?? '';
+        _controller.value = TextEditingValue(
+          text: nextText,
+          selection: TextSelection(baseOffset: 0, extentOffset: nextText.length),
+        );
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          _focusNode.requestFocus();
+        });
+      }
+    }
   }
 
   @override
   void dispose() {
     _controller.dispose();
+    _focusNode.dispose();
     super.dispose();
   }
 
   bool get _canAttach =>
       widget.channel.type == ChannelType.text && widget.onUploadAttachment != null;
+  bool get _isEditing => widget.editingMessageId != null && widget.onEdit != null;
 
   Future<void> uploadDroppedFiles(List<File> files) async {
     await _uploadFiles(files);
@@ -63,6 +99,33 @@ class MessageInputState extends State<MessageInput> {
 
   Future<void> _submit() async {
     final text = _controller.text.trim();
+    if (_isEditing) {
+      if (text.isEmpty || _isSending) return;
+
+      setState(() {
+        _isSending = true;
+        _uploadError = null;
+      });
+
+      try {
+        await widget.onEdit!(widget.editingMessageId!, text);
+        if (!mounted) return;
+        _controller.clear();
+      } catch (error) {
+        if (!mounted) rethrow;
+        setState(() {
+          _uploadError = error.toString().replaceFirst('Exception: ', '');
+        });
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isSending = false;
+          });
+        }
+      }
+      return;
+    }
+
     if (text.isEmpty && _pendingAttachments.isEmpty) return;
 
     if (widget.onSendWithAttachments != null) {
@@ -225,6 +288,42 @@ class MessageInputState extends State<MessageInput> {
                   ],
                 ),
               ),
+            if (_isEditing)
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: NewChatColors.panel,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: NewChatColors.outline),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.edit_rounded,
+                      color: NewChatColors.accentGlow,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        widget.editingAuthorName == null ||
+                                widget.editingAuthorName!.trim().isEmpty
+                            ? 'Editing message'
+                            : "Editing ${widget.editingAuthorName!}'s message",
+                        style: TextStyle(
+                          color: NewChatColors.textMuted,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: _isSending ? null : widget.onCancelEdit,
+                      child: const Text('Cancel'),
+                    ),
+                  ],
+                ),
+              ),
             if (_pendingAttachments.isNotEmpty)
               Container(
                 width: double.infinity,
@@ -268,7 +367,7 @@ class MessageInputState extends State<MessageInput> {
               children: [
                 _ComposerTool(
                   icon: Icons.attach_file_rounded,
-                  onTap: _canAttach ? _pickFiles : null,
+                  onTap: _isEditing ? null : (_canAttach ? _pickFiles : null),
                   busy: _isUploading,
                 ),
                 const SizedBox(width: 12),
@@ -291,14 +390,17 @@ class MessageInputState extends State<MessageInput> {
                       },
                       child: TextField(
                         controller: _controller,
+                        focusNode: _focusNode,
                         keyboardType: TextInputType.multiline,
                         textInputAction: TextInputAction.newline,
                         minLines: 1,
                         maxLines: 6,
                         decoration: InputDecoration(
-                          hintText: hintText,
-                          prefixIcon: const Icon(
-                            Icons.subdirectory_arrow_right_rounded,
+                          hintText: _isEditing ? 'Edit your message' : hintText,
+                          prefixIcon: Icon(
+                            _isEditing
+                                ? Icons.edit_outlined
+                                : Icons.subdirectory_arrow_right_rounded,
                           ),
                         ),
                       ),
@@ -314,7 +416,9 @@ class MessageInputState extends State<MessageInput> {
                           height: 18,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Icon(Icons.send_rounded),
+                      : Icon(
+                          _isEditing ? Icons.check_rounded : Icons.send_rounded,
+                        ),
                 ),
               ],
             ),

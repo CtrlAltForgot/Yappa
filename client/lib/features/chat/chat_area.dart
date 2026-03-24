@@ -27,6 +27,9 @@ class ChatArea extends StatefulWidget {
       onSendWithAttachments;
   final Future<ChatAttachment> Function(File file)? onUploadAttachment;
   final Future<LinkPreview?> Function(String url)? onLoadLinkPreview;
+  final Future<void> Function(ChatMessage message, String content)? onEditMessage;
+  final Future<void> Function(ChatMessage message)? onDeleteMessage;
+  final bool canDeleteAnyMessage;
 
   final List<Member> members;
   final List<Member> voiceMembers;
@@ -79,6 +82,9 @@ class ChatArea extends StatefulWidget {
     this.onSendWithAttachments,
     this.onUploadAttachment,
     this.onLoadLinkPreview,
+    this.onEditMessage,
+    this.onDeleteMessage,
+    this.canDeleteAnyMessage = false,
     this.members = const [],
     this.voiceMembers = const [],
     this.voiceDeckState,
@@ -141,6 +147,7 @@ class _ChatAreaState extends State<ChatArea> {
   bool _pttPressed = false;
   bool _pttKeyboardDown = false;
   bool _pttMouseDown = false;
+  ChatMessage? _editingMessage;
 
   bool get _canAttach =>
       widget.channel.type == ChannelType.text &&
@@ -177,7 +184,13 @@ class _ChatAreaState extends State<ChatArea> {
       _pttMouseDown = false;
     }
 
+    if (_editingMessage != null &&
+        !widget.messages.any((message) => message.id == _editingMessage!.id)) {
+      _editingMessage = null;
+    }
+
     if (widget.channel.id != oldWidget.channel.id) {
+      _editingMessage = null;
       _unseenMessageCount = 0;
       _isNearMessageBottom = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -328,6 +341,80 @@ class _ChatAreaState extends State<ChatArea> {
   ) async {
     _forceScrollToLatestOnNextMessage = true;
     await widget.onSendWithAttachments!(content, attachmentIds);
+  }
+
+  void _beginEditingMessage(ChatMessage message) {
+    if (message.authorId != widget.currentUserId || widget.onEditMessage == null) {
+      return;
+    }
+
+    setState(() {
+      _editingMessage = message;
+    });
+  }
+
+  void _cancelEditingMessage() {
+    if (_editingMessage == null) {
+      return;
+    }
+
+    setState(() {
+      _editingMessage = null;
+    });
+  }
+
+  Future<void> _handleEditMessage(String messageId, String content) async {
+    final editingMessage = _editingMessage;
+    if (editingMessage == null || editingMessage.id != messageId) {
+      return;
+    }
+
+    await widget.onEditMessage?.call(editingMessage, content);
+
+    if (!mounted) return;
+    setState(() {
+      _editingMessage = null;
+    });
+  }
+
+  Future<void> _handleDeleteMessage(ChatMessage message) async {
+    final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            backgroundColor: NewChatColors.panel,
+            title: const Text('Delete message?'),
+            content: Text(
+              message.authorId == widget.currentUserId
+                  ? 'This will permanently remove your message.'
+                  : "This will permanently remove ${message.author}'s message.",
+              style: TextStyle(color: NewChatColors.textMuted),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('Delete'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+
+    if (!confirmed) {
+      return;
+    }
+
+    await widget.onDeleteMessage?.call(message);
+
+    if (!mounted) return;
+    if (_editingMessage?.id == message.id) {
+      setState(() {
+        _editingMessage = null;
+      });
+    }
   }
 
   void _syncTicker() {
@@ -733,6 +820,14 @@ class _ChatAreaState extends State<ChatArea> {
                           members: widget.members,
                           controller: _messageScrollController,
                           previewLoader: widget.onLoadLinkPreview,
+                          currentUserId: widget.currentUserId,
+                          canDeleteAnyMessage: widget.canDeleteAnyMessage,
+                          onEditMessage: widget.onEditMessage == null
+                              ? null
+                              : _beginEditingMessage,
+                          onDeleteMessage: widget.onDeleteMessage == null
+                              ? null
+                              : _handleDeleteMessage,
                         ),
                       ),
                       if (!_isNearMessageBottom)
@@ -755,6 +850,11 @@ class _ChatAreaState extends State<ChatArea> {
                       ? null
                       : _handleLocalSendWithAttachments,
                   onUploadAttachment: widget.onUploadAttachment,
+                  editingMessageId: _editingMessage?.id,
+                  editingContent: _editingMessage?.content,
+                  editingAuthorName: _editingMessage?.author,
+                  onEdit: widget.onEditMessage == null ? null : _handleEditMessage,
+                  onCancelEdit: _editingMessage == null ? null : _cancelEditingMessage,
                   dragHandlingEnabled: false,
                 ),
               ],

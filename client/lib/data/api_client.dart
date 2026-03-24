@@ -633,6 +633,45 @@ Future<YuidChallenge> fetchYuidChallenge({
   }
 
 
+  Future<ChatMessage> updateMessage({
+    required String baseUrl,
+    required String token,
+    required String channelId,
+    required String messageId,
+    required String content,
+  }) async {
+    final normalized = normalizeBaseUrl(baseUrl);
+    final json = await _requestJson(
+      'PATCH',
+      '$normalized/api/channels/$channelId/messages/$messageId',
+      token: token,
+      body: {
+        'content': content,
+      },
+    );
+
+    return _resolveMessageUrls(
+      ChatMessage.fromJson(
+        Map<String, dynamic>.from(json['message'] as Map),
+      ),
+      normalized,
+    );
+  }
+
+  Future<void> deleteMessage({
+    required String baseUrl,
+    required String token,
+    required String channelId,
+    required String messageId,
+  }) async {
+    final normalized = normalizeBaseUrl(baseUrl);
+    await _requestJson(
+      'DELETE',
+      '$normalized/api/channels/$channelId/messages/$messageId',
+      token: token,
+    );
+  }
+
   Future<LinkPreview?> fetchLinkPreview({
     required String baseUrl,
     required String token,
@@ -706,6 +745,9 @@ Future<YuidChallenge> fetchYuidChallenge({
           headers: headers,
           body: jsonEncode(body ?? const {}),
         );
+        break;
+      case 'DELETE':
+        response = await http.delete(Uri.parse(url), headers: headers);
         break;
       default:
         throw ApiException('Unsupported HTTP method: $method');

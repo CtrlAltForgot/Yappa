@@ -774,6 +774,7 @@ function serializeMessage(row, attachments = []) {
     channelId: toId(row.channel_id),
     content: row.content,
     createdAt: row.created_at,
+    updatedAt: row.updated_at || null,
     author: {
       id: toId(row.user_id),
       username: row.username,
@@ -784,6 +785,54 @@ function serializeMessage(row, attachments = []) {
     },
     attachments: attachments.map(serializeAttachment),
   };
+}
+
+function getMessageRowById(messageId) {
+  return db.prepare(`
+  SELECT
+  messages.id,
+  messages.channel_id,
+  messages.user_id,
+  messages.content,
+  messages.created_at,
+  messages.updated_at,
+  users.username,
+  users.role,
+  users.yuid,
+  users.yuid_public_key
+  FROM messages
+  JOIN users ON users.id = messages.user_id
+  WHERE messages.id = ?
+  `).get(messageId);
+}
+
+function buildSerializedMessage(messageId) {
+  const row = getMessageRowById(messageId);
+  if (!row) {
+    return null;
+  }
+
+  const attachmentsMap = getAttachmentsForMessageIds(db, [messageId]);
+  return serializeMessage(row, attachmentsMap.get(Number(messageId)) || []);
+}
+
+function removeAttachmentFile(relativePath) {
+  if (!relativePath) {
+    return;
+  }
+
+  const absolutePath = path.join(DATA_ROOT, relativePath);
+  try {
+    if (fs.existsSync(absolutePath)) {
+      fs.unlinkSync(absolutePath);
+    }
+  } catch (error) {
+    console.error(
+      'Failed to delete attachment file:',
+      absolutePath,
+      error.message,
+    );
+  }
 }
 
 function currentServer() {
@@ -1765,8 +1814,11 @@ app.get('/api/channels/:channelId/messages', authRequired, (req, res) => {
   messages.user_id,
   messages.content,
   messages.created_at,
+  messages.updated_at,
   users.username,
-  users.role
+  users.role,
+  users.yuid,
+  users.yuid_public_key
   FROM messages
   JOIN users ON users.id = messages.user_id
   WHERE messages.channel_id = ?
@@ -1943,30 +1995,141 @@ app.post('/api/channels/:channelId/messages', authRequired, (req, res) => {
     userId: req.auth.user.id,
   });
 
-  const row = db
-  .prepare(`
-  SELECT
-  messages.id,
-  messages.channel_id,
-  messages.user_id,
-  messages.content,
-  messages.created_at,
-  users.username,
-  users.role
-  FROM messages
-  JOIN users ON users.id = messages.user_id
-  WHERE messages.id = ?
-  `)
-  .get(messageId);
-
-  const attachmentsMap = getAttachmentsForMessageIds(db, [messageId]);
-  const message = serializeMessage(row, attachmentsMap.get(messageId) || []);
+  const message = buildSerializedMessage(messageId);
 
   io.emit('message:new', { message });
 
   res.status(201).json({
     ok: true,
     message,
+  });
+});
+
+app.patch('/api/channels/:channelId/messages/:messageId', authRequired, (req, res) => {
+  const channelId = Number(req.params.channelId);
+  const messageId = Number(req.params.messageId);
+
+  if (!Number.isInteger(channelId)) {
+    return apiError(res, 400, 'invalid_channel_id', 'Invalid channel id.');
+  }
+
+  if (!Number.isInteger(messageId)) {
+    return apiError(res, 400, 'invalid_message_id', 'Invalid message id.');
+  }
+
+  const existing = db.prepare(`
+  SELECT id, channel_id, user_id
+  FROM messages
+  WHERE id = ?
+  `).get(messageId);
+
+  if (!existing || Number(existing.channel_id) !== channelId) {
+    return apiError(res, 404, 'message_not_found', 'Message not found.');
+  }
+
+  if (Number(existing.user_id) !== Number(req.auth.user.id)) {
+    return apiError(
+      res,
+      403,
+      'message_edit_forbidden',
+      'You can only edit your own messages.',
+    );
+  }
+
+  const content = String(req.body?.content || '').trim();
+  const attachments = getAttachmentsForMessageIds(db, [messageId]).get(messageId) || [];
+
+  if (!content && attachments.length === 0) {
+    return apiError(
+      res,
+      400,
+      'invalid_message_length',
+      'Message must contain text or attachments.',
+    );
+  }
+
+  if (content.length > 2000) {
+    return apiError(
+      res,
+      400,
+      'invalid_message_length',
+      'Message text must be 0-2000 characters.',
+    );
+  }
+
+  db.prepare(`
+  UPDATE messages
+  SET content = ?, updated_at = ?
+  WHERE id = ?
+  `).run(content, nowIso(), messageId);
+
+  const message = buildSerializedMessage(messageId);
+  io.emit('message:update', { message });
+
+  res.json({
+    ok: true,
+    message,
+  });
+});
+
+app.delete('/api/channels/:channelId/messages/:messageId', authRequired, (req, res) => {
+  const channelId = Number(req.params.channelId);
+  const messageId = Number(req.params.messageId);
+
+  if (!Number.isInteger(channelId)) {
+    return apiError(res, 400, 'invalid_channel_id', 'Invalid channel id.');
+  }
+
+  if (!Number.isInteger(messageId)) {
+    return apiError(res, 400, 'invalid_message_id', 'Invalid message id.');
+  }
+
+  const existing = db.prepare(`
+  SELECT id, channel_id, user_id
+  FROM messages
+  WHERE id = ?
+  `).get(messageId);
+
+  if (!existing || Number(existing.channel_id) !== channelId) {
+    return apiError(res, 404, 'message_not_found', 'Message not found.');
+  }
+
+  const canDelete =
+    Number(existing.user_id) === Number(req.auth.user.id) || isOwner(req.auth.user);
+
+  if (!canDelete) {
+    return apiError(
+      res,
+      403,
+      'message_delete_forbidden',
+      'You can only delete your own messages unless you are the owner.',
+    );
+  }
+
+  const deletedAt = nowIso();
+  const attachments = getAttachmentsForMessageIds(db, [messageId]).get(messageId) || [];
+
+  db.transaction(() => {
+    for (const attachment of attachments) {
+      markAttachmentDeleted(db, attachment.id, deletedAt);
+    }
+
+    db.prepare('DELETE FROM messages WHERE id = ?').run(messageId);
+  })();
+
+  for (const attachment of attachments) {
+    removeAttachmentFile(attachment.relative_path);
+  }
+
+  io.emit('message:delete', {
+    channelId: toId(channelId),
+    messageId: toId(messageId),
+  });
+
+  res.json({
+    ok: true,
+    channelId: toId(channelId),
+    messageId: toId(messageId),
   });
 });
 
