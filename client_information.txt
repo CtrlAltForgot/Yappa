@@ -1,5 +1,5 @@
-📝 Changelog - 3/12/26 📝
-Welcome everyone, to Yappa! as of today we do have a few new wonderful features to discuss!
+📝 Changelog - 3/23/26 📝
+Welcome everyone, to Yappa! as of this release
 
 - Fixed Voice Decks to have full audio functionality with the current client & server builds.
 - Moved call control section from top right corner to bottom left area.
@@ -15,3 +15,6 @@ Welcome everyone, to Yappa! as of today we do have a few new wonderful features 
 - Fixed minor bugs relating to chat scrolling when a message is recieved.
 - Added profile settings panel.
 - Added image cropping utility.
+- Added sharing screen functionality, expect bugs!
+
+Thank you for your support. Please report any issues at: https://github.com/CtrlAltForgot/Yappa/issues
