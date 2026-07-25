@@ -526,17 +526,12 @@ class _MessageDayDivider extends StatelessWidget {
     final now = DateTime.now();
     final localDate = date.toLocal();
     final today = DateTime(now.year, now.month, now.day);
-    final messageDay = DateTime(
-      localDate.year,
-      localDate.month,
-      localDate.day,
-    );
+    final messageDay = DateTime(localDate.year, localDate.month, localDate.day);
     final difference = today.difference(messageDay).inDays;
     final label = switch (difference) {
       0 => 'Today',
       1 => 'Yesterday',
-      _ =>
-        '${_monthName(localDate.month)} ${localDate.day}, ${localDate.year}',
+      _ => '${_monthName(localDate.month)} ${localDate.day}, ${localDate.year}',
     };
 
     return Padding(

@@ -976,6 +976,12 @@ that the repository is ahead of the deployed server.
 
 ## Current Release Priorities
 
+Chat timestamps remain stored and transported as UTC. The desktop message
+surface now converts them to the operating system's local timezone before
+formatting times, grouping consecutive messages by day, or choosing
+Today/Yesterday labels. A regression test covers a UTC timestamp crossing a
+Central-time midnight boundary; Flutter analysis and all 58 client tests pass.
+
 The authorization, progressive abuse protection, secret/log auditing,
 persistent server identity, certificate-preserving LAN fallback, guarded
 LiveKit E2EE, persisted MLS message/attachment runtime, hardened production

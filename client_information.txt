@@ -23,6 +23,8 @@ independent review justify that claim.
 - Encrypted file errors now explain whether you should reconnect, wait, check
   storage permissions, or retry without exposing private file locations or
   technical encryption details.
+- Message clocks and date dividers now convert the server’s UTC timestamps to
+  your computer’s local timezone, including messages near midnight.
 - The current Linux release package was rebuilt and launched after these
   changes. Its native encryption, voice, protected-storage, and media-preview
   libraries all resolved successfully. Linux packages now use portable
