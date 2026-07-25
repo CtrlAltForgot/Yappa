@@ -1,4 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:file_picker/file_picker.dart';
 
 import '../../app/app_state.dart';
 import '../../app/theme.dart';
@@ -12,7 +15,9 @@ import '../connect/connect_screen.dart';
 import '../members/member_sidebar.dart';
 import '../settings/yappa_settings_dialog.dart';
 import '../settings/user_settings_dialog.dart';
+import '../../data/video_preferences.dart';
 import '../../data/voice_transport_service.dart';
+import '../voice/screen_share_picker_dialog.dart';
 
 class ShellScreen extends StatefulWidget {
   final AppState appState;
@@ -115,10 +120,7 @@ class _ShellScreenState extends State<ShellScreen> {
       return;
     }
 
-    await showServerAdminDialog(
-      context,
-      appState: widget.appState,
-    );
+    await showServerAdminDialog(context, appState: widget.appState);
   }
 
   Future<void> _showSettingsDialog(BuildContext context) async {
@@ -173,6 +175,18 @@ class _ShellScreenState extends State<ShellScreen> {
     } catch (_) {}
   }
 
+  bool get _useInAppScreenSharePicker {
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.windows:
+      case TargetPlatform.macOS:
+        return true;
+      case TargetPlatform.linux:
+        return !YappaVideoPreferences.isWaylandSession;
+      default:
+        return false;
+    }
+  }
+
   Future<void> _setSelectedScreenShareEnabled(bool value) async {
     if (_screenShareToggleInFlight) {
       return;
@@ -185,19 +199,36 @@ class _ShellScreenState extends State<ShellScreen> {
         return;
       }
 
+      String? preferredSourceId;
+      if (_useInAppScreenSharePicker) {
+        final supportsWindowSelection =
+            defaultTargetPlatform == TargetPlatform.windows ||
+            defaultTargetPlatform == TargetPlatform.macOS;
+        final selectedSource = await showYappaScreenSharePickerDialog(
+          context: context,
+          types: supportsWindowSelection
+              ? const <SourceType>[SourceType.Screen, SourceType.Window]
+              : const <SourceType>[SourceType.Screen],
+        );
+        if (selectedSource == null) {
+          return;
+        }
+        preferredSourceId = selectedSource.id;
+      }
+
       await widget.appState.setSelectedScreenShareEnabled(
         true,
-        preferredTarget: VoiceScreenShareTarget.screen,
+        preferredTarget: VoiceScreenShareTarget.any,
+        preferredSourceId: preferredSourceId,
       );
     } catch (error) {
       if (!mounted) return;
-      final message = widget.appState.voiceTransportError ??
+      final message =
+          widget.appState.voiceTransportError ??
           'Could not start screen share: $error';
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(content: Text(message)),
-        );
+        ..showSnackBar(SnackBar(content: Text(message)));
     } finally {
       _screenShareToggleInFlight = false;
     }
@@ -217,8 +248,9 @@ class _ShellScreenState extends State<ShellScreen> {
 
     final selectedChannel = widget.appState.selectedChannel;
     final isVoiceDeck = selectedChannel.type.name == 'voice';
-    final isInSelectedVoiceDeck =
-        widget.appState.isCurrentUserInVoiceDeck(selectedChannel.id);
+    final isInSelectedVoiceDeck = widget.appState.isCurrentUserInVoiceDeck(
+      selectedChannel.id,
+    );
 
     return Scaffold(
       body: Column(
@@ -231,6 +263,8 @@ class _ShellScreenState extends State<ShellScreen> {
                 ? () => _showOwnerPanel(context)
                 : null,
           ),
+          if (widget.appState.isSelectedServerUnreachable)
+            _ServerReconnectBanner(appState: widget.appState),
           Expanded(
             child: LayoutBuilder(
               builder: (context, constraints) {
@@ -243,17 +277,18 @@ class _ShellScreenState extends State<ShellScreen> {
                 final centerMin = totalWidth >= 1400
                     ? 720.0
                     : totalWidth >= 1180
-                        ? 560.0
-                        : totalWidth >= 980
-                            ? 420.0
-                            : 320.0;
+                    ? 560.0
+                    : totalWidth >= 980
+                    ? 420.0
+                    : 320.0;
 
                 final maxSideBudget = totalWidth - railWidth - centerMin;
 
                 double leftWidth = _channelSidebarWidth;
                 double rightWidth = _memberSidebarWidth;
 
-                if (maxSideBudget < (minChannelSidebarWidth + minMemberSidebarWidth)) {
+                if (maxSideBudget <
+                    (minChannelSidebarWidth + minMemberSidebarWidth)) {
                   leftWidth = minChannelSidebarWidth;
                   rightWidth = minMemberSidebarWidth;
                 } else if (leftWidth + rightWidth > maxSideBudget) {
@@ -291,7 +326,8 @@ class _ShellScreenState extends State<ShellScreen> {
                           Positioned.fill(
                             child: ChannelSidebar(
                               server: widget.appState.selectedServer,
-                              channels: widget.appState.channelsForSelectedServer,
+                              channels:
+                                  widget.appState.channelsForSelectedServer,
                               members: widget.appState.selectedMembers,
                               voiceDeckStates:
                                   widget.appState.selectedVoiceDeckStates,
@@ -303,17 +339,20 @@ class _ShellScreenState extends State<ShellScreen> {
                               onVoiceDeckDoubleTap: (channelId) async {
                                 widget.appState.selectChannel(channelId);
                                 try {
-                                  await widget.appState.joinVoiceDeck(channelId);
+                                  await widget.appState.joinVoiceDeck(
+                                    channelId,
+                                  );
                                 } catch (_) {}
                               },
                               canOpenAdminPanel:
                                   widget.appState.canManageSelectedServer,
                               onOpenAdminPanel:
                                   widget.appState.canManageSelectedServer
-                                      ? () => _showOwnerPanel(context)
-                                      : null,
-                              currentUserId:
-                                  widget.appState.currentUserIdForSelectedServer,
+                                  ? () => _showOwnerPanel(context)
+                                  : null,
+                              currentUserId: widget
+                                  .appState
+                                  .currentUserIdForSelectedServer,
                               voiceMemberVolumeForUserId:
                                   widget.appState.voiceMemberVolumeFor,
                               onSetVoiceMemberVolume: (userId, volume) {
@@ -321,6 +360,31 @@ class _ShellScreenState extends State<ShellScreen> {
                                   userId: userId,
                                   volume: volume,
                                 );
+                              },
+                              onUpdateChannel:
+                                  ({
+                                    required channelId,
+                                    required name,
+                                    String? glyph,
+                                  }) async {
+                                    await widget.appState
+                                        .updateChannelOnSelectedServer(
+                                          channelId: channelId,
+                                          name: name,
+                                          glyph: glyph,
+                                        );
+                                  },
+                              onCreateChannel:
+                                  ({required name, required type}) async {
+                                    await widget.appState
+                                        .createChannelOnSelectedServer(
+                                          name: name,
+                                          type: type,
+                                        );
+                                  },
+                              onDeleteChannel: (channelId) {
+                                return widget.appState
+                                    .deleteChannelOnSelectedServer(channelId);
                               },
                               bottomDock: _SidebarVoiceControlDock(
                                 canJoinSelectedChannel: isVoiceDeck,
@@ -376,8 +440,10 @@ class _ShellScreenState extends State<ShellScreen> {
                               onDrag: (delta) {
                                 setState(() {
                                   _channelSidebarWidth =
-                                      (_channelSidebarWidth + delta)
-                                          .clamp(minChannelSidebarWidth, 360.0);
+                                      (_channelSidebarWidth + delta).clamp(
+                                        minChannelSidebarWidth,
+                                        360.0,
+                                      );
                                 });
                               },
                             ),
@@ -392,6 +458,8 @@ class _ShellScreenState extends State<ShellScreen> {
                             child: ChatArea(
                               channel: selectedChannel,
                               messages: widget.appState.selectedMessages,
+                              textE2eeStartup: widget.appState
+                                  .encryptedChannelStartup(selectedChannel.id),
                               members: widget.appState.selectedMembers,
                               voiceMembers: isVoiceDeck
                                   ? widget.appState.membersForVoiceDeck(
@@ -425,20 +493,27 @@ class _ShellScreenState extends State<ShellScreen> {
                                   widget.appState.voiceTransportJoining,
                               voiceTransportJoined:
                                   widget.appState.voiceTransportJoined,
-                              voiceTransportMicrophoneReady: widget
-                                  .appState.voiceTransportMicrophoneReady,
+                              voiceTransportMicrophoneReady:
+                                  widget.appState.voiceTransportMicrophoneReady,
                               voiceTransportRemoteAudioAttached: widget
-                                  .appState.voiceTransportRemoteAudioAttached,
+                                  .appState
+                                  .voiceTransportRemoteAudioAttached,
                               voiceTransportLocalPeerId: widget
-                                  .appState.voiceTransportSnapshot.localPeerId,
+                                  .appState
+                                  .voiceTransportSnapshot
+                                  .localPeerId,
                               voiceTransportChannelId: widget
-                                  .appState.voiceTransportSnapshot.voiceChannelId,
+                                  .appState
+                                  .voiceTransportSnapshot
+                                  .voiceChannelId,
                               voiceTransportError:
                                   widget.appState.voiceTransportError,
                               voiceTransportPeers:
                                   widget.appState.voiceTransportPeers,
-                              currentUserId:
-                                  widget.appState.currentUserIdForSelectedServer,
+                              mediaE2eeStatus: widget.appState.mediaE2eeStatus,
+                              currentUserId: widget
+                                  .appState
+                                  .currentUserIdForSelectedServer,
                               voiceMemberVolumeForUserId:
                                   widget.appState.voiceMemberVolumeFor,
                               onSetVoiceMemberVolume: (userId, volume) {
@@ -451,20 +526,19 @@ class _ShellScreenState extends State<ShellScreen> {
                                   widget.appState.localCameraTrack,
                               localScreenShareTrack:
                                   widget.appState.selectedScreenShareEnabled
-                                      ? widget.appState.localScreenShareTrack
-                                      : null,
+                                  ? widget.appState.localScreenShareTrack
+                                  : null,
                               remoteCameraTracks:
                                   widget.appState.remoteCameraTracks,
                               remoteScreenShareTracks:
                                   widget.appState.remoteScreenShareTracks,
-                              onJoinVoiceDeck:
-                                  isVoiceDeck ? _joinSelectedVoiceDeck : null,
-                              onLeaveVoiceDeck:
-                                  _leaveSelectedVoiceDeck,
+                              onJoinVoiceDeck: isVoiceDeck
+                                  ? _joinSelectedVoiceDeck
+                                  : null,
+                              onLeaveVoiceDeck: _leaveSelectedVoiceDeck,
                               onSetMicMuted: _setSelectedMicMuted,
                               onSetAudioMuted: _setSelectedAudioMuted,
-                              onSetCameraEnabled:
-                                  _setSelectedCameraEnabled,
+                              onSetCameraEnabled: _setSelectedCameraEnabled,
                               onSetScreenShareEnabled:
                                   _setSelectedScreenShareEnabled,
                               onSetSpeaking: _setSelectedSpeaking,
@@ -473,24 +547,67 @@ class _ShellScreenState extends State<ShellScreen> {
                               },
                               onSendWithAttachments:
                                   (content, attachmentIds) async {
-                                await widget.appState.sendMessage(
-                                  content,
-                                  attachmentIds: attachmentIds,
+                                    await widget.appState.sendMessage(
+                                      content,
+                                      attachmentIds: attachmentIds,
+                                    );
+                                  },
+                              onUploadAttachment: (file) {
+                                return widget.appState.uploadAttachmentFile(
+                                  file,
                                 );
                               },
-                              onUploadAttachment: (file) {
+                              onSendEncryptedAttachment: (files, content) {
                                 return widget.appState
-                                    .uploadAttachmentFile(file);
+                                    .sendEncryptedAttachmentFiles(
+                                      files,
+                                      content: content,
+                                    );
+                              },
+                              onDownloadEncryptedAttachment:
+                                  (attachment) async {
+                                    final path = await FilePicker.platform
+                                        .saveFile(
+                                          dialogTitle:
+                                              'Decrypt and save attachment',
+                                          fileName: attachment.name,
+                                          lockParentWindow: true,
+                                        );
+                                    if (path == null || path.isEmpty) return;
+                                    await widget.appState
+                                        .downloadEncryptedAttachment(
+                                          attachment: attachment,
+                                          outputPath: path,
+                                        );
+                                  },
+                              onPreviewEncryptedAttachment:
+                                  (attachment, outputPath) {
+                                    return widget.appState
+                                        .downloadEncryptedAttachment(
+                                          attachment: attachment,
+                                          outputPath: outputPath,
+                                        );
+                                  },
+                              onToggleEncryptedReaction: (message, emoji) {
+                                return widget.appState.toggleEncryptedReaction(
+                                  target: message,
+                                  emoji: emoji,
+                                );
                               },
                               onEditMessage: (message, content) {
-                                return widget.appState.editMessage(message, content);
+                                return widget.appState.editMessage(
+                                  message,
+                                  content,
+                                );
                               },
                               onDeleteMessage: (message) {
                                 return widget.appState.deleteMessage(message);
                               },
-                              canDeleteAnyMessage: widget.appState.isSelectedServerOwner,
-                              onLoadLinkPreview:
-                                  widget.appState.fetchLinkPreviewForSelectedServer,
+                              canDeleteAnyMessage:
+                                  widget.appState.isSelectedServerOwner,
+                              onLoadLinkPreview: widget
+                                  .appState
+                                  .fetchLinkPreviewForSelectedServer,
                             ),
                           ),
                           SizedBox(
@@ -512,8 +629,10 @@ class _ShellScreenState extends State<ShellScreen> {
                                     onDrag: (delta) {
                                       setState(() {
                                         _memberSidebarWidth =
-                                            (_memberSidebarWidth - delta)
-                                                .clamp(minMemberSidebarWidth, 360.0);
+                                            (_memberSidebarWidth - delta).clamp(
+                                              minMemberSidebarWidth,
+                                              360.0,
+                                            );
                                       });
                                     },
                                   ),
@@ -535,12 +654,56 @@ class _ShellScreenState extends State<ShellScreen> {
   }
 }
 
+class _ServerReconnectBanner extends StatelessWidget {
+  final AppState appState;
+
+  const _ServerReconnectBanner({required this.appState});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      decoration: const BoxDecoration(
+        color: Color(0xFF241217),
+        border: Border(bottom: BorderSide(color: Color(0xFF6B2833))),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.cloud_off_rounded, color: Color(0xFFFFB4BF)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              appState.lastError ?? 'This server is unreachable right now.',
+              style: const TextStyle(
+                color: Color(0xFFFFD9DE),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          const SizedBox(width: 16),
+          FilledButton.icon(
+            onPressed: appState.isBusy
+                ? null
+                : appState.retrySelectedServerConnection,
+            icon: appState.isBusy
+                ? const SizedBox.square(
+                    dimension: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh_rounded),
+            label: const Text('Retry connection'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _EdgeResizeHandle extends StatelessWidget {
   final ValueChanged<double> onDrag;
 
-  const _EdgeResizeHandle({
-    required this.onDrag,
-  });
+  const _EdgeResizeHandle({required this.onDrag});
 
   @override
   Widget build(BuildContext context) {
@@ -599,9 +762,7 @@ class _HomeAndServerRail extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: NewChatColors.panel,
-        border: Border(
-          right: BorderSide(color: NewChatColors.outline),
-        ),
+        border: Border(right: BorderSide(color: NewChatColors.outline)),
       ),
       child: Column(
         children: [
@@ -670,10 +831,12 @@ class _RailIconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final backgroundColor =
-        selected ? NewChatColors.accent : NewChatColors.surface;
-    final borderColor =
-        selected ? NewChatColors.accentGlow : NewChatColors.outline;
+    final backgroundColor = selected
+        ? NewChatColors.accent
+        : NewChatColors.surface;
+    final borderColor = selected
+        ? NewChatColors.accentGlow
+        : NewChatColors.outline;
 
     Widget content;
     if (child != null) {
@@ -777,11 +940,7 @@ class _TopFrameBar extends StatelessWidget {
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: NewChatColors.outline),
           ),
-          child: Icon(
-            icon,
-            size: 20,
-            color: NewChatColors.textMuted,
-          ),
+          child: Icon(icon, size: 20, color: NewChatColors.textMuted),
         ),
       ),
     );
@@ -794,9 +953,7 @@ class _TopFrameBar extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 18),
       decoration: BoxDecoration(
         color: NewChatColors.panel,
-        border: Border(
-          bottom: BorderSide(color: NewChatColors.outline),
-        ),
+        border: Border(bottom: BorderSide(color: NewChatColors.outline)),
       ),
       child: Row(
         children: [
@@ -818,11 +975,13 @@ class _TopFrameBar extends StatelessWidget {
               decoration: BoxDecoration(
                 color: NewChatColors.surface,
                 borderRadius: BorderRadius.circular(14),
-                ),
+              ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  _FrameBarAvatar(member: appState.currentUserMemberForSelectedServer),
+                  _FrameBarAvatar(
+                    member: appState.currentUserMemberForSelectedServer,
+                  ),
                   const SizedBox(width: 8),
                   Text(appState.currentDisplayName),
                 ],
@@ -867,7 +1026,9 @@ class _FrameBarAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final displayName = member?.name ?? '';
-    final initial = (displayName.isNotEmpty ? displayName.characters.first : '?').toUpperCase();
+    final initial =
+        (displayName.isNotEmpty ? displayName.characters.first : '?')
+            .toUpperCase();
     final avatarSource = member?.avatarUrl;
 
     return Container(
@@ -969,16 +1130,16 @@ class _SidebarVoiceControlDock extends StatelessWidget {
                 tooltip: isInSelectedVoiceDeck
                     ? 'Leave call'
                     : canJoinSelectedChannel
-                        ? 'Join call'
-                        : 'Select a voice deck to join',
+                    ? 'Join call'
+                    : 'Select a voice deck to join',
                 icon: isInSelectedVoiceDeck
                     ? Icons.call_end_rounded
                     : Icons.call_rounded,
                 color: isInSelectedVoiceDeck
                     ? const Color(0xFFFF667E)
                     : canPressJoinLeave
-                        ? const Color(0xFF54D17A)
-                        : NewChatColors.textMuted,
+                    ? const Color(0xFF54D17A)
+                    : NewChatColors.textMuted,
                 onTap: (isBusy || !canPressJoinLeave) ? null : onJoinLeave,
               ),
             ),
@@ -1060,19 +1221,15 @@ class _SidebarVoiceControlButton extends StatelessWidget {
       message: tooltip,
       child: InkWell(
         onTap: onTap == null ? null : () => onTap!.call(),
-        mouseCursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+        mouseCursor: enabled
+            ? SystemMouseCursors.click
+            : SystemMouseCursors.basic,
         borderRadius: BorderRadius.circular(12),
         child: Opacity(
           opacity: enabled ? 1 : 0.38,
           child: SizedBox(
             height: 38,
-            child: Center(
-              child: Icon(
-                icon,
-                size: 19,
-                color: color,
-              ),
-            ),
+            child: Center(child: Icon(icon, size: 19, color: color)),
           ),
         ),
       ),

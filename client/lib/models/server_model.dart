@@ -5,6 +5,10 @@ class ChatServer {
   final String tagline;
   final String description;
   final String address;
+  final String publicAddress;
+  final String lanAddress;
+  final int? lanTlsPort;
+  final String identityPublicKey;
   final String accentColor;
   final String? iconUrl;
   final String? bannerUrl;
@@ -16,10 +20,18 @@ class ChatServer {
     required this.tagline,
     required this.description,
     required this.address,
+    this.publicAddress = '',
+    this.lanAddress = '',
+    this.lanTlsPort,
+    this.identityPublicKey = '',
     this.accentColor = '#8b0c14',
     this.iconUrl,
     this.bannerUrl,
   });
+
+  String get joinAddress {
+    return publicAddress.trim().isNotEmpty ? publicAddress : address;
+  }
 
   ChatServer copyWith({
     String? id,
@@ -28,6 +40,10 @@ class ChatServer {
     String? tagline,
     String? description,
     String? address,
+    String? publicAddress,
+    String? lanAddress,
+    int? lanTlsPort,
+    String? identityPublicKey,
     String? accentColor,
     String? iconUrl,
     String? bannerUrl,
@@ -39,6 +55,10 @@ class ChatServer {
       tagline: tagline ?? this.tagline,
       description: description ?? this.description,
       address: address ?? this.address,
+      publicAddress: publicAddress ?? this.publicAddress,
+      lanAddress: lanAddress ?? this.lanAddress,
+      lanTlsPort: lanTlsPort ?? this.lanTlsPort,
+      identityPublicKey: identityPublicKey ?? this.identityPublicKey,
       accentColor: accentColor ?? this.accentColor,
       iconUrl: iconUrl ?? this.iconUrl,
       bannerUrl: bannerUrl ?? this.bannerUrl,
@@ -46,16 +66,20 @@ class ChatServer {
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'shortName': shortName,
-        'tagline': tagline,
-        'description': description,
-        'address': address,
-        'accentColor': accentColor,
-        'iconUrl': iconUrl,
-        'bannerUrl': bannerUrl,
-      };
+    'id': id,
+    'name': name,
+    'shortName': shortName,
+    'tagline': tagline,
+    'description': description,
+    'address': address,
+    'publicAddress': publicAddress,
+    'lanAddress': lanAddress,
+    'lanTlsPort': lanTlsPort,
+    'identityPublicKey': identityPublicKey,
+    'accentColor': accentColor,
+    'iconUrl': iconUrl,
+    'bannerUrl': bannerUrl,
+  };
 
   factory ChatServer.fromJson(Map<String, dynamic> json) {
     final branding = json['branding'];
@@ -91,6 +115,10 @@ class ChatServer {
       tagline: (json['tagline'] as String?) ?? description,
       description: description,
       address: (json['address'] as String?) ?? '',
+      publicAddress: (json['publicAddress'] as String?) ?? '',
+      lanAddress: (json['lanAddress'] as String?) ?? '',
+      lanTlsPort: (json['lanTlsPort'] as num?)?.toInt(),
+      identityPublicKey: (json['identityPublicKey'] as String?) ?? '',
       accentColor: accentColor,
       iconUrl: iconUrl,
       bannerUrl: bannerUrl,

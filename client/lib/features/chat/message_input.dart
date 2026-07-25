@@ -4,8 +4,10 @@ import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:pasteboard/pasteboard.dart';
 
 import '../../app/theme.dart';
+import '../../data/encrypted_attachment_failure.dart';
 import '../../models/channel_model.dart';
 import '../../models/message_model.dart';
 
@@ -13,8 +15,10 @@ class MessageInput extends StatefulWidget {
   final ChatChannel channel;
   final ValueChanged<String> onSend;
   final Future<void> Function(String content, List<String> attachmentIds)?
-      onSendWithAttachments;
+  onSendWithAttachments;
   final Future<ChatAttachment> Function(File file)? onUploadAttachment;
+  final Future<void> Function(List<File> files, String content)?
+  onSendEncryptedAttachment;
   final String? editingMessageId;
   final String? editingContent;
   final String? editingAuthorName;
@@ -28,6 +32,7 @@ class MessageInput extends StatefulWidget {
     required this.onSend,
     this.onSendWithAttachments,
     this.onUploadAttachment,
+    this.onSendEncryptedAttachment,
     this.editingMessageId,
     this.editingContent,
     this.editingAuthorName,
@@ -42,6 +47,10 @@ class MessageInput extends StatefulWidget {
 
 class _SubmitMessageIntent extends Intent {
   const _SubmitMessageIntent();
+}
+
+class _PasteMessageIntent extends Intent {
+  const _PasteMessageIntent();
 }
 
 class MessageInputState extends State<MessageInput> {
@@ -72,7 +81,10 @@ class MessageInputState extends State<MessageInput> {
         final nextText = widget.editingContent ?? '';
         _controller.value = TextEditingValue(
           text: nextText,
-          selection: TextSelection(baseOffset: 0, extentOffset: nextText.length),
+          selection: TextSelection(
+            baseOffset: 0,
+            extentOffset: nextText.length,
+          ),
         );
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) return;
@@ -90,8 +102,11 @@ class MessageInputState extends State<MessageInput> {
   }
 
   bool get _canAttach =>
-      widget.channel.type == ChannelType.text && widget.onUploadAttachment != null;
-  bool get _isEditing => widget.editingMessageId != null && widget.onEdit != null;
+      widget.channel.type == ChannelType.text &&
+      (widget.onUploadAttachment != null ||
+          widget.onSendEncryptedAttachment != null);
+  bool get _isEditing =>
+      widget.editingMessageId != null && widget.onEdit != null;
 
   Future<void> uploadDroppedFiles(List<File> files) async {
     await _uploadFiles(files);
@@ -186,6 +201,82 @@ class MessageInputState extends State<MessageInput> {
     await _uploadFiles(files);
   }
 
+  Future<void> _pasteFromClipboard() async {
+    if (_canAttach && !_isEditing && !_isUploading && !_isSending) {
+      try {
+        final pastedFile = await _clipboardImageFile();
+        if (pastedFile != null) {
+          try {
+            await _uploadFiles([pastedFile]);
+          } finally {
+            try {
+              await pastedFile.delete();
+            } catch (_) {}
+          }
+          return;
+        }
+      } catch (error) {
+        if (mounted) {
+          setState(() {
+            _uploadError =
+                'Could not read the clipboard image: '
+                '${error.toString().replaceFirst('Exception: ', '')}';
+          });
+        }
+        return;
+      }
+    }
+
+    final clipboardData = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = clipboardData?.text;
+    if (text == null || text.isEmpty) {
+      return;
+    }
+
+    final value = _controller.value;
+    final selection = value.selection.isValid
+        ? value.selection
+        : TextSelection.collapsed(offset: value.text.length);
+    final nextText = value.text.replaceRange(
+      selection.start,
+      selection.end,
+      text,
+    );
+    _controller.value = TextEditingValue(
+      text: nextText,
+      selection: TextSelection.collapsed(offset: selection.start + text.length),
+    );
+  }
+
+  Future<File?> _clipboardImageFile() async {
+    final clipboardFiles = await Pasteboard.files();
+    for (final path in clipboardFiles) {
+      final file = File(path);
+      final extension = file.path.split('.').last.toLowerCase();
+      if (await file.exists() &&
+          const {'png', 'jpg', 'jpeg', 'gif', 'webp'}.contains(extension)) {
+        return _writeClipboardImage(await file.readAsBytes(), extension);
+      }
+    }
+
+    final bytes = await Pasteboard.image;
+    if (bytes != null && bytes.isNotEmpty) {
+      return _writeClipboardImage(bytes, 'png');
+    }
+
+    return null;
+  }
+
+  Future<File> _writeClipboardImage(Uint8List bytes, String extension) async {
+    final timestamp = DateTime.now().microsecondsSinceEpoch;
+    final file = File(
+      '${Directory.systemTemp.path}'
+      '${Platform.pathSeparator}yappa-pasted-image-$timestamp.$extension',
+    );
+    await file.writeAsBytes(bytes, flush: true);
+    return file;
+  }
+
   Future<void> _uploadFiles(List<File> files) async {
     if (!_canAttach || _isUploading || _isSending) return;
 
@@ -195,6 +286,33 @@ class MessageInputState extends State<MessageInput> {
     });
 
     try {
+      if (widget.onSendEncryptedAttachment != null) {
+        final availableFiles = files
+            .where((file) => file.existsSync())
+            .toList(growable: false);
+        if (availableFiles.isEmpty) return;
+        if (availableFiles.length > 10) {
+          setState(() {
+            _uploadError = 'Send no more than 10 encrypted files at once.';
+          });
+          return;
+        }
+        try {
+          final content = _controller.text.trim();
+          await widget.onSendEncryptedAttachment!(availableFiles, content);
+          if (!mounted) return;
+          _controller.clear();
+        } catch (error) {
+          if (!mounted) return;
+          setState(() {
+            _uploadError = encryptedAttachmentFailureMessage(
+              error,
+              operation: EncryptedAttachmentOperation.send,
+            );
+          });
+        }
+        return;
+      }
       for (final file in files) {
         if (!file.existsSync()) continue;
 
@@ -203,8 +321,9 @@ class MessageInputState extends State<MessageInput> {
           if (!mounted) return;
 
           setState(() {
-            final exists =
-                _pendingAttachments.any((item) => item.id == attachment.id);
+            final exists = _pendingAttachments.any(
+              (item) => item.id == attachment.id,
+            );
             if (!exists) {
               _pendingAttachments.add(attachment);
             }
@@ -248,8 +367,9 @@ class MessageInputState extends State<MessageInput> {
               : Colors.transparent,
           borderRadius: BorderRadius.circular(22),
           border: Border.all(
-            color:
-                _isDragActive ? NewChatColors.accentGlow : Colors.transparent,
+            color: _isDragActive
+                ? NewChatColors.accentGlow
+                : Colors.transparent,
             width: 1.4,
           ),
         ),
@@ -292,7 +412,10 @@ class MessageInputState extends State<MessageInput> {
               Container(
                 width: double.infinity,
                 margin: const EdgeInsets.only(bottom: 10),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
                 decoration: BoxDecoration(
                   color: NewChatColors.panel,
                   borderRadius: BorderRadius.circular(18),
@@ -300,10 +423,7 @@ class MessageInputState extends State<MessageInput> {
                 ),
                 child: Row(
                   children: [
-                    Icon(
-                      Icons.edit_rounded,
-                      color: NewChatColors.accentGlow,
-                    ),
+                    Icon(Icons.edit_rounded, color: NewChatColors.accentGlow),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
@@ -378,15 +498,27 @@ class MessageInputState extends State<MessageInput> {
                           const _SubmitMessageIntent(),
                       SingleActivator(LogicalKeyboardKey.numpadEnter):
                           const _SubmitMessageIntent(),
+                      SingleActivator(LogicalKeyboardKey.keyV, control: true):
+                          const _PasteMessageIntent(),
+                      SingleActivator(LogicalKeyboardKey.keyV, meta: true):
+                          const _PasteMessageIntent(),
                     },
                     child: Actions(
                       actions: <Type, Action<Intent>>{
-                        _SubmitMessageIntent: CallbackAction<_SubmitMessageIntent>(
-                          onInvoke: (intent) {
-                            _submit();
-                            return null;
-                          },
-                        ),
+                        _SubmitMessageIntent:
+                            CallbackAction<_SubmitMessageIntent>(
+                              onInvoke: (intent) {
+                                _submit();
+                                return null;
+                              },
+                            ),
+                        _PasteMessageIntent:
+                            CallbackAction<_PasteMessageIntent>(
+                              onInvoke: (intent) {
+                                _pasteFromClipboard();
+                                return null;
+                              },
+                            ),
                       },
                       child: TextField(
                         controller: _controller,
@@ -488,7 +620,9 @@ class _ComposerTool extends StatelessWidget {
 
     return InkWell(
       onTap: disabled || busy ? null : onTap,
-      mouseCursor: disabled || busy ? SystemMouseCursors.basic : SystemMouseCursors.click,
+      mouseCursor: disabled || busy
+          ? SystemMouseCursors.basic
+          : SystemMouseCursors.click,
       borderRadius: BorderRadius.circular(18),
       child: Container(
         width: 52,
@@ -572,8 +706,8 @@ class _PendingAttachmentChip extends StatelessWidget {
                   attachment.isVideo
                       ? Icons.movie_rounded
                       : attachment.isAudio
-                          ? Icons.audiotrack_rounded
-                          : Icons.insert_drive_file_rounded,
+                      ? Icons.audiotrack_rounded
+                      : Icons.insert_drive_file_rounded,
                   size: 16,
                   color: NewChatColors.accentGlow,
                 ),

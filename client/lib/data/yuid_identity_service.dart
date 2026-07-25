@@ -5,6 +5,8 @@ import 'dart:typed_data';
 import 'package:cryptography/cryptography.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'secret_storage.dart';
+
 class YuidIdentity {
   final String yuid;
   final String publicKeyBase64Url;
@@ -33,23 +35,38 @@ class YuidIdentityService {
   static const _yuidKey = 'yappa_yuid';
   static const _publicKeyKey = 'yappa_yuid_public_key';
   static const _privateKeyKey = 'yappa_yuid_private_key';
+  static const _secureIdentityKey = 'yappa.yuid_identity.v1';
   static const _stableDirectoryName = 'Yappa';
   static const _stableIdentityFileName = 'yuid_identity.json';
   static const int _canonicalYuidLength = 20;
 
   final Ed25519 _algorithm = Ed25519();
+  final SecretStorage _secretStorage;
   YuidIdentity? _cached;
+
+  YuidIdentityService({SecretStorage secretStorage = const OsSecretStorage()})
+    : _secretStorage = secretStorage;
 
   Future<YuidIdentity> getOrCreateIdentity() async {
     if (_cached != null) return _cached!;
 
     final prefs = await SharedPreferences.getInstance();
 
+    final secureIdentity = await _readSecureIdentity();
+    if (secureIdentity != null) {
+      final normalized = await _canonicalizeIdentity(secureIdentity);
+      await _savePublicIdentity(prefs, normalized);
+      await _removeLegacyPrivateCopies(prefs);
+      _cached = normalized;
+      return normalized;
+    }
+
     final stableIdentity = await _readStableIdentityFile();
     if (stableIdentity != null) {
       final normalized = await _canonicalizeIdentity(stableIdentity);
-      await _saveToSharedPreferences(prefs, normalized);
-      await _writeStableIdentityFile(normalized);
+      await _saveSecureIdentity(normalized);
+      await _savePublicIdentity(prefs, normalized);
+      await _removeLegacyPrivateCopies(prefs);
       _cached = normalized;
       return normalized;
     }
@@ -66,8 +83,9 @@ class YuidIdentityService {
         ),
       );
 
-      await _saveToSharedPreferences(prefs, restored);
-      await _writeStableIdentityFile(restored);
+      await _saveSecureIdentity(restored);
+      await _savePublicIdentity(prefs, restored);
+      await _removeLegacyPrivateCopies(prefs);
       _cached = restored;
       return restored;
     }
@@ -84,8 +102,9 @@ class YuidIdentityService {
       ),
     );
 
-    await _saveToSharedPreferences(prefs, created);
-    await _writeStableIdentityFile(created);
+    await _saveSecureIdentity(created);
+    await _savePublicIdentity(prefs, created);
+    await _removeLegacyPrivateCopies(prefs);
     _cached = created;
     return created;
   }
@@ -119,6 +138,72 @@ class YuidIdentityService {
     );
   }
 
+  Future<String> signMediaDeviceAuthorization({
+    required String serverId,
+    required String username,
+    required String nonce,
+    required String deviceId,
+    required String mediaPublicKey,
+  }) async {
+    final identity = await getOrCreateIdentity();
+    final publicKey = SimplePublicKey(
+      _decodeBase64Url(identity.publicKeyBase64Url),
+      type: KeyPairType.ed25519,
+    );
+    final keyPair = SimpleKeyPairData(
+      _decodeBase64Url(identity.privateKeyBase64Url),
+      publicKey: publicKey,
+      type: KeyPairType.ed25519,
+    );
+    final message = utf8.encode(
+      'yappa-media-device-v1|$serverId|${username.trim().toLowerCase()}|'
+      '$nonce|$mediaPublicKey|$deviceId',
+    );
+    final signature = await _algorithm.sign(message, keyPair: keyPair);
+    return _base64UrlNoPad(signature.bytes);
+  }
+
+  Future<String> signMlsCredentialBinding({
+    required String serverId,
+    required String deviceId,
+    required Uint8List mlsSignaturePublicKey,
+  }) async {
+    if (serverId.trim().isEmpty ||
+        !RegExp(r'^device_[A-Za-z0-9_-]{24}$').hasMatch(deviceId) ||
+        mlsSignaturePublicKey.length != 32) {
+      throw ArgumentError('Invalid MLS credential binding input.');
+    }
+    final identity = await getOrCreateIdentity();
+    final publicKey = SimplePublicKey(
+      _decodeBase64Url(identity.publicKeyBase64Url),
+      type: KeyPairType.ed25519,
+    );
+    final keyPair = SimpleKeyPairData(
+      _decodeBase64Url(identity.privateKeyBase64Url),
+      publicKey: publicKey,
+      type: KeyPairType.ed25519,
+    );
+    final signatureKey = _base64UrlNoPad(mlsSignaturePublicKey);
+    final message = utf8.encode(
+      'yappa-mls-credential-v1|${serverId.trim()}|${identity.yuid}|'
+      '$deviceId|$signatureKey',
+    );
+    final signature = await _algorithm.sign(message, keyPair: keyPair);
+    return _base64UrlNoPad(signature.bytes);
+  }
+
+  Future<SimpleKeyPairData> keyPair() async {
+    final identity = await getOrCreateIdentity();
+    return SimpleKeyPairData(
+      _decodeBase64Url(identity.privateKeyBase64Url),
+      publicKey: SimplePublicKey(
+        _decodeBase64Url(identity.publicKeyBase64Url),
+        type: KeyPairType.ed25519,
+      ),
+      type: KeyPairType.ed25519,
+    );
+  }
+
   Future<YuidIdentity> _canonicalizeIdentity(YuidIdentity identity) async {
     final canonicalYuid = await _buildYuidFromPublicKeyBase64Url(
       identity.publicKeyBase64Url,
@@ -130,35 +215,47 @@ class YuidIdentityService {
     );
   }
 
-  Future<void> _saveToSharedPreferences(
+  Future<void> _savePublicIdentity(
     SharedPreferences prefs,
     YuidIdentity identity,
   ) async {
     await prefs.setString(_yuidKey, identity.yuid);
     await prefs.setString(_publicKeyKey, identity.publicKeyBase64Url);
-    await prefs.setString(_privateKeyKey, identity.privateKeyBase64Url);
   }
 
-  Future<YuidIdentity?> _readStableIdentityFile() async {
-    try {
-      final file = await _stableIdentityFile();
-      if (!await file.exists()) {
-        return null;
-      }
+  Future<YuidIdentity?> _readSecureIdentity() async {
+    final raw = await _secretStorage.read(_secureIdentityKey);
+    if ((raw ?? '').isEmpty) {
+      return null;
+    }
+    return _decodeIdentity(raw!);
+  }
 
-      final raw = await file.readAsString();
+  Future<void> _saveSecureIdentity(YuidIdentity identity) async {
+    await _secretStorage.write(
+      _secureIdentityKey,
+      jsonEncode({
+        'version': 1,
+        'yuid': identity.yuid,
+        'publicKeyBase64Url': identity.publicKeyBase64Url,
+        'privateKeyBase64Url': identity.privateKeyBase64Url,
+      }),
+    );
+  }
+
+  YuidIdentity? _decodeIdentity(String raw) {
+    try {
       final decoded = jsonDecode(raw);
       if (decoded is! Map<String, dynamic>) {
         return null;
       }
-
       final publicKey = (decoded['publicKeyBase64Url'] ?? '').toString().trim();
-      final privateKey =
-          (decoded['privateKeyBase64Url'] ?? '').toString().trim();
+      final privateKey = (decoded['privateKeyBase64Url'] ?? '')
+          .toString()
+          .trim();
       if (publicKey.isEmpty || privateKey.isEmpty) {
         return null;
       }
-
       return YuidIdentity(
         yuid: (decoded['yuid'] ?? '').toString().trim(),
         publicKeyBase64Url: publicKey,
@@ -169,19 +266,29 @@ class YuidIdentityService {
     }
   }
 
-  Future<void> _writeStableIdentityFile(YuidIdentity identity) async {
+  Future<void> _removeLegacyPrivateCopies(SharedPreferences prefs) async {
+    await prefs.remove(_privateKeyKey);
     try {
       final file = await _stableIdentityFile();
-      await file.parent.create(recursive: true);
-      final payload = jsonEncode({
-        'version': 1,
-        'yuid': identity.yuid,
-        'publicKeyBase64Url': identity.publicKeyBase64Url,
-        'privateKeyBase64Url': identity.privateKeyBase64Url,
-      });
-      await file.writeAsString(payload, flush: true);
+      if (await file.exists()) {
+        await file.delete();
+      }
     } catch (_) {
-      // Keep auth working even if the stable backup file could not be written.
+      // Secure storage already contains the identity. A failed cleanup is
+      // retried on the next startup.
+    }
+  }
+
+  Future<YuidIdentity?> _readStableIdentityFile() async {
+    try {
+      final file = await _stableIdentityFile();
+      if (!await file.exists()) {
+        return null;
+      }
+
+      return _decodeIdentity(await file.readAsString());
+    } catch (_) {
+      return null;
     }
   }
 
@@ -204,19 +311,13 @@ class YuidIdentityService {
 
       final userProfile = Platform.environment['USERPROFILE']?.trim();
       if ((userProfile ?? '').isNotEmpty) {
-        return _joinPath(
-          _joinPath(userProfile!, 'AppData'),
-          'Roaming',
-        );
+        return _joinPath(_joinPath(userProfile!, 'AppData'), 'Roaming');
       }
     }
 
     final home = Platform.environment['HOME']?.trim();
     if (Platform.isMacOS && (home ?? '').isNotEmpty) {
-      return _joinPath(
-        _joinPath(home!, 'Library'),
-        'Application Support',
-      );
+      return _joinPath(_joinPath(home!, 'Library'), 'Application Support');
     }
 
     if (Platform.isLinux) {

@@ -1,0 +1,41 @@
+[package]
+name = "hpke-rs"
+version = "0.6.1"
+authors = ["Franziskus Kiefer <franziskuskiefer@gmail.com>"]
+edition = "2021"
+license = "MPL-2.0"
+documentation = "https://docs.rs/hpke-rs"
+description = "HPKE Implementation"
+readme = "Readme.md"
+repository = "https://github.com/cryspen/hpke-rs"
+
+[dependencies]
+hpke-rs-crypto = { version = "=0.6.1", default-features = false }
+hpke-rs-rust-crypto = { version = "=0.6.1", default-features = false, optional = true }
+libcrux-sha3 = "=0.0.10"
+log = "0.4"
+rand_core = { version = "0.9", default-features = false }
+serde = { version = "1.0", features = ["derive"], optional = true }
+subtle = { version = "2.6", default-features = false }
+tls_codec = { version = "0.4.2", features = ["derive"], optional = true }
+zeroize = { version = "1.5", features = ["zeroize_derive"] }
+
+[features]
+default = []
+std = [
+    "rand_core/std",
+    "hpke-rs-crypto/std",
+    "hpke-rs-rust-crypto?/std",
+]
+serialization = ["serde", "tls_codec", "tls_codec/serde", "std"]
+hazmat = []
+rustcrypto = ["dep:hpke-rs-rust-crypto"]
+# Yappa never enables the libcrux provider. Keeping these compatibility feature
+# names avoids changing hpke-rs' public feature surface while preventing Cargo
+# from locking its vulnerable, unused optional dependency chain.
+libcrux = []
+libcrux-rustcrypto-p-curves = []
+experimental = ["hpke-rs-rust-crypto?/experimental"]
+hpke-test = ["std"]
+hpke-test-prng = ["hpke-rs-rust-crypto?/deterministic-prng"]
+

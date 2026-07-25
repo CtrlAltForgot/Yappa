@@ -1,12 +1,17 @@
 name: Build Yappa Desktop
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: yappa-desktop-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
-  YAPPA_VERSION: "1.0.0"
+  YAPPA_VERSION: "0.1.0-dev"
 
 jobs:
   build_linux:
@@ -15,7 +20,9 @@ jobs:
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Set version
         id: version
@@ -27,9 +34,10 @@ jobs:
           echo "safe_version=$SAFE_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Setup Flutter
-        uses: subosito/flutter-action@v2
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           channel: stable
+          flutter-version: 3.44.7
 
       - name: Show Flutter version
         shell: bash
@@ -40,14 +48,91 @@ jobs:
         run: |
           set -euo pipefail
           cd client
-          flutter pub get
+          flutter pub get --enforce-lockfile
+
+      - name: Validate client
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked --manifest-path client/native/yappa_mls/Cargo.toml
+          cargo test --locked --manifest-path client/native/yappa_mls/Cargo.toml
+          client/native/yappa_mls/scripts/test_openmls_vectors.sh
+          cd client
+          flutter analyze
+          flutter test
 
       - name: Build Linux
         shell: bash
         run: |
           set -euo pipefail
-          cd client
-          flutter build linux --release
+          release_source="/tmp/yappa-release-source-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          rm -rf "$release_source"
+          mkdir -p "$release_source"
+          cp -a client "$release_source/client"
+          rm -rf \
+            "$release_source/client/.dart_tool" \
+            "$release_source/client/build"
+
+          cd "$release_source/client"
+          flutter pub get --enforce-lockfile
+          flutter build linux --release \
+            --split-debug-info=build/linux-symbols
+
+          cd "$GITHUB_WORKSPACE"
+          rm -rf \
+            client/build/linux/x64/release/bundle \
+            client/build/linux-symbols
+          mkdir -p client/build/linux/x64/release
+          cp -a \
+            "$release_source/client/build/linux/x64/release/bundle" \
+            client/build/linux/x64/release/bundle
+          cp -a \
+            "$release_source/client/build/linux-symbols" \
+            client/build/linux-symbols
+          rm -rf "$release_source"
+
+      - name: Validate Linux bundle isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle="client/build/linux/x64/release/bundle"
+          test -x "$bundle/Yappa"
+          test -f "$bundle/lib/libyappa_mls.so"
+
+          while IFS= read -r -d '' file; do
+            dynamic="$(readelf -d "$file" 2>/dev/null || true)"
+            if printf '%s\n' "$dynamic" \
+              | grep -E 'RPATH|RUNPATH' \
+              | grep -E '/home/|/Users/|[A-Za-z]:\\\\'; then
+              echo "Absolute build path found in runtime search metadata: $file" >&2
+              exit 1
+            fi
+          done < <(find "$bundle" -type f -print0)
+
+          while IFS= read -r -d '' library; do
+            if ldd "$library" 2>/dev/null | grep -q 'not found'; then
+              echo "Unresolved bundled dependency: $library" >&2
+              ldd "$library" >&2 || true
+              exit 1
+            fi
+          done < <(
+            find "$bundle/lib" -maxdepth 1 -type f \
+              \( -name '*.so' -o -name '*.so.*' \) -print0
+          )
+
+          if grep -R -a -E -l \
+            '/home/|/Users/|[A-Za-z]:\\\\Users\\\\' \
+            "$bundle"; then
+            echo "Builder home path found in Linux bundle." >&2
+            exit 1
+          fi
+
+          if grep -R -a -E -l \
+            'sslip\.io|codex-yappa|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY' \
+            "$bundle"; then
+            echo "Forbidden secret or retired transport marker in Linux bundle." >&2
+            exit 1
+          fi
 
       - name: Package Linux artifact
         shell: bash
@@ -74,7 +159,7 @@ jobs:
           tar -C client/dist -czf "$ARCHIVE_PATH" "Yappa-${{ steps.version.outputs.safe_version }}-linux-x64"
 
       - name: Upload Linux artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: Yappa-linux-x64
           path: client/dist/Yappa-${{ steps.version.outputs.safe_version }}-linux-x64.tar.gz
@@ -85,7 +170,9 @@ jobs:
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Set version
         id: version
@@ -96,21 +183,121 @@ jobs:
           echo "safe_version=$SAFE_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Setup Flutter
-        uses: subosito/flutter-action@v2
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           channel: stable
+          flutter-version: 3.44.7
 
       - name: Install client dependencies
         shell: bash
         run: |
+          set -euo pipefail
           cd client
-          flutter pub get
+          flutter pub get --enforce-lockfile
+
+      - name: Install pinned libsodium runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $archive = Join-Path $env:RUNNER_TEMP "libsodium-1.0.20-msvc.zip"
+          $extract = Join-Path $env:RUNNER_TEMP "yappa-libsodium"
+          Invoke-WebRequest `
+            -Uri "https://download.libsodium.org/libsodium/releases/libsodium-1.0.20-msvc.zip" `
+            -OutFile $archive
+          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          $expected = "2ff97f9e3f5b341bdc808e698057bea1ae454f99e29ff6f9b62e14d0eb1b1baa"
+          if ($actual -ne $expected) {
+            throw "libsodium archive checksum mismatch"
+          }
+          Expand-Archive -Path $archive -DestinationPath $extract
+          $runtime = Join-Path $extract "libsodium/x64/Release/v143/dynamic"
+          if (-not (Test-Path (Join-Path $runtime "libsodium.dll"))) {
+            throw "libsodium.dll was not present in the verified archive"
+          }
+          $runtime | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "YAPPA_SODIUM_DLL=$(Join-Path $runtime 'libsodium.dll')" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Validate client
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked --manifest-path client/native/yappa_mls/Cargo.toml
+          cargo test --locked --manifest-path client/native/yappa_mls/Cargo.toml
+          client/native/yappa_mls/scripts/test_openmls_vectors.sh
+          cd client
+          flutter analyze
+          flutter test
 
       - name: Build Windows
         shell: bash
         run: |
+          set -euo pipefail
           cd client
-          flutter build windows --release
+          flutter build windows --release \
+            --split-debug-info=build/windows-symbols
+
+      - name: Verify Windows runtime bundle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $bundle = "client/build/windows/x64/runner/Release"
+          Copy-Item -Force $env:YAPPA_SODIUM_DLL (Join-Path $bundle "libsodium.dll")
+          foreach ($file in @(
+            "yappa.exe",
+            "flutter_windows.dll",
+            "yappa_mls.dll",
+            "libsodium.dll"
+          )) {
+            if (-not (Test-Path (Join-Path $bundle $file))) {
+              throw "Required Windows runtime file is missing: $file"
+            }
+          }
+
+          $forbidden = [regex]::new(
+            '(?i)([A-Z]:\\Users\\|/Users/|/home/|sslip\.io|codex-yappa|' +
+            'BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY)'
+          )
+          foreach ($artifact in Get-ChildItem -Path $bundle -Recurse -File) {
+            $content = [Text.Encoding]::Latin1.GetString(
+              [IO.File]::ReadAllBytes($artifact.FullName)
+            )
+            if ($forbidden.IsMatch($content)) {
+              throw "Forbidden builder path, secret, or retired transport marker in Windows bundle: $($artifact.Name)"
+            }
+          }
+
+          @"
+          Yappa 0.1.0-dev Windows friend-test build
+
+          Keep every file in this folder together and run yappa.exe.
+          This development build is not code-signed yet, so Windows may show
+          an Unknown Publisher warning. Do not bypass any certificate warning
+          inside Yappa itself.
+
+          Test:
+          1. Join using only the server's public IP.
+          2. Confirm messages and online presence update without reconnect banners.
+          3. Confirm website cards appear, including a YouTube player card.
+          4. Join and leave voice twice; report any encryption or connection error.
+          5. Restart Yappa and confirm the saved session returns.
+
+          Send screenshots and the exact visible error text for any failure.
+          Never send passwords, session tokens, private keys, or server .env files.
+          "@ | Set-Content -Path (Join-Path $bundle "README-Windows.txt")
+
+      - name: Smoke-test Windows startup
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $executable = Resolve-Path "client/build/windows/x64/runner/Release/yappa.exe"
+          $process = Start-Process -FilePath $executable -PassThru
+          Start-Sleep -Seconds 8
+          if ($process.HasExited) {
+            throw "Yappa exited during the Windows runtime smoke test (exit code $($process.ExitCode))"
+          }
+          Stop-Process -Id $process.Id -Force
+          Wait-Process -Id $process.Id -ErrorAction SilentlyContinue
 
       - name: Package Windows ZIP
         shell: pwsh
@@ -119,7 +306,7 @@ jobs:
           Compress-Archive -Path client/build/windows/x64/runner/Release/* -DestinationPath client/dist/Yappa-${{ steps.version.outputs.safe_version }}-windows-x64.zip
 
       - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: Yappa-windows-x64
           path: client/dist/Yappa-${{ steps.version.outputs.safe_version }}-windows-x64.zip
@@ -130,7 +317,9 @@ jobs:
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Set version
         id: version
@@ -141,21 +330,117 @@ jobs:
           echo "safe_version=$SAFE_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Setup Flutter
-        uses: subosito/flutter-action@v2
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           channel: stable
+          flutter-version: 3.44.7
 
       - name: Install client dependencies
         shell: bash
         run: |
+          set -euo pipefail
           cd client
-          flutter pub get
+          flutter pub get --enforce-lockfile
+
+      - name: Validate client
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked --manifest-path client/native/yappa_mls/Cargo.toml
+          cargo test --locked --manifest-path client/native/yappa_mls/Cargo.toml
+          client/native/yappa_mls/scripts/test_openmls_vectors.sh
+          cd client
+          flutter analyze
+          flutter test
 
       - name: Build macOS
         shell: bash
         run: |
-          cd client
-          flutter build macos --release
+          set -euo pipefail
+          release_source="/tmp/yappa-macos-release-source-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          rm -rf "$release_source"
+          mkdir -p "$release_source"
+          cp -a client "$release_source/client"
+          rm -rf \
+            "$release_source/client/.dart_tool" \
+            "$release_source/client/build"
+
+          cd "$release_source/client"
+          flutter pub get --enforce-lockfile
+          flutter build macos --release \
+            --split-debug-info=build/macos-symbols
+
+          cd "$GITHUB_WORKSPACE"
+          rm -rf \
+            client/build/macos/Build/Products/Release \
+            client/build/macos-symbols
+          mkdir -p client/build/macos/Build/Products
+          cp -a \
+            "$release_source/client/build/macos/Build/Products/Release" \
+            client/build/macos/Build/Products/Release
+          cp -a \
+            "$release_source/client/build/macos-symbols" \
+            client/build/macos-symbols
+          rm -rf "$release_source"
+
+      - name: Verify macOS runtime bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="client/build/macos/Build/Products/Release/Yappa.app"
+          executable="$app/Contents/MacOS/Yappa"
+          mls="$app/Contents/Frameworks/libyappa_mls.dylib"
+
+          test -x "$executable"
+          test -f "$mls"
+          otool -L "$mls"
+          codesign --verify --deep --strict "$app"
+
+          while IFS= read -r -d '' binary; do
+            if otool -l "$binary" 2>/dev/null \
+              | grep -A2 LC_RPATH \
+              | grep -E 'path (/Users/|/home/|/tmp/)'; then
+              echo "Absolute build path found in macOS runtime search metadata: $binary" >&2
+              exit 1
+            fi
+          done < <(find "$app" -type f -perm -111 -print0)
+
+          entitlements="$RUNNER_TEMP/yappa-entitlements.plist"
+          codesign -d --entitlements :- "$app" > "$entitlements"
+          for entitlement in \
+            com.apple.security.app-sandbox \
+            com.apple.security.network.client \
+            com.apple.security.device.audio-input \
+            com.apple.security.device.camera; do
+            test "$(plutil -extract "$entitlement" raw "$entitlements")" = "true"
+          done
+
+          if grep -R -a -E -l \
+            '/Users/|/home/|sslip\.io|codex-yappa|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY' \
+            "$app"; then
+            echo "Forbidden builder path, secret, or retired transport marker in macOS bundle." >&2
+            exit 1
+          fi
+
+      - name: Smoke-test macOS startup
+        shell: bash
+        run: |
+          set -euo pipefail
+          executable="client/build/macos/Build/Products/Release/Yappa.app/Contents/MacOS/Yappa"
+          "$executable" >"$RUNNER_TEMP/yappa-macos-smoke.log" 2>&1 &
+          pid=$!
+          sleep 8
+          if ! kill -0 "$pid" 2>/dev/null; then
+            cat "$RUNNER_TEMP/yappa-macos-smoke.log" >&2
+            wait "$pid"
+            exit 1
+          fi
+          kill -TERM "$pid"
+          wait "$pid" || status=$?
+          if [ "${status:-0}" -ne 0 ] && [ "${status:-0}" -ne 143 ]; then
+            cat "$RUNNER_TEMP/yappa-macos-smoke.log" >&2
+            exit 1
+          fi
 
       - name: Package macOS ZIP
         shell: bash
@@ -165,7 +450,7 @@ jobs:
           zip -r ../../../../../dist/Yappa-${{ steps.version.outputs.safe_version }}-macos.zip Yappa.app
 
       - name: Upload macOS artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: Yappa-macos
           path: client/dist/Yappa-${{ steps.version.outputs.safe_version }}-macos.zip

@@ -1,8 +1,12 @@
 require('dotenv').config();
 
 const crypto = require('crypto');
+const dgram = require('dgram');
+const dns = require('dns');
 const fs = require('fs');
 const http = require('http');
+const https = require('https');
+const net = require('net');
 const path = require('path');
 const express = require('express');
 const cors = require('cors');
@@ -10,6 +14,7 @@ const bcrypt = require('bcryptjs');
 const multer = require('multer');
 const mime = require('mime-types');
 const { Server } = require('socket.io');
+const { createPinnedLookup } = require('./safe-preview-lookup');
 const nacl = require('tweetnacl');
 const { AccessToken } = require('livekit-server-sdk');
 const {
@@ -35,15 +40,30 @@ const {
   nowIso,
   randomId,
   revokeBan,
+  revokeSession,
+  sessionTokenStorageValue,
   touchSession,
   touchUserLogin,
   touchUserYuid,
   updateServerSettings,
   updateUserProfile,
 } = require('./db');
-const { buildAuthMiddleware, getSessionWithUser } = require('./auth');
+const {
+  buildAuthMiddleware,
+  getSessionWithUser,
+  nextIdleExpiry,
+} = require('./auth');
+const {
+  integerEnvironmentValue,
+  optionalSecretEnvironmentValue,
+} = require('./config');
 
-const PORT = Number(process.env.PORT || 4100);
+const PORT = integerEnvironmentValue('PORT', 4100, { max: 65535 });
+const LISTEN_HOST = String(process.env.LISTEN_HOST || '127.0.0.1').trim();
+if (!net.isIP(LISTEN_HOST)) {
+  console.error('[server] startup refused (code=invalid_configuration).');
+  process.exit(1);
+}
 const DEFAULT_SERVER_NAME = process.env.SERVER_NAME || 'Night Wire';
 const DEFAULT_SERVER_DESCRIPTION =
 process.env.SERVER_DESCRIPTION || 'quiet grid for testing strange ideas';
@@ -51,31 +71,480 @@ const DB_PATH =
 process.env.DB_PATH || path.join(process.cwd(), 'data', 'newchat.db');
 const DATA_ROOT =
 process.env.DATA_ROOT || path.join(path.dirname(DB_PATH), 'servers');
-const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
+const CORS_ORIGIN = process.env.CORS_ORIGIN ?? '';
+const TRUST_PROXY = String(process.env.TRUST_PROXY || '').toLowerCase() === 'true';
+const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT || '256kb';
+const AUTH_RATE_LIMIT_WINDOW_MS = integerEnvironmentValue(
+  'AUTH_RATE_LIMIT_WINDOW_MS',
+  15 * 60 * 1000,
+);
+const AUTH_RATE_LIMIT_MAX = integerEnvironmentValue('AUTH_RATE_LIMIT_MAX', 10);
+const AUTH_BACKOFF_FREE_FAILURES = integerEnvironmentValue(
+  'AUTH_BACKOFF_FREE_FAILURES',
+  3,
+  { max: 20 },
+);
+const AUTH_BACKOFF_BASE_MS = integerEnvironmentValue(
+  'AUTH_BACKOFF_BASE_MS',
+  1000,
+  { min: 50, max: 60 * 1000 },
+);
+const AUTH_BACKOFF_MAX_MS = integerEnvironmentValue(
+  'AUTH_BACKOFF_MAX_MS',
+  30000,
+  { min: AUTH_BACKOFF_BASE_MS, max: 15 * 60 * 1000 },
+);
+const AUTH_BACKOFF_RESET_MS = integerEnvironmentValue(
+  'AUTH_BACKOFF_RESET_MS',
+  30 * 60 * 1000,
+  { min: AUTH_BACKOFF_MAX_MS, max: 24 * 60 * 60 * 1000 },
+);
+const BCRYPT_COST = integerEnvironmentValue('BCRYPT_COST', 12, {
+  min: 10,
+  max: 15,
+});
+const NEW_ACCOUNT_PASSWORD_MIN_LENGTH = integerEnvironmentValue(
+  'NEW_ACCOUNT_PASSWORD_MIN_LENGTH',
+  10,
+  { min: 10, max: 64 },
+);
+const CHALLENGE_RATE_LIMIT_WINDOW_MS = integerEnvironmentValue(
+  'CHALLENGE_RATE_LIMIT_WINDOW_MS',
+  60 * 1000,
+);
+const CHALLENGE_RATE_LIMIT_MAX = integerEnvironmentValue(
+  'CHALLENGE_RATE_LIMIT_MAX',
+  30,
+);
+const CONTENT_MUTATION_RATE_LIMIT_WINDOW_MS = integerEnvironmentValue(
+  'CONTENT_MUTATION_RATE_LIMIT_WINDOW_MS',
+  60 * 1000,
+);
+const CONTENT_MUTATION_RATE_LIMIT_MAX = integerEnvironmentValue(
+  'CONTENT_MUTATION_RATE_LIMIT_MAX',
+  120,
+);
+const EXPENSIVE_OPERATION_RATE_LIMIT_WINDOW_MS = integerEnvironmentValue(
+  'EXPENSIVE_OPERATION_RATE_LIMIT_WINDOW_MS',
+  60 * 1000,
+);
+const EXPENSIVE_OPERATION_RATE_LIMIT_MAX = integerEnvironmentValue(
+  'EXPENSIVE_OPERATION_RATE_LIMIT_MAX',
+  30,
+);
+const UPLOAD_RATE_LIMIT_WINDOW_MS = integerEnvironmentValue(
+  'UPLOAD_RATE_LIMIT_WINDOW_MS',
+  10 * 60 * 1000,
+);
+const UPLOAD_RATE_LIMIT_MAX = integerEnvironmentValue(
+  'UPLOAD_RATE_LIMIT_MAX',
+  20,
+);
+const ACCOUNT_MUTATION_RATE_LIMIT_WINDOW_MS = integerEnvironmentValue(
+  'ACCOUNT_MUTATION_RATE_LIMIT_WINDOW_MS',
+  60 * 1000,
+);
+const ACCOUNT_MUTATION_RATE_LIMIT_MAX = integerEnvironmentValue(
+  'ACCOUNT_MUTATION_RATE_LIMIT_MAX',
+  30,
+);
+const ATTACHMENT_DOWNLOAD_RATE_LIMIT_WINDOW_MS = integerEnvironmentValue(
+  'ATTACHMENT_DOWNLOAD_RATE_LIMIT_WINDOW_MS',
+  60 * 1000,
+);
+const ATTACHMENT_DOWNLOAD_RATE_LIMIT_MAX = integerEnvironmentValue(
+  'ATTACHMENT_DOWNLOAD_RATE_LIMIT_MAX',
+  300,
+);
+const SOCKET_CONTROL_RATE_LIMIT_WINDOW_MS = integerEnvironmentValue(
+  'SOCKET_CONTROL_RATE_LIMIT_WINDOW_MS',
+  60 * 1000,
+);
+const SOCKET_CONTROL_RATE_LIMIT_MAX = integerEnvironmentValue(
+  'SOCKET_CONTROL_RATE_LIMIT_MAX',
+  240,
+);
+const SOCKET_SIGNAL_RATE_LIMIT_WINDOW_MS = integerEnvironmentValue(
+  'SOCKET_SIGNAL_RATE_LIMIT_WINDOW_MS',
+  60 * 1000,
+);
+const SOCKET_SIGNAL_RATE_LIMIT_MAX = integerEnvironmentValue(
+  'SOCKET_SIGNAL_RATE_LIMIT_MAX',
+  1200,
+);
+const MEDIA_ENVELOPE_RATE_LIMIT_WINDOW_MS = integerEnvironmentValue(
+  'MEDIA_ENVELOPE_RATE_LIMIT_WINDOW_MS',
+  60 * 1000,
+);
+const MEDIA_ENVELOPE_RATE_LIMIT_MAX = integerEnvironmentValue(
+  'MEDIA_ENVELOPE_RATE_LIMIT_MAX',
+  240,
+);
+const SOCKET_CONNECTION_RATE_LIMIT_WINDOW_MS = integerEnvironmentValue(
+  'SOCKET_CONNECTION_RATE_LIMIT_WINDOW_MS',
+  60 * 1000,
+);
+const SOCKET_CONNECTION_RATE_LIMIT_MAX = integerEnvironmentValue(
+  'SOCKET_CONNECTION_RATE_LIMIT_MAX',
+  120,
+);
+const ATTACHMENT_URL_TTL_SECONDS = integerEnvironmentValue(
+  'ATTACHMENT_URL_TTL_SECONDS',
+  15 * 60,
+  { min: 60, max: 3600 },
+);
+const configuredAttachmentSigningSecret = optionalSecretEnvironmentValue(
+  'ATTACHMENT_SIGNING_SECRET',
+);
+const ATTACHMENT_SIGNING_SECRET =
+  configuredAttachmentSigningSecret || crypto.randomBytes(32).toString('hex');
 const LIVEKIT_URL = (process.env.LIVEKIT_URL || '').trim();
 const LIVEKIT_PUBLIC_HOST = (process.env.LIVEKIT_PUBLIC_HOST || '').trim();
 const LIVEKIT_PUBLIC_SCHEME = (process.env.LIVEKIT_PUBLIC_SCHEME || '').trim();
-const LIVEKIT_SIGNAL_PORT = Number(process.env.LIVEKIT_SIGNAL_PORT || 7880);
+const LIVEKIT_SIGNAL_PORT = integerEnvironmentValue(
+  'LIVEKIT_SIGNAL_PORT',
+  7880,
+  { max: 65535 },
+);
 const LIVEKIT_API_KEY = (process.env.LIVEKIT_API_KEY || '').trim();
-const LIVEKIT_API_SECRET = (process.env.LIVEKIT_API_SECRET || '').trim();
+const LIVEKIT_API_SECRET = optionalSecretEnvironmentValue(
+  'LIVEKIT_API_SECRET',
+);
 const LIVEKIT_TOKEN_TTL = process.env.LIVEKIT_TOKEN_TTL || '12h';
-const YUID_CHALLENGE_TTL_MS = Number(process.env.YUID_CHALLENGE_TTL_MS || 5 * 60 * 1000);
+const LAN_DISCOVERY_ENABLED =
+  String(process.env.LAN_DISCOVERY_ENABLED || 'true').toLowerCase() === 'true';
+const LAN_DISCOVERY_PORT = 41200;
+const LAN_DISCOVERY_TLS_PORT = integerEnvironmentValue(
+  'YAPPA_HTTPS_PORT',
+  443,
+  { max: 65535 },
+);
+const YAPPA_ADVERTISED_ADDRESS = String(
+  process.env.YAPPA_ADVERTISED_ADDRESS || '',
+).trim();
+const YUID_CHALLENGE_TTL_MS = integerEnvironmentValue(
+  'YUID_CHALLENGE_TTL_MS',
+  5 * 60 * 1000,
+);
+const SESSION_ABSOLUTE_TTL_MS = integerEnvironmentValue(
+  'SESSION_ABSOLUTE_TTL_MS',
+  30 * 24 * 60 * 60 * 1000,
+  { min: 24 * 60 * 60 * 1000, max: 365 * 24 * 60 * 60 * 1000 },
+);
 
-const db = createDb(DB_PATH, {
-  serverName: DEFAULT_SERVER_NAME,
-  serverDescription: DEFAULT_SERVER_DESCRIPTION,
-});
+let db;
+try {
+  db = createDb(DB_PATH, {
+    serverName: DEFAULT_SERVER_NAME,
+    serverDescription: DEFAULT_SERVER_DESCRIPTION,
+  });
+} catch (error) {
+  const code = String(error?.code || error?.name || 'unknown')
+    .replace(/[^a-zA-Z0-9_.-]/g, '')
+    .slice(0, 80);
+  console.error(
+    `[server] database initialization refused (code=${code || 'unknown'}).`,
+  );
+  process.exit(1);
+}
 const app = express();
+app.disable('x-powered-by');
+app.set('trust proxy', TRUST_PROXY);
 const httpServer = http.createServer(app);
+const configuredCorsOrigins = CORS_ORIGIN.split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const allowAnyCorsOrigin = configuredCorsOrigins.includes('*');
+
+function corsOriginAllowed(origin, callback) {
+  if (!origin || allowAnyCorsOrigin || configuredCorsOrigins.includes(origin)) {
+    callback(null, true);
+    return;
+  }
+
+  const error = new Error('Origin is not allowed by this Yappa node.');
+  error.code = 'cors_origin_denied';
+  callback(error);
+}
+
 const io = new Server(httpServer, {
   cors: {
-    origin: CORS_ORIGIN === '*' ? true : CORS_ORIGIN,
+    origin: corsOriginAllowed,
     credentials: false,
   },
 });
 
-app.use(cors({ origin: CORS_ORIGIN === '*' ? true : CORS_ORIGIN }));
-app.use(express.json({ limit: '2mb' }));
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'");
+  if (req.secure) {
+    res.setHeader(
+      'Strict-Transport-Security',
+      'max-age=31536000; includeSubDomains',
+    );
+  }
+  next();
+});
+app.use(cors({ origin: corsOriginAllowed }));
+app.use(express.json({ limit: JSON_BODY_LIMIT }));
+
+function createRateLimiter({ windowMs, max, code, message, keyFor }) {
+  const attempts = new Map();
+
+  return (req, res, next) => {
+    const now = Date.now();
+    const key =
+      keyFor?.(req) || req.ip || req.socket.remoteAddress || 'unknown';
+    const current = attempts.get(key);
+    const entry =
+      !current || current.resetAt <= now
+        ? { count: 0, resetAt: now + windowMs }
+        : current;
+
+    entry.count += 1;
+    attempts.set(key, entry);
+
+    const remaining = Math.max(0, max - entry.count);
+    res.setHeader('RateLimit-Limit', String(max));
+    res.setHeader('RateLimit-Remaining', String(remaining));
+    res.setHeader(
+      'RateLimit-Reset',
+      String(Math.max(0, Math.ceil((entry.resetAt - now) / 1000))),
+    );
+
+    if (entry.count > max) {
+      const retryAfter = Math.max(
+        1,
+        Math.ceil((entry.resetAt - now) / 1000),
+      );
+      res.setHeader('Retry-After', String(retryAfter));
+      return apiError(res, 429, code, message, { retryAfter });
+    }
+
+    if (attempts.size > 10000) {
+      for (const [storedKey, storedEntry] of attempts.entries()) {
+        if (storedEntry.resetAt <= now) {
+          attempts.delete(storedKey);
+        }
+      }
+    }
+
+    return next();
+  };
+}
+
+function safeOperationalErrorCode(error) {
+  const value = String(error?.code || error?.name || 'unknown');
+  return value.replace(/[^a-zA-Z0-9_.-]/g, '').slice(0, 80) || 'unknown';
+}
+
+function logOperationalFailure(event, error) {
+  console.error(
+    `[server] ${event} failed (code=${safeOperationalErrorCode(error)}).`,
+  );
+}
+
+const authRateLimit = createRateLimiter({
+  windowMs: AUTH_RATE_LIMIT_WINDOW_MS,
+  max: AUTH_RATE_LIMIT_MAX,
+  code: 'auth_rate_limited',
+  message: 'Too many sign-in attempts. Wait before trying again.',
+});
+const challengeRateLimit = createRateLimiter({
+  windowMs: CHALLENGE_RATE_LIMIT_WINDOW_MS,
+  max: CHALLENGE_RATE_LIMIT_MAX,
+  code: 'challenge_rate_limited',
+  message: 'Too many identity challenge requests. Try again shortly.',
+});
+const authenticatedRateLimitKey = (req) =>
+  req.auth?.user?.id != null
+    ? `user:${req.auth.user.id}`
+    : `ip:${req.ip || req.socket.remoteAddress || 'unknown'}`;
+const contentMutationRateLimit = createRateLimiter({
+  windowMs: CONTENT_MUTATION_RATE_LIMIT_WINDOW_MS,
+  max: CONTENT_MUTATION_RATE_LIMIT_MAX,
+  code: 'content_rate_limited',
+  message: 'Too many content changes. Wait briefly before trying again.',
+  keyFor: authenticatedRateLimitKey,
+});
+const expensiveOperationRateLimit = createRateLimiter({
+  windowMs: EXPENSIVE_OPERATION_RATE_LIMIT_WINDOW_MS,
+  max: EXPENSIVE_OPERATION_RATE_LIMIT_MAX,
+  code: 'operation_rate_limited',
+  message: 'Too many resource-intensive requests. Try again shortly.',
+  keyFor: authenticatedRateLimitKey,
+});
+const uploadRateLimit = createRateLimiter({
+  windowMs: UPLOAD_RATE_LIMIT_WINDOW_MS,
+  max: UPLOAD_RATE_LIMIT_MAX,
+  code: 'upload_rate_limited',
+  message: 'Too many attachment uploads. Try again later.',
+  keyFor: authenticatedRateLimitKey,
+});
+const accountMutationRateLimit = createRateLimiter({
+  windowMs: ACCOUNT_MUTATION_RATE_LIMIT_WINDOW_MS,
+  max: ACCOUNT_MUTATION_RATE_LIMIT_MAX,
+  code: 'account_rate_limited',
+  message: 'Too many account or device changes. Try again shortly.',
+  keyFor: authenticatedRateLimitKey,
+});
+const attachmentDownloadRateLimit = createRateLimiter({
+  windowMs: ATTACHMENT_DOWNLOAD_RATE_LIMIT_WINDOW_MS,
+  max: ATTACHMENT_DOWNLOAD_RATE_LIMIT_MAX,
+  code: 'attachment_download_rate_limited',
+  message: 'Too many attachment downloads. Try again shortly.',
+});
+
+const socketEventAttempts = new Map();
+const socketConnectionAttempts = new Map();
+
+function allowSocketConnection(socket) {
+  const now = Date.now();
+  const address =
+    socket.handshake.address ||
+    socket.request?.socket?.remoteAddress ||
+    'unknown';
+  const current = socketConnectionAttempts.get(address);
+  const entry =
+    !current || current.resetAt <= now
+      ? {
+          count: 0,
+          resetAt: now + SOCKET_CONNECTION_RATE_LIMIT_WINDOW_MS,
+        }
+      : current;
+  entry.count += 1;
+  socketConnectionAttempts.set(address, entry);
+  if (entry.count <= SOCKET_CONNECTION_RATE_LIMIT_MAX) return true;
+
+  if (socketConnectionAttempts.size > 10000) {
+    for (const [storedKey, storedEntry] of socketConnectionAttempts.entries()) {
+      if (storedEntry.resetAt <= now) {
+        socketConnectionAttempts.delete(storedKey);
+      }
+    }
+  }
+  return false;
+}
+
+function allowSocketEvent(socket, category, { windowMs, max }, ack) {
+  const now = Date.now();
+  const key = `${socket.user?.id ?? socket.id}:${category}`;
+  const current = socketEventAttempts.get(key);
+  const entry =
+    !current || current.resetAt <= now
+      ? { count: 0, resetAt: now + windowMs }
+      : current;
+  entry.count += 1;
+  socketEventAttempts.set(key, entry);
+
+  if (entry.count <= max) {
+    return true;
+  }
+
+  const retryAfter = Math.max(
+    1,
+    Math.ceil((entry.resetAt - now) / 1000),
+  );
+  ack?.({
+    ok: false,
+    error: {
+      code: 'socket_rate_limited',
+      message: 'Too many realtime requests. Try again shortly.',
+      retryAfter,
+    },
+  });
+
+  if (socketEventAttempts.size > 10000) {
+    for (const [storedKey, storedEntry] of socketEventAttempts.entries()) {
+      if (storedEntry.resetAt <= now) {
+        socketEventAttempts.delete(storedKey);
+      }
+    }
+  }
+  return false;
+}
+
+const socketControlLimit = {
+  windowMs: SOCKET_CONTROL_RATE_LIMIT_WINDOW_MS,
+  max: SOCKET_CONTROL_RATE_LIMIT_MAX,
+};
+const socketSignalLimit = {
+  windowMs: SOCKET_SIGNAL_RATE_LIMIT_WINDOW_MS,
+  max: SOCKET_SIGNAL_RATE_LIMIT_MAX,
+};
+const mediaEnvelopeLimit = {
+  windowMs: MEDIA_ENVELOPE_RATE_LIMIT_WINDOW_MS,
+  max: MEDIA_ENVELOPE_RATE_LIMIT_MAX,
+};
+
+const authFailuresByUserId = new Map();
+
+function getAuthBackoff(userId) {
+  const key = Number(userId);
+  const now = Date.now();
+  const entry = authFailuresByUserId.get(key);
+  if (!entry) return null;
+  if (entry.lastFailureAt + AUTH_BACKOFF_RESET_MS <= now) {
+    authFailuresByUserId.delete(key);
+    return null;
+  }
+  if (entry.blockedUntil <= now) return null;
+  return {
+    retryAfter: Math.max(1, Math.ceil((entry.blockedUntil - now) / 1000)),
+  };
+}
+
+function recordAuthFailure(userId) {
+  const key = Number(userId);
+  const now = Date.now();
+  const existing = authFailuresByUserId.get(key);
+  const failures =
+    !existing || existing.lastFailureAt + AUTH_BACKOFF_RESET_MS <= now
+      ? 1
+      : existing.failures + 1;
+  const exponent = Math.max(0, failures - AUTH_BACKOFF_FREE_FAILURES);
+  const delayMs =
+    exponent === 0
+      ? 0
+      : Math.min(AUTH_BACKOFF_MAX_MS, AUTH_BACKOFF_BASE_MS * 2 ** (exponent - 1));
+  const entry = {
+    failures,
+    lastFailureAt: now,
+    blockedUntil: now + delayMs,
+  };
+  authFailuresByUserId.set(key, entry);
+
+  if (authFailuresByUserId.size > 10000) {
+    for (const [storedKey, storedEntry] of authFailuresByUserId.entries()) {
+      if (storedEntry.lastFailureAt + AUTH_BACKOFF_RESET_MS <= now) {
+        authFailuresByUserId.delete(storedKey);
+      }
+    }
+  }
+
+  return delayMs > 0
+    ? { retryAfter: Math.max(1, Math.ceil(delayMs / 1000)) }
+    : null;
+}
+
+function clearAuthFailures(userId) {
+  authFailuresByUserId.delete(Number(userId));
+}
+
+function authBackoffError(res, backoff) {
+  res.setHeader('Retry-After', String(backoff.retryAfter));
+  return apiError(
+    res,
+    429,
+    'auth_temporarily_locked',
+    'Too many incorrect password attempts. Wait before trying again.',
+    { retryAfter: backoff.retryAfter },
+  );
+}
 
 
 const linkPreviewCache = new Map();
@@ -222,10 +691,210 @@ function extractTitle(html) {
   return stripHtml(titleMatch[1]);
 }
 
+function extractFirstUsefulParagraph(html) {
+  const withoutNonContent = String(html || '').replace(
+    /<(?:script|style|noscript|svg|nav|header|footer)\b[\s\S]*?<\/(?:script|style|noscript|svg|nav|header|footer)>/gi,
+    ' ',
+  );
+  const paragraphPattern = /<p\b[^>]*>([\s\S]*?)<\/p>/gi;
+  let match;
+  while ((match = paragraphPattern.exec(withoutNonContent)) !== null) {
+    const paragraph = stripHtml(match[1]);
+    if (paragraph.length >= 40) {
+      return paragraph;
+    }
+  }
+  return null;
+}
+
 function truncateText(value, maxLength) {
   const text = String(value || '').trim();
   if (!text) return '';
   return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
+}
+
+function recognizedVideoEmbed(url) {
+  const parsed = new URL(url);
+  const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+
+  if (host === 'youtu.be') {
+    const videoId = parsed.pathname.split('/').filter(Boolean)[0] || '';
+    if (/^[a-zA-Z0-9_-]{6,20}$/.test(videoId)) {
+      return {
+        mediaUrl: `https://www.youtube.com/embed/${videoId}?feature=oembed&autoplay=1`,
+        imageUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+        mediaAspectRatio: 16 / 9,
+      };
+    }
+  }
+  if (host === 'youtube.com' || host === 'm.youtube.com') {
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    const videoId =
+      parsed.pathname === '/watch'
+        ? parsed.searchParams.get('v') || ''
+        : ['shorts', 'embed', 'live'].includes(parts[0])
+          ? parts[1] || ''
+          : '';
+    if (/^[a-zA-Z0-9_-]{6,20}$/.test(videoId)) {
+      return {
+        mediaUrl: `https://www.youtube.com/embed/${videoId}?feature=oembed&autoplay=1`,
+        imageUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+        mediaAspectRatio: 16 / 9,
+      };
+    }
+  }
+  if (host === 'vimeo.com' || host === 'player.vimeo.com') {
+    const videoId = parsed.pathname.split('/').filter(Boolean).find((part) =>
+      /^\d+$/.test(part),
+    );
+    if (videoId) {
+      return {
+        mediaUrl: `https://player.vimeo.com/video/${videoId}?autoplay=1`,
+        imageUrl: null,
+        mediaAspectRatio: 16 / 9,
+      };
+    }
+  }
+  if (host === 'tiktok.com' || host === 'm.tiktok.com') {
+    const match = /\/video\/(\d+)/.exec(parsed.pathname);
+    if (match) {
+      return {
+        mediaUrl: `https://www.tiktok.com/player/v1/${match[1]}?autoplay=1`,
+        imageUrl: null,
+        mediaAspectRatio: 9 / 16,
+      };
+    }
+  }
+  return null;
+}
+
+function isNonPublicPreviewAddress(address) {
+  const normalized = String(address || '').toLowerCase();
+  const family = net.isIP(normalized);
+  if (family === 4) {
+    const bytes = normalized.split('.').map(Number);
+    return (
+      bytes[0] === 0 ||
+      bytes[0] === 10 ||
+      (bytes[0] === 100 && bytes[1] >= 64 && bytes[1] <= 127) ||
+      bytes[0] === 127 ||
+      (bytes[0] === 169 && bytes[1] === 254) ||
+      (bytes[0] === 172 && bytes[1] >= 16 && bytes[1] <= 31) ||
+      (bytes[0] === 192 &&
+        ((bytes[1] === 0 && (bytes[2] === 0 || bytes[2] === 2)) ||
+          bytes[1] === 168)) ||
+      (bytes[0] === 198 &&
+        (bytes[1] === 18 || bytes[1] === 19 || bytes[1] === 51)) ||
+      (bytes[0] === 203 && bytes[1] === 0 && bytes[2] === 113) ||
+      bytes[0] >= 224
+    );
+  }
+  if (family === 6) {
+    if (normalized.startsWith('::ffff:')) {
+      return isNonPublicPreviewAddress(normalized.slice('::ffff:'.length));
+    }
+    return (
+      normalized === '::' ||
+      normalized === '::1' ||
+      normalized.startsWith('fc') ||
+      normalized.startsWith('fd') ||
+      /^fe[89ab]/.test(normalized) ||
+      normalized.startsWith('ff')
+    );
+  }
+  return true;
+}
+
+async function resolvePublicPreviewTarget(url) {
+  const parsed = new URL(url);
+  if (parsed.username || parsed.password) {
+    throw new Error('Preview URLs cannot include credentials.');
+  }
+
+  const literalFamily = net.isIP(parsed.hostname);
+  const addresses = literalFamily
+    ? [{ address: parsed.hostname, family: literalFamily }]
+    : await dns.promises.lookup(parsed.hostname, {
+        all: true,
+        verbatim: true,
+      });
+  if (
+    addresses.length === 0 ||
+    addresses.some((entry) => isNonPublicPreviewAddress(entry.address))
+  ) {
+    throw new Error('Preview target is not a public internet address.');
+  }
+  return { parsed, target: addresses[0] };
+}
+
+async function requestPreviewResource(url, redirectCount = 0) {
+  if (redirectCount > 5) {
+    throw new Error('Preview redirected too many times.');
+  }
+  const { parsed, target } = await resolvePublicPreviewTarget(url);
+  const transport = parsed.protocol === 'https:' ? https : http;
+
+  const response = await new Promise((resolve, reject) => {
+    const request = transport.request(
+      parsed,
+      {
+        headers: {
+          'user-agent':
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 ' +
+            'Chrome/124 Safari/537.36 YappaLinkPreview/1.0',
+          accept:
+            'text/html,application/xhtml+xml,image/avif,image/webp,' +
+            'image/apng,*/*;q=0.8',
+          'accept-language': 'en-US,en;q=0.9',
+        },
+        servername: parsed.hostname,
+        lookup: createPinnedLookup(target),
+      },
+      (incoming) => resolve(incoming),
+    );
+    request.setTimeout(LINK_PREVIEW_TIMEOUT_MS, () => {
+      request.destroy(new Error('Preview request timed out.'));
+    });
+    request.on('error', reject);
+    request.end();
+  });
+
+  const statusCode = Number(response.statusCode || 0);
+  if (statusCode >= 300 && statusCode < 400 && response.headers.location) {
+    response.resume();
+    const redirectUrl = new URL(response.headers.location, parsed).toString();
+    return requestPreviewResource(redirectUrl, redirectCount + 1);
+  }
+  if (statusCode < 200 || statusCode >= 300) {
+    response.resume();
+    throw new Error(`Preview target returned HTTP ${statusCode}.`);
+  }
+
+  const contentType = String(response.headers['content-type'] || '').toLowerCase();
+  if (contentType.startsWith('image/')) {
+    response.destroy();
+    return {
+      finalUrl: parsed.toString(),
+      contentType,
+      body: '',
+    };
+  }
+
+  const chunks = [];
+  let receivedBytes = 0;
+  for await (const chunk of response) {
+    receivedBytes += chunk.length;
+    if (receivedBytes > 600000) {
+      response.destroy();
+      break;
+    }
+    chunks.push(chunk);
+  }
+  return {
+    finalUrl: parsed.toString(),
+    contentType,
+    body: Buffer.concat(chunks).toString('utf8'),
+  };
 }
 
 async function loadLinkPreview(url) {
@@ -234,99 +903,489 @@ async function loadLinkPreview(url) {
     return cached;
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), LINK_PREVIEW_TIMEOUT_MS);
+  const response = await requestPreviewResource(url);
+  const finalUrl = response.finalUrl || url;
+  const parsedUrl = new URL(finalUrl);
+  const contentType = response.contentType;
 
-  try {
-    const response = await fetch(url, {
-      redirect: 'follow',
-      signal: controller.signal,
-      headers: {
-        'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36 YappaLinkPreview/1.0',
-        'accept': 'text/html,application/xhtml+xml,image/avif,image/webp,image/apng,*/*;q=0.8',
-        'accept-language': 'en-US,en;q=0.9',
-      },
-    });
-
-    const finalUrl = response.url || url;
-    const parsedUrl = new URL(finalUrl);
-    const contentType = String(response.headers.get('content-type') || '').toLowerCase();
-
-    if (contentType.startsWith('image/')) {
-      const preview = {
-        url: finalUrl,
-        domain: parsedUrl.hostname,
-        siteName: parsedUrl.hostname,
-        title: path.basename(parsedUrl.pathname) || parsedUrl.hostname,
-        description: null,
-        imageUrl: finalUrl,
-        faviconUrl: null,
-      };
-      setCachedLinkPreview(url, preview);
-      return preview;
-    }
-
-    const rawHtml = await response.text();
-    const html = rawHtml.slice(0, 600000);
-
-    const title = truncateText(
-      extractMetaContent(html, ['og:title', 'twitter:title']) || extractTitle(html) || parsedUrl.hostname,
-      180,
-    );
-    const description = truncateText(
-      extractMetaContent(html, ['og:description', 'twitter:description', 'description']) || '',
-      280,
-    ) || null;
-    const siteName = truncateText(
-      extractMetaContent(html, ['og:site_name', 'application-name']) || parsedUrl.hostname,
-      80,
-    );
-
-    const imageCandidate =
-      extractMetaContent(html, ['og:image', 'og:image:url', 'og:image:secure_url', 'twitter:image', 'twitter:image:src', 'image']) ||
-      extractLinkHref(html, ['image_src']) ||
-      extractFirstImageSource(html);
-    const faviconCandidate =
-      extractLinkHref(html, ['icon']) ||
-      '/favicon.ico';
-
+  if (contentType.startsWith('image/')) {
     const preview = {
-      url: finalUrl,
-      domain: parsedUrl.hostname,
-      siteName,
-      title,
-      description,
-      imageUrl: resolveAbsoluteUrl(finalUrl, imageCandidate),
-      faviconUrl: resolveAbsoluteUrl(finalUrl, faviconCandidate),
+      url,
+      finalUrl,
+      hostname: parsedUrl.hostname,
+      siteName: parsedUrl.hostname,
+      title: path.basename(parsedUrl.pathname) || parsedUrl.hostname,
+      description: null,
+      imageUrl: finalUrl,
+      iconUrl: null,
+      mediaUrl: null,
+      mediaAspectRatio: null,
+      kind: 'image',
+      contentType,
     };
-
     setCachedLinkPreview(url, preview);
     return preview;
-  } finally {
-    clearTimeout(timeout);
   }
+
+  const html = response.body.slice(0, 600000);
+
+  const title = truncateText(
+    extractMetaContent(html, ['og:title', 'twitter:title']) ||
+      extractTitle(html) ||
+      parsedUrl.hostname,
+    180,
+  );
+  const description =
+    truncateText(
+      extractMetaContent(html, [
+        'og:description',
+        'twitter:description',
+        'description',
+      ]) ||
+        extractFirstUsefulParagraph(html) ||
+        '',
+      280,
+    ) || null;
+  const siteName = truncateText(
+    extractMetaContent(html, ['og:site_name', 'application-name']) ||
+      parsedUrl.hostname,
+    80,
+  );
+
+  const recognizedVideo = recognizedVideoEmbed(finalUrl);
+  const imageCandidate =
+    recognizedVideo?.imageUrl ||
+    extractMetaContent(html, [
+      'og:image',
+      'og:image:url',
+      'og:image:secure_url',
+      'twitter:image',
+      'twitter:image:src',
+      'image',
+    ]) ||
+    extractLinkHref(html, ['image_src']) ||
+    extractFirstImageSource(html);
+  const faviconCandidate = extractLinkHref(html, ['icon']) || '/favicon.ico';
+
+  const preview = {
+    url,
+    finalUrl,
+    hostname: parsedUrl.hostname,
+    siteName,
+    title,
+    description,
+    imageUrl: resolveAbsoluteUrl(finalUrl, imageCandidate),
+    iconUrl: resolveAbsoluteUrl(finalUrl, faviconCandidate),
+    mediaUrl: recognizedVideo?.mediaUrl || null,
+    mediaAspectRatio: recognizedVideo?.mediaAspectRatio || null,
+    kind: recognizedVideo ? 'video' : 'link',
+    contentType,
+  };
+
+  setCachedLinkPreview(url, preview);
+  return preview;
+}
+
+async function loadSafeLinkPreviewFallback(url) {
+  const { parsed } = await resolvePublicPreviewTarget(url);
+  const finalUrl = parsed.toString();
+  const video = recognizedVideoEmbed(finalUrl);
+  const preview = {
+    url,
+    finalUrl,
+    hostname: parsed.hostname,
+    siteName: parsed.hostname,
+    title: parsed.hostname,
+    description: null,
+    imageUrl: video?.imageUrl || null,
+    iconUrl: new URL('/favicon.ico', parsed).toString(),
+    mediaUrl: video?.mediaUrl || null,
+    mediaAspectRatio: video?.mediaAspectRatio || null,
+    kind: video ? 'video' : 'link',
+    contentType: '',
+  };
+  setCachedLinkPreview(url, preview);
+  return preview;
 }
 
 const authRequired = buildAuthMiddleware(db);
 const socketPresence = new Map();
 const onlineUsersById = new Map();
+const mediaRoomStates = new Map();
 const yuidChallenges = new Map();
 const serverId = getServerConfig(db).server_id;
 const serverRoot = path.join(DATA_ROOT, serverId);
 const attachmentsRoot = path.join(serverRoot, 'attachments');
+const encryptedAttachmentsRoot = path.join(
+  serverRoot,
+  'encrypted-attachments',
+);
 const sharedStorageRoot = path.join(serverRoot, 'storage', 'root');
 const brandingRoot = path.join(serverRoot, 'branding');
 const brandingIconRoot = path.join(brandingRoot, 'icon');
 const brandingBannerRoot = path.join(brandingRoot, 'banner');
 
 ensureDir(attachmentsRoot);
+ensureDir(encryptedAttachmentsRoot);
 ensureDir(sharedStorageRoot);
 ensureDir(brandingIconRoot);
 ensureDir(brandingBannerRoot);
 
+const serverIdentityPath = path.join(serverRoot, 'server-identity.json');
+
+function loadOrCreateServerIdentity() {
+  if (fs.existsSync(serverIdentityPath)) {
+    const stored = JSON.parse(fs.readFileSync(serverIdentityPath, 'utf8'));
+    const privateKey = crypto.createPrivateKey(stored.privateKeyPem);
+    const publicKey = crypto.createPublicKey(privateKey);
+    const publicJwk = publicKey.export({ format: 'jwk' });
+    if (
+      stored.algorithm !== 'Ed25519' ||
+      typeof stored.publicKey !== 'string' ||
+      stored.publicKey !== publicJwk.x
+    ) {
+      throw new Error('Invalid persisted server identity.');
+    }
+    return {
+      algorithm: stored.algorithm,
+      publicKey: stored.publicKey,
+      privateKey,
+    };
+  }
+
+  const generated = crypto.generateKeyPairSync('ed25519');
+  const publicJwk = generated.publicKey.export({ format: 'jwk' });
+  const record = {
+    version: 1,
+    algorithm: 'Ed25519',
+    publicKey: publicJwk.x,
+    privateKeyPem: generated.privateKey.export({
+      format: 'pem',
+      type: 'pkcs8',
+    }),
+    createdAt: nowIso(),
+  };
+  const temporaryPath = `${serverIdentityPath}.${crypto.randomUUID()}.tmp`;
+  fs.writeFileSync(temporaryPath, `${JSON.stringify(record, null, 2)}\n`, {
+    mode: 0o600,
+    flag: 'wx',
+  });
+  fs.renameSync(temporaryPath, serverIdentityPath);
+  fs.chmodSync(serverIdentityPath, 0o600);
+  return {
+    algorithm: record.algorithm,
+    publicKey: record.publicKey,
+    privateKey: generated.privateKey,
+  };
+}
+
+const serverIdentity = loadOrCreateServerIdentity();
+
+function activeMediaRoomMembers(channelId) {
+  const byDeviceId = new Map();
+  for (const [socketId, presence] of socketPresence.entries()) {
+    if (
+      toId(presence.voiceChannelId) !== toId(channelId) ||
+      !presence.mediaDeviceId
+    ) {
+      continue;
+    }
+    const existing = byDeviceId.get(presence.mediaDeviceId);
+    if (!existing || socketId < existing.socketId) {
+      byDeviceId.set(presence.mediaDeviceId, {
+        socketId,
+        deviceId: presence.mediaDeviceId,
+        userId: toId(presence.userId),
+      });
+    }
+  }
+
+  const members = [];
+  for (const active of byDeviceId.values()) {
+    const row = db
+      .prepare(`
+        SELECT media_devices.*, users.username, users.yuid,
+               users.yuid_public_key
+        FROM media_devices
+        JOIN users ON users.id = media_devices.user_id
+        WHERE media_devices.id = ?
+          AND media_devices.revoked_at IS NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM bans
+            WHERE bans.revoked_at IS NULL
+              AND (
+                bans.user_id = users.id
+                OR (
+                  bans.yuid IS NOT NULL
+                  AND users.yuid IS NOT NULL
+                  AND bans.yuid = users.yuid
+                )
+              )
+          )
+      `)
+      .get(active.deviceId);
+    if (!row) continue;
+    members.push({
+      socketId: active.socketId,
+      device: {
+        ...serializeMediaDevice(row),
+        username: row.username,
+        yuid: row.yuid,
+        yuidPublicKey: row.yuid_public_key,
+      },
+    });
+  }
+  // Device ids are restricted to ASCII base64url characters. Compare their
+  // UTF-16/code-point values directly so every JavaScript and Dart client
+  // elects the same leader regardless of host locale.
+  members.sort((first, second) =>
+    first.device.id < second.device.id
+      ? -1
+      : first.device.id > second.device.id
+        ? 1
+        : 0,
+  );
+  return members;
+}
+
+function emitMediaRoomState(channelId, { forceRotation = false } = {}) {
+  if (channelId == null || channelId === '') return null;
+  const roomKey = toId(channelId);
+  const previous = mediaRoomStates.get(roomKey);
+  const members = activeMediaRoomMembers(roomKey);
+  if (members.length === 0) {
+    mediaRoomStates.delete(roomKey);
+    return null;
+  }
+
+  const deviceIds = members.map((member) => member.device.id);
+  const previousIds = previous?.deviceIds || [];
+  const membershipChanged =
+    previousIds.length !== deviceIds.length ||
+    previousIds.some((deviceId, index) => deviceId !== deviceIds[index]);
+  const removedMember = previousIds.some(
+    (deviceId) => !deviceIds.includes(deviceId),
+  );
+  const leaderDeviceId = deviceIds[0];
+  const leaderChanged =
+    previous != null && previous.leaderDeviceId !== leaderDeviceId;
+  const shouldRotate =
+    previous == null || forceRotation || removedMember || leaderChanged;
+  const state = {
+    channelId: roomKey,
+    epoch: previous == null
+      ? 1
+      : previous.epoch + (shouldRotate ? 1 : 0),
+    membershipSequence:
+      (previous?.membershipSequence || 0) + (membershipChanged ? 1 : 0),
+    leaderDeviceId,
+    deviceIds,
+    lastEnvelopeSequenceBySender:
+      shouldRotate
+        ? new Map()
+        : (previous?.lastEnvelopeSequenceBySender || new Map()),
+  };
+  mediaRoomStates.set(roomKey, state);
+
+  const payload = {
+    protocol: 'yappa-media-room-v1',
+    serverId,
+    channelId: roomKey,
+    epoch: state.epoch,
+    membershipSequence: state.membershipSequence,
+    leaderDeviceId,
+    devices: members.map((member) => member.device),
+  };
+  for (const member of members) {
+    io.to(member.socketId).emit('media:e2ee:state', payload);
+  }
+  return state;
+}
+
+function validateMediaEnvelopePayload(envelope) {
+  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) {
+    return false;
+  }
+  if (
+    envelope.protocol !== 'yappa-media-envelope-v1' ||
+    envelope.serverId !== serverId ||
+    !/^\d+$/.test(String(envelope.channelId || '')) ||
+    !Number.isSafeInteger(envelope.epoch) ||
+    envelope.epoch < 1 ||
+    !Number.isSafeInteger(envelope.messageSequence) ||
+    envelope.messageSequence < 1 ||
+    !/^device_[A-Za-z0-9_-]{24}$/.test(envelope.senderDeviceId || '') ||
+    !/^device_[A-Za-z0-9_-]{24}$/.test(envelope.recipientDeviceId || '')
+  ) {
+    return false;
+  }
+  const encodedLengths = {
+    ephemeralPublicKey: 43,
+    nonce: 16,
+    authenticationTag: 22,
+    signature: 86,
+  };
+  for (const [field, exactLength] of Object.entries(encodedLengths)) {
+    const value = envelope[field];
+    if (
+      typeof value !== 'string' ||
+      value.length !== exactLength ||
+      !/^[A-Za-z0-9_-]+$/.test(value)
+    ) {
+      return false;
+    }
+  }
+  return (
+    typeof envelope.ciphertext === 'string' &&
+    envelope.ciphertext.length === 59 &&
+    /^[A-Za-z0-9_-]+$/.test(envelope.ciphertext)
+  );
+}
+
+function encodeMediaEnvelopeFields(values) {
+  const fields = [];
+  for (const value of values) {
+    const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value, 'utf8');
+    const length = Buffer.allocUnsafe(4);
+    length.writeUInt32BE(bytes.length);
+    fields.push(length, bytes);
+  }
+  return Buffer.concat(fields);
+}
+
+function verifyRelayedMediaEnvelope(envelope, senderDevice) {
+  try {
+    const ephemeralPublicKey = Buffer.from(
+      envelope.ephemeralPublicKey,
+      'base64url',
+    );
+    const nonce = Buffer.from(envelope.nonce, 'base64url');
+    const ciphertext = Buffer.from(envelope.ciphertext, 'base64url');
+    const authenticationTag = Buffer.from(
+      envelope.authenticationTag,
+      'base64url',
+    );
+    const signature = Buffer.from(envelope.signature, 'base64url');
+    const yuidPublicKey = Buffer.from(
+      senderDevice.yuidPublicKey,
+      'base64url',
+    );
+    if (
+      ephemeralPublicKey.length !== 32 ||
+      nonce.length !== 12 ||
+      ciphertext.length !== 44 ||
+      authenticationTag.length !== 16 ||
+      signature.length !== 64 ||
+      yuidPublicKey.length !== 32
+    ) {
+      return false;
+    }
+    const associatedData = encodeMediaEnvelopeFields([
+      'yappa-media-envelope-v1',
+      envelope.serverId,
+      toId(envelope.channelId),
+      String(envelope.epoch),
+      envelope.senderDeviceId,
+      envelope.recipientDeviceId,
+      ephemeralPublicKey,
+    ]);
+    const signedPayload = encodeMediaEnvelopeFields([
+      associatedData,
+      nonce,
+      ciphertext,
+      authenticationTag,
+      String(envelope.messageSequence),
+    ]);
+    return nacl.sign.detached.verify(
+      new Uint8Array(signedPayload),
+      new Uint8Array(signature),
+      new Uint8Array(yuidPublicKey),
+    );
+  } catch {
+    return false;
+  }
+}
+
+function startLanDiscovery() {
+  if (!LAN_DISCOVERY_ENABLED) return;
+  const requestCounts = new Map();
+  const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+  socket.on('message', (message, remote) => {
+    if (message.length > 512) return;
+    let request;
+    try {
+      request = JSON.parse(message.toString('utf8'));
+    } catch {
+      return;
+    }
+    const nonce = String(request?.nonce || '').trim();
+    if (
+      request?.protocol !== 'yappa-lan-discovery-v1' ||
+      !/^[A-Za-z0-9_-]{22,128}$/.test(nonce)
+    ) {
+      return;
+    }
+
+    const now = Date.now();
+    const normalizedRemoteAddress = remote.address.replace(/^::ffff:/, '');
+    const relayClientAddress = String(
+      request?.relayClientAddress || '',
+    ).trim();
+    const trustedRelay =
+      (normalizedRemoteAddress === '127.0.0.1' ||
+        normalizedRemoteAddress === '::1') &&
+      /^(10\.|127\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(
+        relayClientAddress,
+      );
+    const rateAddress = trustedRelay
+      ? relayClientAddress
+      : normalizedRemoteAddress;
+    const previous = requestCounts.get(rateAddress);
+    const rate =
+      !previous || previous.resetAt <= now
+        ? { count: 0, resetAt: now + 60_000 }
+        : previous;
+    rate.count += 1;
+    requestCounts.set(rateAddress, rate);
+    if (rate.count > 30) return;
+    if (requestCounts.size > 1000) {
+      for (const [address, entry] of requestCounts.entries()) {
+        if (entry.resetAt <= now) requestCounts.delete(address);
+      }
+    }
+
+    const proof =
+      `yappa-lan-discovery-v1|${serverId}|${nonce}|` +
+      `${LAN_DISCOVERY_TLS_PORT}|${YAPPA_ADVERTISED_ADDRESS}`;
+    const response = Buffer.from(
+      JSON.stringify({
+        protocol: 'yappa-lan-discovery-v1',
+        serverId,
+        algorithm: serverIdentity.algorithm,
+        publicKey: serverIdentity.publicKey,
+        nonce,
+        tlsPort: LAN_DISCOVERY_TLS_PORT,
+        advertisedAddress: YAPPA_ADVERTISED_ADDRESS,
+        signature: crypto
+          .sign(null, Buffer.from(proof, 'utf8'), serverIdentity.privateKey)
+          .toString('base64url'),
+      }),
+      'utf8',
+    );
+    socket.send(response, remote.port, remote.address);
+  });
+  socket.on('error', (error) => {
+    logOperationalFailure('LAN discovery', error);
+  });
+  socket.bind(LAN_DISCOVERY_PORT, '0.0.0.0');
+}
+
+startLanDiscovery();
+
 app.use(
-  '/uploads',
-  express.static(DATA_ROOT, {
+  `/uploads/${serverId}/branding`,
+  express.static(brandingRoot, {
     fallthrough: false,
     maxAge: '1h',
   }),
@@ -334,6 +1393,18 @@ app.use(
 
 function toId(value) {
   return String(value);
+}
+
+function serializeSession(row, currentSessionId = null) {
+  return {
+    id: toId(row.id),
+    deviceName: row.device_name || 'Yappa client',
+    createdAt: row.created_at,
+    lastSeenAt: row.last_seen_at,
+    expiresAt: row.expires_at || null,
+    idleExpiresAt: row.idle_expires_at || null,
+    current: Number(row.id) === Number(currentSessionId),
+  };
 }
 
 function safeJsonParse(value, fallback) {
@@ -436,7 +1507,53 @@ function stripPortFromHost(host) {
   return value;
 }
 
+function isPrivateOrDevelopmentHost(input) {
+  const host = String(input || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^\[|\]$/g, '');
+  if (
+    host === 'localhost' ||
+    host.endsWith('.localhost') ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal') ||
+    !host.includes('.')
+  ) {
+    return true;
+  }
+
+  const family = net.isIP(host);
+  if (family === 4) {
+    const bytes = host.split('.').map(Number);
+    return (
+      bytes[0] === 10 ||
+      bytes[0] === 127 ||
+      (bytes[0] === 169 && bytes[1] === 254) ||
+      (bytes[0] === 172 && bytes[1] >= 16 && bytes[1] <= 31) ||
+      (bytes[0] === 192 && bytes[1] === 168)
+    );
+  }
+  if (family === 6) {
+    return (
+      host === '::1' ||
+      host.startsWith('fc') ||
+      host.startsWith('fd') ||
+      /^fe[89ab]/.test(host)
+    );
+  }
+  return false;
+}
+
 function resolveLiveKitWebSocketUrl(req) {
+  const rawHost = String(req.get('x-forwarded-host') || req.get('host') || '')
+    .split(',')[0]
+    .trim();
+  const host = stripPortFromHost(rawHost) || '127.0.0.1';
+
+  if (isPrivateOrDevelopmentHost(host)) {
+    return `ws://${host}:${LIVEKIT_SIGNAL_PORT}`;
+  }
+
   if (LIVEKIT_URL) {
     return LIVEKIT_URL;
   }
@@ -458,14 +1575,8 @@ function resolveLiveKitWebSocketUrl(req) {
     .toLowerCase();
   const scheme = forwardedProto === 'https' ? 'wss' : 'ws';
 
-  const rawHost = String(req.get('x-forwarded-host') || req.get('host') || '')
-    .split(',')[0]
-    .trim();
-  const host = stripPortFromHost(rawHost) || '127.0.0.1';
-
   return `${scheme}://${host}:${LIVEKIT_SIGNAL_PORT}`;
 }
-
 
 function cleanupExpiredYuidChallenges() {
   const now = Date.now();
@@ -607,6 +1718,289 @@ function verifyYuidProof({ usernameNormalized, yuidPublicKey, yuidSignature, yui
   };
 }
 
+function verifyMediaDeviceProof({
+  usernameNormalized,
+  yuidPublicKey,
+  yuidNonce,
+  mediaDeviceId,
+  mediaPublicKey,
+  mediaDeviceSignature,
+}) {
+  if (!/^device_[A-Za-z0-9_-]{24}$/.test(mediaDeviceId)) {
+    return {
+      ok: false,
+      status: 400,
+      code: 'invalid_media_device_id',
+      message: 'Invalid media device identifier.',
+    };
+  }
+  const yuidPublicKeyBytes = decodeBase64Url(yuidPublicKey);
+  const mediaPublicKeyBytes = decodeBase64Url(mediaPublicKey);
+  const signatureBytes = decodeBase64Url(mediaDeviceSignature);
+  if (!mediaPublicKeyBytes || mediaPublicKeyBytes.length !== 32) {
+    return {
+      ok: false,
+      status: 400,
+      code: 'invalid_media_public_key',
+      message: 'Invalid media device public key.',
+    };
+  }
+  if (
+    !yuidPublicKeyBytes ||
+    yuidPublicKeyBytes.length !== 32 ||
+    !signatureBytes ||
+    signatureBytes.length !== 64
+  ) {
+    return {
+      ok: false,
+      status: 400,
+      code: 'invalid_media_device_signature',
+      message: 'Invalid media device authorization signature.',
+    };
+  }
+  const message = Buffer.from(
+    `yappa-media-device-v1|${serverId}|${usernameNormalized}|${yuidNonce}|` +
+      `${Buffer.from(mediaPublicKeyBytes).toString('base64url')}|${mediaDeviceId}`,
+    'utf8',
+  );
+  const verified = nacl.sign.detached.verify(
+    new Uint8Array(message),
+    new Uint8Array(signatureBytes),
+    new Uint8Array(yuidPublicKeyBytes),
+  );
+  if (!verified) {
+    return {
+      ok: false,
+      status: 401,
+      code: 'invalid_media_device_signature',
+      message: 'This media device authorization could not be verified.',
+    };
+  }
+  return {
+    ok: true,
+    deviceId: mediaDeviceId,
+    publicKey: Buffer.from(mediaPublicKeyBytes).toString('base64url'),
+    signature: Buffer.from(signatureBytes).toString('base64url'),
+    authorizationNonce: yuidNonce,
+    authorizedUsername: usernameNormalized,
+  };
+}
+
+function verifyMlsCredentialBinding({
+  yuid,
+  yuidPublicKey,
+  deviceId,
+  signaturePublicKey,
+  identityBindingSignature,
+}) {
+  if (!/^device_[A-Za-z0-9_-]{24}$/.test(String(deviceId || ''))) {
+    return { ok: false, code: 'invalid_mls_device_id' };
+  }
+  if (
+    !/^[A-Za-z0-9_-]{43}$/.test(String(signaturePublicKey || '')) ||
+    !/^[A-Za-z0-9_-]{86}$/.test(String(identityBindingSignature || ''))
+  ) {
+    return { ok: false, code: 'invalid_mls_credential_binding' };
+  }
+  const yuidPublicKeyBytes = decodeBase64Url(yuidPublicKey);
+  const signaturePublicKeyBytes = decodeBase64Url(signaturePublicKey);
+  const bindingSignatureBytes = decodeBase64Url(identityBindingSignature);
+  if (
+    !yuidPublicKeyBytes ||
+    yuidPublicKeyBytes.length !== 32 ||
+    !signaturePublicKeyBytes ||
+    signaturePublicKeyBytes.length !== 32 ||
+    !bindingSignatureBytes ||
+    bindingSignatureBytes.length !== 64
+  ) {
+    return { ok: false, code: 'invalid_mls_credential_binding' };
+  }
+  const canonicalSignaturePublicKey =
+    Buffer.from(signaturePublicKeyBytes).toString('base64url');
+  const message = Buffer.from(
+    `yappa-mls-credential-v1|${serverId}|${yuid}|${deviceId}|` +
+      canonicalSignaturePublicKey,
+    'utf8',
+  );
+  if (
+    !nacl.sign.detached.verify(
+      new Uint8Array(message),
+      new Uint8Array(bindingSignatureBytes),
+      new Uint8Array(yuidPublicKeyBytes),
+    )
+  ) {
+    return { ok: false, code: 'invalid_mls_credential_binding' };
+  }
+  return {
+    ok: true,
+    signaturePublicKey: canonicalSignaturePublicKey,
+    identityBindingSignature:
+      Buffer.from(bindingSignatureBytes).toString('base64url'),
+  };
+}
+
+function compactExpiredMlsKeyPackages(now = nowIso()) {
+  db.prepare(`
+    UPDATE mls_key_packages
+    SET key_package = X'',
+        claimed_at = COALESCE(claimed_at, expires_at)
+    WHERE expires_at <= ?
+    AND length(key_package) > 0
+  `).run(now);
+}
+
+function activeMlsDevice(deviceId) {
+  return db.prepare(`
+    SELECT media_devices.id, media_devices.user_id, users.username,
+           users.yuid, users.yuid_public_key
+    FROM media_devices
+    JOIN users ON users.id = media_devices.user_id
+    WHERE media_devices.id = ?
+    AND media_devices.revoked_at IS NULL
+    AND NOT EXISTS (
+      SELECT 1 FROM bans
+      WHERE bans.revoked_at IS NULL
+      AND (
+        bans.user_id = users.id
+        OR (bans.yuid IS NOT NULL AND bans.yuid = users.yuid)
+      )
+    )
+  `).get(deviceId);
+}
+
+function serializeMlsDeliveryMessage(row) {
+  const encryptedAttachmentIds =
+    row.event_id == null
+      ? []
+      : db
+          .prepare(`
+            SELECT id
+            FROM encrypted_attachments
+            WHERE event_id = ?
+            AND deleted_at IS NULL
+            ORDER BY id ASC
+          `)
+          .all(row.event_id)
+          .map((attachment) => attachment.id);
+  return {
+    id: row.id,
+    clientOperationId: row.client_operation_id,
+    channelId: toId(row.channel_id),
+    serverSequence: Number(row.server_sequence),
+    messageClass: row.message_class,
+    acceptedEpoch: Number(row.accepted_epoch),
+    parentEpoch:
+      row.parent_epoch == null ? null : Number(row.parent_epoch),
+    uploaderUserId: toId(row.uploader_user_id),
+    uploaderDeviceId: row.uploader_device_id,
+    recipientDeviceId: row.recipient_device_id || null,
+    wireMessage: Buffer.from(row.wire_message).toString('base64url'),
+    createdAt: row.created_at,
+    event:
+      row.event_id == null
+        ? null
+        : {
+            eventId: row.event_id,
+            kind: row.event_kind,
+            targetEventId: row.target_event_id || null,
+            encryptedAttachmentIds,
+          },
+  };
+}
+
+function registerMediaDevice(userId, proof) {
+  const existing = db
+    .prepare('SELECT * FROM media_devices WHERE id = ?')
+    .get(proof.deviceId);
+  if (existing) {
+    if (Number(existing.user_id) !== Number(userId)) {
+      return {
+        ok: false,
+        status: 409,
+        code: 'media_device_already_bound',
+        message: 'This media device is already bound to another account.',
+      };
+    }
+    if (existing.public_key !== proof.publicKey) {
+      return {
+        ok: false,
+        status: 409,
+        code: 'media_device_key_changed',
+        message: 'This media device identifier has a different public key.',
+      };
+    }
+    if (existing.revoked_at) {
+      return {
+        ok: false,
+        status: 403,
+        code: 'media_device_revoked',
+        message: 'This media device identity has been revoked.',
+      };
+    }
+    db.prepare(`
+      UPDATE media_devices
+      SET yuid_authorization_signature = ?,
+          authorization_nonce = ?,
+          authorized_username = ?,
+          last_seen_at = ?
+      WHERE id = ?
+    `).run(
+      proof.signature,
+      proof.authorizationNonce,
+      proof.authorizedUsername,
+      nowIso(),
+      proof.deviceId,
+    );
+    return { ok: true, device: db.prepare('SELECT * FROM media_devices WHERE id = ?').get(proof.deviceId) };
+  }
+
+  const conflictingKey = db
+    .prepare('SELECT id FROM media_devices WHERE public_key = ?')
+    .get(proof.publicKey);
+  if (conflictingKey) {
+    return {
+      ok: false,
+      status: 409,
+      code: 'media_device_key_already_bound',
+      message: 'This media public key is already registered.',
+    };
+  }
+  const createdAt = nowIso();
+  db.prepare(`
+    INSERT INTO media_devices (
+      id, user_id, public_key, yuid_authorization_signature,
+      authorization_nonce, authorized_username, created_at, last_seen_at,
+      revoked_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+  `).run(
+    proof.deviceId,
+    userId,
+    proof.publicKey,
+    proof.signature,
+    proof.authorizationNonce,
+    proof.authorizedUsername,
+    createdAt,
+    createdAt,
+  );
+  return { ok: true, device: db.prepare('SELECT * FROM media_devices WHERE id = ?').get(proof.deviceId) };
+}
+
+function serializeMediaDevice(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    userId: toId(row.user_id),
+    publicKey: row.public_key,
+    yuidAuthorizationSignature: row.yuid_authorization_signature,
+    authorizationNonce: row.authorization_nonce,
+    authorizedUsername: row.authorized_username,
+    createdAt: row.created_at,
+    lastSeenAt: row.last_seen_at,
+    revokedAt: row.revoked_at || null,
+  };
+}
+
 migrateStoredYuids();
 
 function serializeChannel(row, currentServerId) {
@@ -616,7 +2010,69 @@ function serializeChannel(row, currentServerId) {
     name: row.name,
     type: row.type,
     position: row.position,
+    glyph: row.glyph || null,
     createdAt: row.created_at,
+    encryptionMode: row.encryption_mode || 'legacy',
+    encryptionVersion: Number(row.encryption_version || 0),
+  };
+}
+
+function normalizeChannelGlyph(value) {
+  if (value === undefined) {
+    return { ok: true, present: false, value: undefined };
+  }
+
+  if (value === null) {
+    return { ok: true, present: true, value: null };
+  }
+
+  const normalized = String(value).trim();
+  if (!normalized) {
+    return { ok: true, present: true, value: null };
+  }
+
+  if (normalized.length > 64) {
+    return {
+      ok: false,
+      status: 400,
+      code: 'invalid_channel_glyph',
+      message: 'Channel icon or emoji must be 64 characters or fewer.',
+    };
+  }
+
+  if (normalized.startsWith('icon:')) {
+    const iconKey = normalized.slice(5);
+    if (!iconKey || !/^[a-z0-9_]+$/i.test(iconKey)) {
+      return {
+        ok: false,
+        status: 400,
+        code: 'invalid_channel_glyph',
+        message: 'Channel icon keys must use letters, numbers, or underscores.',
+      };
+    }
+
+    return { ok: true, present: true, value: normalized };
+  }
+
+  if (normalized.startsWith('emoji:')) {
+    const emojiValue = normalized.slice(6).trim();
+    if (!emojiValue) {
+      return {
+        ok: false,
+        status: 400,
+        code: 'invalid_channel_glyph',
+        message: 'Channel emoji selections cannot be empty.',
+      };
+    }
+
+    return { ok: true, present: true, value: `emoji:${emojiValue}` };
+  }
+
+  return {
+    ok: false,
+    status: 400,
+    code: 'invalid_channel_glyph',
+    message: 'Channel icon or emoji must start with icon: or emoji:.',
   };
 }
 
@@ -628,6 +2084,22 @@ function sanitizeVoiceMediaState(value = {}) {
     screenShareEnabled: Boolean(value.screenShareEnabled),
     speaking: Boolean(value.speaking),
   };
+}
+
+function mergeVoiceMediaState(current = {}, patch = {}) {
+  const next = { ...sanitizeVoiceMediaState(current) };
+  for (const key of [
+    'micMuted',
+    'audioMuted',
+    'cameraEnabled',
+    'screenShareEnabled',
+    'speaking',
+  ]) {
+    if (typeof patch[key] === 'boolean') {
+      next[key] = patch[key];
+    }
+  }
+  return next;
 }
 
 function voiceMediaStateChanged(current = {}, next = {}) {
@@ -711,11 +2183,7 @@ function cleanupPreviousBrandingAsset(previousUrl) {
       fs.unlinkSync(absolutePath);
     }
   } catch (error) {
-    console.error(
-      'Failed to delete previous branding asset:',
-      absolutePath,
-      error.message,
-    );
+    logOperationalFailure('branding cleanup', error);
   }
 }
 
@@ -748,7 +2216,31 @@ function persistBrandingAsset(slot, uploadedFile) {
   };
 }
 
-function serializeAttachment(row) {
+function attachmentGrantSignature({ attachmentId, userId, expires }) {
+  return crypto
+    .createHmac('sha256', ATTACHMENT_SIGNING_SECRET)
+    .update(`${attachmentId}.${userId}.${expires}`, 'utf8')
+    .digest('base64url');
+}
+
+function signedAttachmentUrl(row, viewerUserId) {
+  const attachmentId = toId(row.id);
+  const userId = toId(viewerUserId);
+  const expires = Math.floor(Date.now() / 1000) + ATTACHMENT_URL_TTL_SECONDS;
+  const signature = attachmentGrantSignature({
+    attachmentId,
+    userId,
+    expires,
+  });
+  const query = new URLSearchParams({
+    user: userId,
+    expires: String(expires),
+    signature,
+  });
+  return `/api/attachments/${attachmentId}/content?${query.toString()}`;
+}
+
+function serializeAttachment(row, viewerUserId) {
   return {
     id: toId(row.id),
     serverId: row.server_id,
@@ -760,15 +2252,14 @@ function serializeAttachment(row) {
     storedName: row.stored_name,
     mimeType: row.mime_type,
     sizeBytes: Number(row.size_bytes),
-    url: attachmentUrlFromRelativePath(row.relative_path),
-    relativePath: row.relative_path,
+    url: signedAttachmentUrl(row, viewerUserId),
     createdAt: row.created_at,
     expiresAt: row.expires_at,
     deletedAt: row.deleted_at,
   };
 }
 
-function serializeMessage(row, attachments = []) {
+function serializeMessage(row, attachments = [], viewerUserId) {
   return {
     id: toId(row.id),
     channelId: toId(row.channel_id),
@@ -783,7 +2274,9 @@ function serializeMessage(row, attachments = []) {
     yuid: row.yuid || null,
     yuidVerified: Boolean(row.yuidVerified || (row.yuid && row.yuid_public_key)),
     },
-    attachments: attachments.map(serializeAttachment),
+    attachments: attachments.map((attachment) =>
+      serializeAttachment(attachment, viewerUserId),
+    ),
   };
 }
 
@@ -806,14 +2299,18 @@ function getMessageRowById(messageId) {
   `).get(messageId);
 }
 
-function buildSerializedMessage(messageId) {
+function buildSerializedMessage(messageId, viewerUserId) {
   const row = getMessageRowById(messageId);
   if (!row) {
     return null;
   }
 
   const attachmentsMap = getAttachmentsForMessageIds(db, [messageId]);
-  return serializeMessage(row, attachmentsMap.get(Number(messageId)) || []);
+  return serializeMessage(
+    row,
+    attachmentsMap.get(Number(messageId)) || [],
+    viewerUserId,
+  );
 }
 
 function removeAttachmentFile(relativePath) {
@@ -827,11 +2324,7 @@ function removeAttachmentFile(relativePath) {
       fs.unlinkSync(absolutePath);
     }
   } catch (error) {
-    console.error(
-      'Failed to delete attachment file:',
-      absolutePath,
-      error.message,
-    );
+    logOperationalFailure('attachment cleanup', error);
   }
 }
 
@@ -1061,7 +2554,6 @@ function emitServerUpdated() {
           channels: currentChannels(),
           settings: currentSettings(),
           voice: getVoiceState(),
-          bans: currentBans(),
   });
 }
 
@@ -1113,6 +2605,31 @@ function computeExpiresAt(retentionDays) {
   ).toISOString();
 }
 
+async function sha256File(filePath) {
+  const digest = crypto.createHash('sha256');
+  const stream = fs.createReadStream(filePath);
+  for await (const chunk of stream) {
+    digest.update(chunk);
+  }
+  return digest.digest('hex');
+}
+
+function rejectPlaintextForEncryptedChannel(res, channel) {
+  if (
+    String(channel?.encryption_mode || 'legacy') === 'legacy' &&
+    Number(channel?.encryption_version || 0) === 0
+  ) {
+    return false;
+  }
+  apiError(
+    res,
+    409,
+    'encrypted_channel_requires_e2ee',
+    'This channel requires end-to-end encrypted messaging. Plaintext was rejected.',
+  );
+  return true;
+}
+
 function inferMimeType(uploadedFile) {
   const originalName = uploadedFile.originalname || '';
   const byExtension = mime.lookup(originalName);
@@ -1145,7 +2662,45 @@ const storage = multer.diskStorage({
   },
 });
 
-const upload = multer({ storage });
+function uploadSingleAttachment(req, res, next) {
+  const maxBytes = Math.max(
+    1,
+    Number(getServerSettings(db).attachment_max_bytes),
+  );
+  return multer({
+    storage,
+    limits: {
+      fileSize: maxBytes,
+      files: 1,
+      fields: 4,
+      fieldSize: 16 * 1024,
+    },
+  }).single('file')(req, res, next);
+}
+
+const encryptedAttachmentStorage = multer.diskStorage({
+  destination(_req, _file, cb) {
+    cb(null, encryptedAttachmentsRoot);
+  },
+  filename(_req, _file, cb) {
+    cb(null, `${Date.now()}_${randomId('eatt')}.bin`);
+  },
+});
+
+function uploadSingleEncryptedAttachment(req, res, next) {
+  const maxBytes =
+    Math.max(1, Number(getServerSettings(db).attachment_max_bytes)) +
+    1024 * 1024;
+  return multer({
+    storage: encryptedAttachmentStorage,
+    limits: {
+      fileSize: maxBytes,
+      files: 1,
+      fields: 8,
+      fieldSize: 16 * 1024,
+    },
+  }).single('ciphertext')(req, res, next);
+}
 
 const brandingStorage = multer.diskStorage({
   destination(req, _file, cb) {
@@ -1164,18 +2719,198 @@ const brandingUpload = multer({
   limits: { fileSize: 10 * 1024 * 1024 },
 });
 
+app.get(
+  '/api/attachments/:attachmentId/content',
+  attachmentDownloadRateLimit,
+  (req, res) => {
+  const attachmentId = Number(req.params.attachmentId);
+  const userId = Number(req.query.user);
+  const expires = Number(req.query.expires);
+  const providedSignature = String(req.query.signature || '');
+
+  if (
+    !Number.isInteger(attachmentId) ||
+    !Number.isInteger(userId) ||
+    !Number.isInteger(expires) ||
+    !/^[A-Za-z0-9_-]{43}$/.test(providedSignature)
+  ) {
+    return apiError(
+      res,
+      403,
+      'invalid_attachment_grant',
+      'This attachment link is invalid.',
+    );
+  }
+
+  if (expires < Math.floor(Date.now() / 1000)) {
+    return apiError(
+      res,
+      403,
+      'attachment_grant_expired',
+      'This attachment link has expired.',
+    );
+  }
+
+  const expectedSignature = attachmentGrantSignature({
+    attachmentId: toId(attachmentId),
+    userId: toId(userId),
+    expires,
+  });
+  const providedBytes = Buffer.from(providedSignature, 'utf8');
+  const expectedBytes = Buffer.from(expectedSignature, 'utf8');
+  if (
+    providedBytes.length !== expectedBytes.length ||
+    !crypto.timingSafeEqual(providedBytes, expectedBytes)
+  ) {
+    return apiError(
+      res,
+      403,
+      'invalid_attachment_grant',
+      'This attachment link is invalid.',
+    );
+  }
+
+  const user = db
+    .prepare('SELECT id, yuid FROM users WHERE id = ?')
+    .get(userId);
+  if (
+    !user ||
+    getActiveBanForIdentity({ userId: user.id, yuid: user.yuid || null })
+  ) {
+    return apiError(
+      res,
+      403,
+      'attachment_access_denied',
+      'This attachment is not available to that account.',
+    );
+  }
+
+  const attachment = db
+    .prepare(`
+    SELECT *
+    FROM attachments
+    WHERE id = ?
+    AND deleted_at IS NULL
+    `)
+    .get(attachmentId);
+  if (!attachment) {
+    return apiError(
+      res,
+      404,
+      'attachment_not_found',
+      'Attachment not found.',
+    );
+  }
+
+  const channel = db
+    .prepare('SELECT id FROM channels WHERE id = ?')
+    .get(attachment.channel_id);
+  if (!channel) {
+    return apiError(
+      res,
+      403,
+      'attachment_access_denied',
+      'The attachment channel is no longer available.',
+    );
+  }
+
+  const absolutePath = path.resolve(DATA_ROOT, attachment.relative_path);
+  const resolvedAttachmentsRoot = path.resolve(attachmentsRoot);
+  if (
+    absolutePath !== resolvedAttachmentsRoot &&
+    !absolutePath.startsWith(`${resolvedAttachmentsRoot}${path.sep}`)
+  ) {
+    return apiError(
+      res,
+      403,
+      'attachment_path_invalid',
+      'The attachment path is invalid.',
+    );
+  }
+
+  res.setHeader('Content-Type', attachment.mime_type);
+  res.setHeader(
+    'Content-Disposition',
+    `inline; filename*=UTF-8''${encodeURIComponent(attachment.original_name)}`,
+  );
+  res.setHeader(
+    'Cache-Control',
+    `private, max-age=${Math.max(
+      0,
+      Math.min(
+        ATTACHMENT_URL_TTL_SECONDS,
+        expires - Math.floor(Date.now() / 1000),
+      ),
+    )}`,
+  );
+  return res.sendFile(absolutePath);
+  },
+);
+
 app.get('/health', (_req, res) => {
   res.json({
     ok: true,
-    server: currentServer(),
-           settings: currentSettings(),
-           voice: getVoiceState(),
-           time: nowIso(),
+    time: nowIso(),
+  });
+});
+
+app.get('/api/server/identity', challengeRateLimit, (req, res) => {
+  const nonce = String(req.query?.nonce || '').trim();
+  if (!/^[A-Za-z0-9_-]{22,128}$/.test(nonce)) {
+    return apiError(
+      res,
+      400,
+      'invalid_identity_nonce',
+      'A valid identity challenge nonce is required.',
+    );
+  }
+  const proof = `yappa-server-proof-v1|${serverId}|${nonce}`;
+  const signature = crypto
+    .sign(null, Buffer.from(proof, 'utf8'), serverIdentity.privateKey)
+    .toString('base64url');
+  return res.json({
+    ok: true,
+    identity: {
+      serverId,
+      algorithm: serverIdentity.algorithm,
+      publicKey: serverIdentity.publicKey,
+      nonce,
+      signature,
+    },
   });
 });
 
 
-app.get('/api/link-preview', authRequired, async (req, res) => {
+app.get(
+  '/api/link-preview',
+  authRequired,
+  expensiveOperationRateLimit,
+  async (req, res) => {
+  const channelId = Number(req.query?.channelId);
+  if (!Number.isInteger(channelId)) {
+    return apiError(
+      res,
+      400,
+      'invalid_channel_id',
+      'A valid text channel is required for link previews.',
+    );
+  }
+  const channel = db.prepare(`
+    SELECT id, type, encryption_mode, encryption_version
+    FROM channels
+    WHERE id = ?
+  `).get(channelId);
+  if (!channel || channel.type !== 'text') {
+    return apiError(
+      res,
+      404,
+      'text_channel_not_found',
+      'That text channel does not exist.',
+    );
+  }
+  if (rejectPlaintextForEncryptedChannel(res, channel)) {
+    return;
+  }
   const url = normalizePreviewUrl(req.query?.url);
   if (!url) {
     return apiError(res, 400, 'invalid_url', 'A valid http or https URL is required.');
@@ -1185,22 +2920,45 @@ app.get('/api/link-preview', authRequired, async (req, res) => {
     const preview = await loadLinkPreview(url);
     return res.json({ ok: true, preview });
   } catch (error) {
+    logOperationalFailure('link preview', error);
+    try {
+      const fallback = await loadSafeLinkPreviewFallback(url);
+      return res.json({ ok: true, preview: fallback });
+    } catch {
+      // Private, malformed, or unresolvable targets remain fail-closed.
+    }
     return apiError(
       res,
       502,
       'link_preview_failed',
-      error?.message || 'Could not load link preview.',
+      'Could not load link preview.',
     );
   }
-});
+  },
+);
 
-app.post('/api/voice/token', authRequired, async (req, res) => {
+app.post(
+  '/api/voice/token',
+  authRequired,
+  expensiveOperationRateLimit,
+  async (req, res) => {
   if (!ensureLiveKitConfigured()) {
     return apiError(
       res,
       503,
       'voice_transport_unavailable',
       'Voice transport is not configured on this Yappa node.',
+    );
+  }
+  if (
+    !req.auth.session.mediaDeviceId ||
+    !req.auth.session.mediaPublicKey
+  ) {
+    return apiError(
+      res,
+      409,
+      'media_device_required',
+      'This session must register its media device before joining voice.',
     );
   }
 
@@ -1224,11 +2982,12 @@ app.post('/api/voice/token', authRequired, async (req, res) => {
 
   const roomName = buildVoiceRoomName(channelId);
   const token = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
-    identity: toId(req.auth.user.id),
+    identity: req.auth.session.mediaDeviceId,
     name: req.auth.user.username,
     ttl: LIVEKIT_TOKEN_TTL,
     metadata: JSON.stringify({
       userId: toId(req.auth.user.id),
+      deviceId: req.auth.session.mediaDeviceId,
       username: req.auth.user.username,
       role: req.auth.user.role,
       serverId,
@@ -1255,23 +3014,21 @@ app.post('/api/voice/token', authRequired, async (req, res) => {
       channelName: channel.name,
     });
   } catch (error) {
+    logOperationalFailure('voice token creation', error);
     return apiError(
       res,
       500,
       'voice_token_failed',
-      error.message || 'Could not create voice token.',
+      'Could not create voice token.',
     );
   }
-});
+  },
+);
 
 app.get('/api/server', (_req, res) => {
   res.json({
     ok: true,
     server: currentServer(),
-           channels: currentChannels(),
-           settings: currentSettings(),
-           bans: req.auth.user.role === 'owner' ? currentBans() : [],
-           voice: getVoiceState(),
   });
 });
 
@@ -1287,7 +3044,12 @@ app.get('/api/server/settings', authRequired, (req, res) => {
   res.json({ ok: true, settings: currentSettings() });
 });
 
-app.patch('/api/server/settings', authRequired, ownerOnly, (req, res) => {
+app.patch(
+  '/api/server/settings',
+  authRequired,
+  ownerOnly,
+  accountMutationRateLimit,
+  (req, res) => {
   const current = getServerSettings(db);
 
   const attachmentRetentionDays = req.body?.attachmentRetentionDays;
@@ -1403,16 +3165,17 @@ app.patch('/api/server/settings', authRequired, ownerOnly, (req, res) => {
   const updated = updateServerSettings(db, patch);
   emitServerUpdated();
   res.json({ ok: true, settings: serializeServerSettings(updated) });
-});
+  },
+);
 
-app.get('/api/auth/yuid/challenge', (_req, res) => {
+app.get('/api/auth/yuid/challenge', challengeRateLimit, (_req, res) => {
   res.json({
     ok: true,
     challenge: issueYuidChallenge(),
   });
 });
 
-app.post('/api/auth/session', async (req, res) => {
+app.post('/api/auth/session', authRateLimit, async (req, res) => {
   const username = String(req.body?.username || '').trim();
   const password = String(req.body?.password || '');
   const usernameNormalized = username.toLowerCase();
@@ -1420,6 +3183,14 @@ app.post('/api/auth/session', async (req, res) => {
   const yuidPublicKey = String(req.body?.yuidPublicKey || '').trim();
   const yuidSignature = String(req.body?.yuidSignature || '').trim();
   const yuidNonce = String(req.body?.yuidNonce || '').trim();
+  const mediaDeviceId = String(req.body?.mediaDeviceId || '').trim();
+  const mediaPublicKey = String(req.body?.mediaPublicKey || '').trim();
+  const mediaDeviceSignature = String(
+    req.body?.mediaDeviceSignature || '',
+  ).trim();
+  const deviceName =
+    String(req.body?.deviceName || 'Yappa client').trim().slice(0, 80) ||
+    'Yappa client';
 
 
 if (!yuidPublicKey || !yuidSignature || !yuidNonce) {
@@ -1455,6 +3226,31 @@ if (yuidClaim && yuidClaim !== yuidVerification.yuid) {
     'The claimed YUID does not match the signed YUID proof.',
   );
 }
+
+  if (!mediaDeviceId || !mediaPublicKey || !mediaDeviceSignature) {
+    return apiError(
+      res,
+      400,
+      'missing_media_device_proof',
+      'This Yappa client must authorize its media encryption device.',
+    );
+  }
+  const mediaDeviceVerification = verifyMediaDeviceProof({
+    usernameNormalized,
+    yuidPublicKey: yuidVerification.yuidPublicKey,
+    yuidNonce,
+    mediaDeviceId,
+    mediaPublicKey,
+    mediaDeviceSignature,
+  });
+  if (!mediaDeviceVerification.ok) {
+    return apiError(
+      res,
+      mediaDeviceVerification.status,
+      mediaDeviceVerification.code,
+      mediaDeviceVerification.message,
+    );
+  }
 
   const yuidBan = getActiveBanForIdentity({ yuid: yuidVerification.yuid });
   if (yuidBan) {
@@ -1517,9 +3313,23 @@ if (yuidClaim && yuidClaim !== yuidVerification.yuid) {
         },
       );
     }
+
+    const activeBackoff = getAuthBackoff(user.id);
+    if (activeBackoff) {
+      return authBackoffError(res, activeBackoff);
+    }
   }
 
   if (!user) {
+    if (password.length < NEW_ACCOUNT_PASSWORD_MIN_LENGTH) {
+      return apiError(
+        res,
+        400,
+        'password_too_short',
+        `New account passwords must be at least ${NEW_ACCOUNT_PASSWORD_MIN_LENGTH} characters.`,
+      );
+    }
+
     const existingCount = db.prepare('SELECT COUNT(*) AS value FROM users').get().value;
     const role = Number(existingCount) === 0 ? 'owner' : 'member';
     const existingYuidUser = getUserByYuid(db, yuidVerification.yuid);
@@ -1532,7 +3342,7 @@ if (yuidClaim && yuidClaim !== yuidVerification.yuid) {
       );
     }
 
-    const passwordHash = await bcrypt.hash(password, 10);
+    const passwordHash = await bcrypt.hash(password, BCRYPT_COST);
     const boundAt = nowIso();
     const created = createUserWithRole(db, {
       username,
@@ -1551,12 +3361,30 @@ if (yuidClaim && yuidClaim !== yuidVerification.yuid) {
   } else {
     const passwordMatch = await bcrypt.compare(password, user.password_hash);
     if (!passwordMatch) {
+      const backoff = recordAuthFailure(user.id);
+      if (backoff) {
+        return authBackoffError(res, backoff);
+      }
       return apiError(
         res,
         401,
         'invalid_credentials',
         'Username or password is incorrect.',
       );
+    }
+    clearAuthFailures(user.id);
+
+    const currentCost = bcrypt.getRounds(user.password_hash);
+    if (currentCost < BCRYPT_COST) {
+      const upgradedPasswordHash = await bcrypt.hash(password, BCRYPT_COST);
+      db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(
+        upgradedPasswordHash,
+        user.id,
+      );
+      user = {
+        ...user,
+        password_hash: upgradedPasswordHash,
+      };
     }
 
     const presentedYuid = yuidVerification.yuid;
@@ -1602,22 +3430,46 @@ if (yuidClaim && yuidClaim !== yuidVerification.yuid) {
         }),
       };
 
-      if (needsRebind) {
-        console.log(
-          `[auth] Rebound YUID for @${user.username} on successful password login.`,
-        );
-      }
     } else {
       touchUserYuid(db, user.id, nowIso());
     }
   }
 
+  const mediaDeviceRegistration = registerMediaDevice(
+    user.id,
+    mediaDeviceVerification,
+  );
+  if (!mediaDeviceRegistration.ok) {
+    return apiError(
+      res,
+      mediaDeviceRegistration.status,
+      mediaDeviceRegistration.code,
+      mediaDeviceRegistration.message,
+    );
+  }
+
   const token = crypto.randomBytes(32).toString('hex');
   const createdAt = nowIso();
+  const expiresAt = new Date(
+    Date.now() + SESSION_ABSOLUTE_TTL_MS,
+  ).toISOString();
+  const idleExpiresAt = nextIdleExpiry();
   db.prepare(`
-  INSERT INTO sessions (token, user_id, created_at, last_seen_at)
-  VALUES (?, ?, ?, ?)
-  `).run(token, user.id, createdAt, createdAt);
+  INSERT INTO sessions (
+    token, user_id, created_at, last_seen_at, expires_at, idle_expires_at,
+    device_name, media_device_id
+  )
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    sessionTokenStorageValue(token),
+    user.id,
+    createdAt,
+    createdAt,
+    expiresAt,
+    idleExpiresAt,
+    deviceName,
+    mediaDeviceVerification.deviceId,
+  );
 
   touchUserLogin(db, user.id, createdAt);
   const refreshedUser = db
@@ -1629,6 +3481,7 @@ if (yuidClaim && yuidClaim !== yuidVerification.yuid) {
   res.status(201).json({
     ok: true,
     token,
+    mediaDevice: serializeMediaDevice(mediaDeviceRegistration.device),
     user: serializeUser(refreshedUser, {
       isOnline: true,
       voiceChannelId: voicePresence?.voiceChannelId || null,
@@ -1658,6 +3511,13 @@ app.get('/api/auth/me', authRequired, (req, res) => {
 
   res.json({
     ok: true,
+    mediaDevice: req.auth.session.mediaDeviceId
+      ? serializeMediaDevice(
+          db
+            .prepare('SELECT * FROM media_devices WHERE id = ?')
+            .get(req.auth.session.mediaDeviceId),
+        )
+      : null,
     user: serializeUser(user, {
       isOnline: getOnlineUserIds().has(user.id),
                         voiceChannelId: voicePresence?.voiceChannelId || null,
@@ -1680,7 +3540,1551 @@ app.get('/api/auth/me', authRequired, (req, res) => {
   });
 });
 
-app.patch('/api/users/me', authRequired, (req, res) => {
+app.post(
+  '/api/media/devices/register',
+  authRequired,
+  accountMutationRateLimit,
+  (req, res) => {
+  const usernameNormalized = req.auth.user.username.trim().toLowerCase();
+  const yuidPublicKey = String(req.body?.yuidPublicKey || '').trim();
+  const yuidSignature = String(req.body?.yuidSignature || '').trim();
+  const yuidNonce = String(req.body?.yuidNonce || '').trim();
+  const yuidVerification = verifyYuidProof({
+    usernameNormalized,
+    yuidPublicKey,
+    yuidSignature,
+    yuidNonce,
+  });
+  if (!yuidVerification.ok) {
+    return apiError(
+      res,
+      yuidVerification.status,
+      yuidVerification.code,
+      yuidVerification.message,
+    );
+  }
+  if (
+    yuidVerification.yuid !== req.auth.user.yuid ||
+    yuidVerification.yuidPublicKey !== yuidPublicKey
+  ) {
+    return apiError(
+      res,
+      403,
+      'media_device_yuid_mismatch',
+      'The device authorization does not match this account.',
+    );
+  }
+  const mediaVerification = verifyMediaDeviceProof({
+    usernameNormalized,
+    yuidPublicKey,
+    yuidNonce,
+    mediaDeviceId: String(req.body?.mediaDeviceId || '').trim(),
+    mediaPublicKey: String(req.body?.mediaPublicKey || '').trim(),
+    mediaDeviceSignature: String(
+      req.body?.mediaDeviceSignature || '',
+    ).trim(),
+  });
+  if (!mediaVerification.ok) {
+    return apiError(
+      res,
+      mediaVerification.status,
+      mediaVerification.code,
+      mediaVerification.message,
+    );
+  }
+  const registration = registerMediaDevice(
+    req.auth.user.id,
+    mediaVerification,
+  );
+  if (!registration.ok) {
+    return apiError(
+      res,
+      registration.status,
+      registration.code,
+      registration.message,
+    );
+  }
+  db.prepare(
+    'UPDATE sessions SET media_device_id = ? WHERE id = ?',
+  ).run(mediaVerification.deviceId, req.auth.session.id);
+  return res.json({
+    ok: true,
+    mediaDevice: serializeMediaDevice(registration.device),
+  });
+  },
+);
+
+app.get('/api/media/devices', authRequired, (_req, res) => {
+  const rows = db
+    .prepare(`
+      SELECT media_devices.*, users.username, users.yuid,
+             users.yuid_public_key
+      FROM media_devices
+      JOIN users ON users.id = media_devices.user_id
+      WHERE media_devices.revoked_at IS NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM bans
+        WHERE bans.revoked_at IS NULL
+        AND (
+          bans.user_id = users.id
+          OR (bans.yuid IS NOT NULL AND bans.yuid = users.yuid)
+        )
+      )
+      ORDER BY media_devices.id ASC
+    `)
+    .all();
+  return res.json({
+    ok: true,
+    devices: rows.map((row) => ({
+      ...serializeMediaDevice(row),
+      username: row.username,
+      yuid: row.yuid,
+      yuidPublicKey: row.yuid_public_key,
+    })),
+  });
+});
+
+app.delete(
+  '/api/media/devices/:deviceId',
+  authRequired,
+  accountMutationRateLimit,
+  (req, res) => {
+  const deviceId = String(req.params.deviceId || '').trim();
+  if (!/^device_[A-Za-z0-9_-]{24}$/.test(deviceId)) {
+    return apiError(
+      res,
+      400,
+      'invalid_media_device_id',
+      'Invalid media device identifier.',
+    );
+  }
+  const device = db
+    .prepare('SELECT * FROM media_devices WHERE id = ?')
+    .get(deviceId);
+  if (!device || device.revoked_at) {
+    return apiError(
+      res,
+      404,
+      'media_device_not_found',
+      'Media device was not found.',
+    );
+  }
+  if (
+    Number(device.user_id) !== Number(req.auth.user.id) &&
+    req.auth.user.role !== 'owner'
+  ) {
+    return apiError(
+      res,
+      403,
+      'media_device_forbidden',
+      'You cannot revoke another account’s media device.',
+    );
+  }
+  const sessionRows = db
+    .prepare('SELECT id FROM sessions WHERE media_device_id = ?')
+    .all(deviceId);
+  const revokedAt = nowIso();
+  const revoke = db.transaction(() => {
+    db.prepare(
+      'UPDATE media_devices SET revoked_at = ? WHERE id = ?',
+    ).run(revokedAt, deviceId);
+    db.prepare('DELETE FROM sessions WHERE media_device_id = ?').run(deviceId);
+  });
+  revoke();
+  for (const session of sessionRows) {
+    disconnectSessionSockets(session.id);
+  }
+  return res.json({ ok: true, deviceId, revokedAt });
+  },
+);
+
+app.get('/api/mls/key-packages', authRequired, (req, res) => {
+  const deviceId = req.auth.session.mediaDeviceId;
+  if (!deviceId) {
+    return apiError(
+      res,
+      409,
+      'media_device_required',
+      'This session must be bound to an active device.',
+    );
+  }
+  const now = nowIso();
+  compactExpiredMlsKeyPackages(now);
+  const counts = db.prepare(`
+    SELECT
+      COUNT(*) AS total,
+      SUM(CASE
+        WHEN claimed_at IS NULL AND expires_at > ? THEN 1
+        ELSE 0
+      END) AS available
+    FROM mls_key_packages
+    WHERE device_id = ?
+  `).get(now, deviceId);
+  return res.json({
+    ok: true,
+    deviceId,
+    total: Number(counts.total || 0),
+    available: Number(counts.available || 0),
+  });
+});
+
+app.post(
+  '/api/mls/key-packages',
+  authRequired,
+  accountMutationRateLimit,
+  (req, res) => {
+    const deviceId = req.auth.session.mediaDeviceId;
+    if (!deviceId) {
+      return apiError(
+        res,
+        409,
+        'media_device_required',
+        'This session must be bound to an active device.',
+      );
+    }
+    const packages = req.body?.packages;
+    if (!Array.isArray(packages) || packages.length < 1 || packages.length > 2) {
+      return apiError(
+        res,
+        400,
+        'invalid_mls_key_packages',
+        'Submit one or two MLS KeyPackages per request.',
+      );
+    }
+    const user = db.prepare(`
+      SELECT yuid, yuid_public_key
+      FROM users
+      WHERE id = ?
+    `).get(req.auth.user.id);
+    if (!user?.yuid || !user?.yuid_public_key) {
+      return apiError(
+        res,
+        409,
+        'verified_yuid_required',
+        'A verified YUID is required for encrypted messaging.',
+      );
+    }
+    const now = Date.now();
+    compactExpiredMlsKeyPackages(new Date(now).toISOString());
+    const validated = [];
+    for (const item of packages) {
+      const ciphersuite = Number(item?.ciphersuite);
+      const keyPackageText = String(item?.keyPackage || '').trim();
+      const expiresAt = String(item?.expiresAt || '').trim();
+      const expiresAtMs = Date.parse(expiresAt);
+      if (
+        ciphersuite !== 1 ||
+        !/^[A-Za-z0-9_-]+$/.test(keyPackageText) ||
+        !Number.isFinite(expiresAtMs) ||
+        expiresAtMs < now + 5 * 60 * 1000 ||
+        expiresAtMs > now + 30 * 24 * 60 * 60 * 1000
+      ) {
+        return apiError(
+          res,
+          400,
+          'invalid_mls_key_package',
+          'Invalid MLS KeyPackage ciphersuite, encoding, or expiry.',
+        );
+      }
+      const keyPackage = decodeBase64Url(keyPackageText);
+      if (!keyPackage || keyPackage.length < 64 || keyPackage.length > 65536) {
+        return apiError(
+          res,
+          400,
+          'invalid_mls_key_package',
+          'MLS KeyPackage size must be between 64 and 65536 bytes.',
+        );
+      }
+      const binding = verifyMlsCredentialBinding({
+        yuid: user.yuid,
+        yuidPublicKey: user.yuid_public_key,
+        deviceId,
+        signaturePublicKey: String(item?.signaturePublicKey || '').trim(),
+        identityBindingSignature: String(
+          item?.identityBindingSignature || '',
+        ).trim(),
+      });
+      if (!binding.ok) {
+        return apiError(
+          res,
+          401,
+          binding.code,
+          'The MLS credential is not authorized by this account’s YUID.',
+        );
+      }
+      validated.push({
+        id: `kp_${crypto.randomBytes(16).toString('base64url')}`,
+        ciphersuite,
+        signaturePublicKey: binding.signaturePublicKey,
+        identityBindingSignature: binding.identityBindingSignature,
+        keyPackage,
+        keyPackageHash: crypto
+          .createHash('sha256')
+          .update(keyPackage)
+          .digest('hex'),
+        expiresAt: new Date(expiresAtMs).toISOString(),
+      });
+    }
+    const available = db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM mls_key_packages
+      WHERE device_id = ?
+      AND claimed_at IS NULL
+      AND expires_at > ?
+    `).get(deviceId, nowIso()).count;
+    if (Number(available) + validated.length > 100) {
+      return apiError(
+        res,
+        409,
+        'mls_key_package_limit',
+        'This device already has enough unused MLS KeyPackages.',
+      );
+    }
+    const total = db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM mls_key_packages
+      WHERE device_id = ?
+    `).get(deviceId).count;
+    if (Number(total) + validated.length > 10000) {
+      return apiError(
+        res,
+        409,
+        'mls_key_package_history_limit',
+        'This device has reached its MLS KeyPackage history limit.',
+      );
+    }
+    const insert = db.prepare(`
+      INSERT INTO mls_key_packages (
+        id, device_id, ciphersuite, signature_public_key,
+        identity_binding_signature, key_package, key_package_hash,
+        created_at, expires_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    try {
+      db.transaction(() => {
+        const createdAt = nowIso();
+        const existingCredentials = Number(
+          db.prepare(`
+            SELECT COUNT(*) AS count
+            FROM mls_device_credentials
+            WHERE device_id = ?
+          `).get(deviceId).count,
+        );
+        const existingKeys = new Set(
+          db.prepare(`
+            SELECT signature_public_key
+            FROM mls_device_credentials
+            WHERE device_id = ?
+          `).all(deviceId).map((row) => row.signature_public_key),
+        );
+        const newKeys = new Set(
+          validated
+            .map((item) => item.signaturePublicKey)
+            .filter((key) => !existingKeys.has(key)),
+        );
+        if (existingCredentials + newKeys.size > 8) {
+          const limit = new Error('MLS credential history limit reached.');
+          limit.code = 'MLS_DEVICE_CREDENTIAL_LIMIT';
+          throw limit;
+        }
+        const insertCredential = db.prepare(`
+          INSERT OR IGNORE INTO mls_device_credentials (
+            device_id, signature_public_key, identity_binding_signature,
+            created_at
+          )
+          VALUES (?, ?, ?, ?)
+        `);
+        for (const item of validated) {
+          insertCredential.run(
+            deviceId,
+            item.signaturePublicKey,
+            item.identityBindingSignature,
+            createdAt,
+          );
+          insert.run(
+            item.id,
+            deviceId,
+            item.ciphersuite,
+            item.signaturePublicKey,
+            item.identityBindingSignature,
+            item.keyPackage,
+            item.keyPackageHash,
+            createdAt,
+            item.expiresAt,
+          );
+        }
+      })();
+    } catch (error) {
+      if (error?.code === 'MLS_DEVICE_CREDENTIAL_LIMIT') {
+        return apiError(
+          res,
+          409,
+          'mls_device_credential_limit',
+          'This device has reached its MLS credential history limit.',
+        );
+      }
+      if (String(error?.code || '').startsWith('SQLITE_CONSTRAINT')) {
+        return apiError(
+          res,
+          409,
+          'duplicate_mls_key_package',
+          'An MLS KeyPackage was already registered.',
+        );
+      }
+      throw error;
+    }
+    return res.status(201).json({
+      ok: true,
+      deviceId,
+      registered: validated.length,
+    });
+  },
+);
+
+app.get('/api/mls/device-credentials', authRequired, (_req, res) => {
+  const credentials = db.prepare(`
+    SELECT mls_device_credentials.device_id,
+           mls_device_credentials.signature_public_key,
+           mls_device_credentials.identity_binding_signature,
+           mls_device_credentials.created_at,
+           users.id AS user_id, users.username, users.yuid,
+           users.yuid_public_key,
+           CASE WHEN users.role = 'owner' THEN 1 ELSE 0 END AS is_server_owner,
+           CASE
+             WHEN media_devices.revoked_at IS NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM bans
+                WHERE bans.revoked_at IS NULL
+                AND (
+                  bans.user_id = users.id
+                  OR (bans.yuid IS NOT NULL AND bans.yuid = users.yuid)
+                )
+              )
+             THEN 1 ELSE 0
+           END AS is_active
+    FROM mls_device_credentials
+    JOIN media_devices
+      ON media_devices.id = mls_device_credentials.device_id
+    JOIN users ON users.id = media_devices.user_id
+    ORDER BY mls_device_credentials.device_id ASC,
+             mls_device_credentials.signature_public_key ASC
+    LIMIT 10000
+  `).all();
+  return res.json({
+    ok: true,
+    credentials: credentials.map((row) => ({
+      deviceId: row.device_id,
+      signaturePublicKey: row.signature_public_key,
+      identityBindingSignature: row.identity_binding_signature,
+      userId: toId(row.user_id),
+      username: row.username,
+      yuid: row.yuid,
+      yuidPublicKey: row.yuid_public_key,
+      isServerOwner: row.is_server_owner === 1,
+      isActive: row.is_active === 1,
+      createdAt: row.created_at,
+    })),
+  });
+});
+
+app.post(
+  '/api/mls/key-packages/claim',
+  authRequired,
+  accountMutationRateLimit,
+  (req, res) => {
+    const claimantDeviceId = req.auth.session.mediaDeviceId;
+    const targetDeviceId = String(req.body?.deviceId || '').trim();
+    if (
+      !claimantDeviceId ||
+      !/^device_[A-Za-z0-9_-]{24}$/.test(targetDeviceId)
+    ) {
+      return apiError(
+        res,
+        400,
+        'invalid_mls_key_package_claim',
+        'An active claimant and target device are required.',
+      );
+    }
+    const target = db.prepare(`
+      SELECT media_devices.id, users.username, users.yuid,
+             users.yuid_public_key
+      FROM media_devices
+      JOIN users ON users.id = media_devices.user_id
+      WHERE media_devices.id = ?
+      AND media_devices.revoked_at IS NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM bans
+        WHERE bans.revoked_at IS NULL
+        AND (
+          bans.user_id = users.id
+          OR (bans.yuid IS NOT NULL AND bans.yuid = users.yuid)
+        )
+      )
+    `).get(targetDeviceId);
+    if (!target) {
+      return apiError(
+        res,
+        404,
+        'mls_target_device_not_found',
+        'The target encrypted-messaging device is unavailable.',
+      );
+    }
+    const claimedAt = nowIso();
+    compactExpiredMlsKeyPackages(claimedAt);
+    const claim = db.transaction(() => {
+      const item = db.prepare(`
+        SELECT *
+        FROM mls_key_packages
+        WHERE device_id = ?
+        AND claimed_at IS NULL
+        AND expires_at > ?
+        ORDER BY expires_at ASC, id ASC
+        LIMIT 1
+      `).get(targetDeviceId, claimedAt);
+      if (!item) return null;
+      const update = db.prepare(`
+        UPDATE mls_key_packages
+        SET claimed_at = ?, claimed_by_device_id = ?, key_package = X''
+        WHERE id = ? AND claimed_at IS NULL
+      `).run(claimedAt, claimantDeviceId, item.id);
+      return update.changes === 1 ? item : null;
+    })();
+    if (!claim) {
+      return apiError(
+        res,
+        404,
+        'mls_key_package_unavailable',
+        'That device has no unused MLS KeyPackage.',
+      );
+    }
+    return res.json({
+      ok: true,
+      keyPackage: {
+        id: claim.id,
+        deviceId: claim.device_id,
+        ciphersuite: Number(claim.ciphersuite),
+        signaturePublicKey: claim.signature_public_key,
+        identityBindingSignature: claim.identity_binding_signature,
+        username: target.username,
+        yuid: target.yuid,
+        yuidPublicKey: target.yuid_public_key,
+        keyPackage: Buffer.from(claim.key_package).toString('base64url'),
+        keyPackageHash: claim.key_package_hash,
+        expiresAt: claim.expires_at,
+      },
+    });
+  },
+);
+
+app.post(
+  '/api/channels/:channelId/encrypted-attachments',
+  authRequired,
+  uploadRateLimit,
+  uploadSingleEncryptedAttachment,
+  async (req, res) => {
+    const uploadedFile = req.file;
+    const channelId = Number(req.params.channelId);
+    const uploaderDeviceId = req.auth.session.mediaDeviceId;
+    const discardUpload = () => {
+      if (uploadedFile?.path) {
+        fs.unlink(uploadedFile.path, () => {});
+      }
+    };
+    if (!uploadedFile) {
+      return apiError(
+        res,
+        400,
+        'missing_encrypted_attachment',
+        'No encrypted attachment object was uploaded.',
+      );
+    }
+    if (!Number.isInteger(channelId) || !uploaderDeviceId) {
+      discardUpload();
+      return apiError(
+        res,
+        400,
+        'invalid_encrypted_attachment',
+        'An encrypted text channel and active device are required.',
+      );
+    }
+    const channel = db.prepare(`
+      SELECT id, type, encryption_mode, encryption_version
+      FROM channels
+      WHERE id = ?
+    `).get(channelId);
+    if (
+      !channel ||
+      channel.type !== 'text' ||
+      channel.encryption_mode !== 'e2ee' ||
+      Number(channel.encryption_version) !== 1
+    ) {
+      discardUpload();
+      return apiError(
+        res,
+        409,
+        'encrypted_channel_required',
+        'Encrypted attachments require an E2EE version 1 text channel.',
+      );
+    }
+
+    const secretstreamHeaderText = String(
+      req.body?.secretstreamHeader || '',
+    ).trim();
+    const attachmentId = String(req.body?.attachmentId || '').trim();
+    const expectedDigest = String(req.body?.ciphertextSha256 || '')
+      .trim()
+      .toLowerCase();
+    const chunkCount = Number(req.body?.chunkCount);
+    const secretstreamHeader = decodeBase64Url(secretstreamHeaderText);
+    if (
+      !secretstreamHeader ||
+      secretstreamHeader.length !== 24 ||
+      !/^eatt_[A-Za-z0-9_-]{22}$/.test(attachmentId) ||
+      !/^[a-f0-9]{64}$/.test(expectedDigest) ||
+      !Number.isInteger(chunkCount) ||
+      chunkCount < 1 ||
+      chunkCount > 1000000
+    ) {
+      discardUpload();
+      return apiError(
+        res,
+        400,
+        'invalid_encrypted_attachment_metadata',
+        'Invalid secretstream header, ciphertext digest, or chunk count.',
+      );
+    }
+
+    const settings = getServerSettings(db);
+    const maxCiphertextBytes =
+      Number(settings.attachment_max_bytes) + 1024 * 1024;
+    if (
+      uploadedFile.size < 17 ||
+      uploadedFile.size > maxCiphertextBytes
+    ) {
+      discardUpload();
+      return apiError(
+        res,
+        400,
+        'encrypted_attachment_too_large',
+        `Encrypted attachment exceeds the ${maxCiphertextBytes} byte limit.`,
+      );
+    }
+
+    let actualDigest;
+    try {
+      actualDigest = await sha256File(uploadedFile.path);
+    } catch (error) {
+      discardUpload();
+      throw error;
+    }
+    if (actualDigest !== expectedDigest) {
+      discardUpload();
+      return apiError(
+        res,
+        400,
+        'encrypted_attachment_digest_mismatch',
+        'The uploaded ciphertext does not match its declared digest.',
+      );
+    }
+
+    const existingAttachment = db.prepare(`
+      SELECT *
+      FROM encrypted_attachments
+      WHERE id = ?
+    `).get(attachmentId);
+    if (existingAttachment) {
+      const existingHeader = Buffer.from(
+        existingAttachment.secretstream_header,
+      );
+      const sameAttachment =
+        Number(existingAttachment.channel_id) === channelId &&
+        Number(existingAttachment.uploader_user_id) ===
+          Number(req.auth.user.id) &&
+        existingAttachment.uploader_device_id === uploaderDeviceId &&
+        existingAttachment.deleted_at == null &&
+        Number(existingAttachment.ciphertext_size_bytes) ===
+          Number(uploadedFile.size) &&
+        existingAttachment.ciphertext_sha256 === actualDigest &&
+        Number(existingAttachment.chunk_count) === chunkCount &&
+        existingHeader.length === secretstreamHeader.length &&
+        crypto.timingSafeEqual(existingHeader, secretstreamHeader);
+      discardUpload();
+      if (!sameAttachment) {
+        return apiError(
+          res,
+          409,
+          'encrypted_attachment_operation_conflict',
+          'That encrypted attachment id was already used for different data.',
+        );
+      }
+      return res.status(200).json({
+        ok: true,
+        replayed: true,
+        attachment: {
+          id: attachmentId,
+          channelId: toId(channelId),
+          secretstreamHeader: existingHeader.toString('base64url'),
+          ciphertextSizeBytes: Number(
+            existingAttachment.ciphertext_size_bytes,
+          ),
+          ciphertextSha256: existingAttachment.ciphertext_sha256,
+          chunkCount: Number(existingAttachment.chunk_count),
+          createdAt: existingAttachment.created_at,
+          expiresAt: existingAttachment.expires_at,
+        },
+      });
+    }
+
+    const totalBytes = db.prepare(`
+      SELECT
+        (SELECT COALESCE(SUM(size_bytes), 0)
+         FROM attachments
+         WHERE deleted_at IS NULL) +
+        (SELECT COALESCE(SUM(ciphertext_size_bytes), 0)
+         FROM encrypted_attachments
+         WHERE deleted_at IS NULL) AS total
+    `).get().total;
+    if (
+      Number(totalBytes) + uploadedFile.size >
+      Number(settings.file_storage_max_total_bytes)
+    ) {
+      discardUpload();
+      return apiError(
+        res,
+        400,
+        'attachment_storage_limit_reached',
+        'The server is out of attachment storage space.',
+      );
+    }
+
+    const createdAt = nowIso();
+    const expiresAt = computeExpiresAt(settings.attachment_retention_days);
+    const relativePath = path.relative(DATA_ROOT, uploadedFile.path);
+    try {
+      db.prepare(`
+        INSERT INTO encrypted_attachments (
+          id, channel_id, event_id, uploader_user_id, uploader_device_id,
+          relative_path, secretstream_header, ciphertext_size_bytes,
+          ciphertext_sha256, chunk_count, created_at, expires_at, deleted_at
+        )
+        VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+      `).run(
+        attachmentId,
+        channelId,
+        req.auth.user.id,
+        uploaderDeviceId,
+        relativePath,
+        secretstreamHeader,
+        uploadedFile.size,
+        actualDigest,
+        chunkCount,
+        createdAt,
+        expiresAt,
+      );
+    } catch (error) {
+      discardUpload();
+      if (String(error?.code || '').startsWith('SQLITE_CONSTRAINT')) {
+        return apiError(
+          res,
+          409,
+          'duplicate_encrypted_attachment',
+          'That encrypted attachment id is already reserved.',
+        );
+      }
+      throw error;
+    }
+    return res.status(201).json({
+      ok: true,
+      attachment: {
+        id: attachmentId,
+        channelId: toId(channelId),
+        secretstreamHeader: secretstreamHeader.toString('base64url'),
+        ciphertextSizeBytes: uploadedFile.size,
+        ciphertextSha256: actualDigest,
+        chunkCount,
+        createdAt,
+        expiresAt,
+      },
+    });
+  },
+);
+
+app.get(
+  '/api/channels/:channelId/encrypted-attachments/:attachmentId',
+  authRequired,
+  attachmentDownloadRateLimit,
+  (req, res) => {
+    const channelId = Number(req.params.channelId);
+    const attachmentId = String(req.params.attachmentId || '').trim();
+    if (
+      !Number.isInteger(channelId) ||
+      !/^eatt_[A-Za-z0-9_-]{22}$/.test(attachmentId)
+    ) {
+      return apiError(
+        res,
+        400,
+        'invalid_encrypted_attachment',
+        'Invalid encrypted attachment identifier.',
+      );
+    }
+    const attachment = db.prepare(`
+      SELECT encrypted_attachments.*
+      FROM encrypted_attachments
+      JOIN channels ON channels.id = encrypted_attachments.channel_id
+      WHERE encrypted_attachments.id = ?
+      AND encrypted_attachments.channel_id = ?
+      AND encrypted_attachments.deleted_at IS NULL
+      AND (
+        encrypted_attachments.expires_at IS NULL
+        OR encrypted_attachments.expires_at > ?
+      )
+      AND channels.type = 'text'
+      AND channels.encryption_mode = 'e2ee'
+      AND channels.encryption_version = 1
+    `).get(attachmentId, channelId, nowIso());
+    if (!attachment) {
+      return apiError(
+        res,
+        404,
+        'encrypted_attachment_not_found',
+        'Encrypted attachment not found.',
+      );
+    }
+    const absolutePath = path.resolve(DATA_ROOT, attachment.relative_path);
+    const resolvedRoot = path.resolve(encryptedAttachmentsRoot);
+    if (
+      absolutePath === resolvedRoot ||
+      !absolutePath.startsWith(`${resolvedRoot}${path.sep}`)
+    ) {
+      return apiError(
+        res,
+        403,
+        'encrypted_attachment_path_invalid',
+        'The encrypted attachment path is invalid.',
+      );
+    }
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', 'attachment; filename="ciphertext.bin"');
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader(
+      'X-Yappa-Secretstream-Header',
+      Buffer.from(attachment.secretstream_header).toString('base64url'),
+    );
+    res.setHeader(
+      'X-Yappa-Ciphertext-SHA256',
+      attachment.ciphertext_sha256,
+    );
+    res.setHeader('X-Yappa-Chunk-Count', String(attachment.chunk_count));
+    res.setHeader(
+      'X-Yappa-Ciphertext-Size',
+      String(attachment.ciphertext_size_bytes),
+    );
+    return res.sendFile(absolutePath);
+  },
+);
+
+app.post(
+  '/api/channels/:channelId/mls/initialize',
+  authRequired,
+  accountMutationRateLimit,
+  (req, res) => {
+    const channelId = Number(req.params.channelId);
+    const deviceId = req.auth.session.mediaDeviceId;
+    if (!Number.isInteger(channelId) || !deviceId) {
+      return apiError(
+        res,
+        400,
+        'invalid_mls_group_initialization',
+        'An encrypted text channel and active device are required.',
+      );
+    }
+    const channel = db.prepare(`
+      SELECT id, type, encryption_mode, encryption_version
+      FROM channels
+      WHERE id = ?
+    `).get(channelId);
+    if (
+      !channel ||
+      channel.type !== 'text' ||
+      channel.encryption_mode !== 'e2ee' ||
+      Number(channel.encryption_version) !== 1
+    ) {
+      return apiError(
+        res,
+        409,
+        'encrypted_channel_required',
+        'MLS groups can only initialize in an E2EE version 1 text channel.',
+      );
+    }
+    const groupId = `yappa-text-v1|${serverId}|${toId(channelId)}`;
+    const existingState = db
+      .prepare('SELECT * FROM mls_channel_state WHERE channel_id = ?')
+      .get(channelId);
+    if (!existingState) {
+      if (req.auth.user.role !== 'owner') {
+        return apiError(
+          res,
+          403,
+          'owner_required',
+          'Only the server owner can initialize encrypted channel state.',
+        );
+      }
+      const enrolled = db.prepare(`
+        SELECT 1
+        FROM mls_device_credentials
+        WHERE device_id = ?
+        LIMIT 1
+      `).get(deviceId);
+      if (!enrolled) {
+        return apiError(
+          res,
+          409,
+          'mls_device_enrollment_required',
+          'This owner device must enroll encrypted messaging first.',
+        );
+      }
+    }
+    const createdAt = nowIso();
+    let created = false;
+    try {
+      const insert = db.prepare(`
+        INSERT INTO mls_channel_state (
+          channel_id, group_id, current_epoch, next_sequence,
+          initialized_by_device_id, initialized_at, updated_at
+        )
+        VALUES (?, ?, 0, 1, ?, ?, ?)
+      `).run(channelId, groupId, deviceId, createdAt, createdAt);
+      created = insert.changes === 1;
+    } catch (error) {
+      if (!String(error?.code || '').startsWith('SQLITE_CONSTRAINT')) {
+        throw error;
+      }
+    }
+    const state = db
+      .prepare('SELECT * FROM mls_channel_state WHERE channel_id = ?')
+      .get(channelId);
+    if (!state) {
+      return apiError(
+        res,
+        409,
+        'mls_group_initialization_conflict',
+        'The MLS group could not be initialized.',
+      );
+    }
+    return res.status(created ? 201 : 200).json({
+      ok: true,
+      created,
+      group: {
+        channelId: toId(channelId),
+        groupId: state.group_id,
+        currentEpoch: Number(state.current_epoch),
+        nextSequence: Number(state.next_sequence),
+        initializedByDeviceId: state.initialized_by_device_id,
+        initializedAt: state.initialized_at,
+      },
+    });
+  },
+);
+
+app.post(
+  '/api/channels/:channelId/mls/messages',
+  authRequired,
+  contentMutationRateLimit,
+  (req, res) => {
+    const channelId = Number(req.params.channelId);
+    const uploaderDeviceId = req.auth.session.mediaDeviceId;
+    if (!Number.isInteger(channelId) || !uploaderDeviceId) {
+      return apiError(
+        res,
+        400,
+        'invalid_mls_delivery_message',
+        'An encrypted text channel and active device are required.',
+      );
+    }
+    const channel = db.prepare(`
+      SELECT id, type, encryption_mode, encryption_version
+      FROM channels
+      WHERE id = ?
+    `).get(channelId);
+    if (
+      !channel ||
+      channel.type !== 'text' ||
+      channel.encryption_mode !== 'e2ee' ||
+      Number(channel.encryption_version) !== 1
+    ) {
+      return apiError(
+        res,
+        409,
+        'encrypted_channel_required',
+        'MLS delivery requires an E2EE version 1 text channel.',
+      );
+    }
+    const messageClass = String(req.body?.messageClass || '').trim();
+    const clientOperationId = String(
+      req.body?.clientOperationId || '',
+    ).trim();
+    const acceptedEpoch = Number(req.body?.acceptedEpoch);
+    const parentEpoch =
+      req.body?.parentEpoch == null ? null : Number(req.body.parentEpoch);
+    const recipientDeviceId =
+      req.body?.recipientDeviceId == null
+        ? null
+        : String(req.body.recipientDeviceId).trim();
+    const wireText = String(req.body?.wireMessage || '').trim();
+    if (
+      !/^mlsop_[A-Za-z0-9_-]{22}$/.test(clientOperationId) ||
+      !['proposal', 'commit', 'welcome', 'application'].includes(messageClass) ||
+      !Number.isInteger(acceptedEpoch) ||
+      acceptedEpoch < 0 ||
+      (parentEpoch != null &&
+        (!Number.isInteger(parentEpoch) || parentEpoch < 0)) ||
+      !/^[A-Za-z0-9_-]+$/.test(wireText)
+    ) {
+      return apiError(
+        res,
+        400,
+        'invalid_mls_delivery_message',
+        'Invalid MLS delivery metadata or wire encoding.',
+      );
+    }
+    const wireMessage = decodeBase64Url(wireText);
+    if (!wireMessage || wireMessage.length < 1 || wireMessage.length > 131072) {
+      return apiError(
+        res,
+        400,
+        'invalid_mls_delivery_message',
+        'MLS wire messages must be between 1 and 131072 bytes.',
+      );
+    }
+    if (
+      (messageClass === 'welcome' &&
+        (!recipientDeviceId || !activeMlsDevice(recipientDeviceId))) ||
+      (messageClass !== 'welcome' && recipientDeviceId != null)
+    ) {
+      return apiError(
+        res,
+        400,
+        'invalid_mls_delivery_recipient',
+        'Only Welcome messages may name one active recipient device.',
+      );
+    }
+
+    let event = null;
+    if (messageClass === 'application') {
+      const eventId = String(req.body?.event?.eventId || '').trim();
+      const kind = String(req.body?.event?.kind || '').trim();
+      const targetEventId =
+        req.body?.event?.targetEventId == null
+          ? null
+          : String(req.body.event.targetEventId).trim();
+      const encryptedAttachmentIds = Array.isArray(
+        req.body?.event?.encryptedAttachmentIds,
+      )
+        ? req.body.event.encryptedAttachmentIds.map((value) =>
+            String(value || '').trim(),
+          )
+        : [];
+      if (
+        !/^[A-Za-z0-9_-]{22}$/.test(eventId) ||
+        !['message', 'edit', 'delete', 'reaction', 'attachment'].includes(kind) ||
+        (targetEventId != null && !/^[A-Za-z0-9_-]{22}$/.test(targetEventId)) ||
+        encryptedAttachmentIds.length > 10 ||
+        encryptedAttachmentIds.some(
+          (id) => !/^eatt_[A-Za-z0-9_-]{22}$/.test(id),
+        ) ||
+        new Set(encryptedAttachmentIds).size !==
+          encryptedAttachmentIds.length ||
+        (['edit', 'delete', 'reaction'].includes(kind) &&
+          targetEventId == null) ||
+        (kind === 'attachment'
+          ? encryptedAttachmentIds.length === 0
+          : encryptedAttachmentIds.length !== 0)
+      ) {
+        return apiError(
+          res,
+          400,
+          'invalid_encrypted_event_routing',
+          'Invalid encrypted application-event routing metadata.',
+        );
+      }
+      event = {
+        eventId,
+        kind,
+        targetEventId,
+        encryptedAttachmentIds,
+      };
+    } else if (req.body?.event != null) {
+      return apiError(
+        res,
+        400,
+        'unexpected_encrypted_event_routing',
+        'Only MLS application messages may include event routing metadata.',
+      );
+    }
+
+    try {
+      const accepted = db.transaction(() => {
+        const existing = db.prepare(`
+          SELECT mls_delivery_messages.*, encrypted_message_events.event_id,
+                 encrypted_message_events.event_kind,
+                 encrypted_message_events.target_event_id
+          FROM mls_delivery_messages
+          LEFT JOIN encrypted_message_events
+            ON encrypted_message_events.delivery_message_id =
+               mls_delivery_messages.id
+          WHERE mls_delivery_messages.uploader_device_id = ?
+          AND mls_delivery_messages.client_operation_id = ?
+        `).get(uploaderDeviceId, clientOperationId);
+        if (existing) {
+          const existingAttachments =
+            existing.event_id == null
+              ? []
+              : db.prepare(`
+                  SELECT id
+                  FROM encrypted_attachments
+                  WHERE event_id = ?
+                  AND deleted_at IS NULL
+                  ORDER BY id ASC
+                `).all(existing.event_id).map((item) => item.id);
+          const requestedAttachments = [
+            ...(event?.encryptedAttachmentIds || []),
+          ].sort();
+          const sameWire =
+            Buffer.from(existing.wire_message).length === wireMessage.length &&
+            crypto.timingSafeEqual(
+              Buffer.from(existing.wire_message),
+              wireMessage,
+            );
+          const sameOperation =
+            Number(existing.channel_id) === channelId &&
+            existing.message_class === messageClass &&
+            Number(existing.accepted_epoch) === acceptedEpoch &&
+            (existing.parent_epoch == null
+              ? parentEpoch == null
+              : Number(existing.parent_epoch) === parentEpoch) &&
+            (existing.recipient_device_id || null) === recipientDeviceId &&
+            sameWire &&
+            (existing.event_id || null) === (event?.eventId || null) &&
+            (existing.event_kind || null) === (event?.kind || null) &&
+            (existing.target_event_id || null) ===
+              (event?.targetEventId || null) &&
+            existingAttachments.length === requestedAttachments.length &&
+            existingAttachments.every(
+              (value, index) => value === requestedAttachments[index],
+            );
+          return sameOperation
+            ? { row: existing, replayed: true }
+            : { error: 'mls_operation_conflict' };
+        }
+        const state = db
+          .prepare('SELECT * FROM mls_channel_state WHERE channel_id = ?')
+          .get(channelId);
+        if (!state) {
+          return { error: 'mls_group_not_initialized' };
+        }
+        const currentEpoch = Number(state.current_epoch);
+        const validEpoch =
+          messageClass === 'commit'
+            ? parentEpoch === currentEpoch && acceptedEpoch === currentEpoch + 1
+            : messageClass === 'proposal'
+              ? parentEpoch === currentEpoch && acceptedEpoch === currentEpoch
+              : parentEpoch == null && acceptedEpoch === currentEpoch;
+        if (!validEpoch) {
+          return {
+            error: 'mls_epoch_conflict',
+            currentEpoch,
+            nextSequence: Number(state.next_sequence),
+          };
+        }
+        const id = `mls_${crypto.randomBytes(16).toString('base64url')}`;
+        const sequence = Number(state.next_sequence);
+        const createdAt = nowIso();
+        if (event?.targetEventId) {
+          const target = db.prepare(`
+            SELECT event_id, channel_id, sender_user_id, event_kind
+            FROM encrypted_message_events
+            WHERE event_id = ?
+          `).get(event.targetEventId);
+          if (!target || Number(target.channel_id) !== channelId) {
+            const invalidReference = new Error(
+              'Invalid encrypted event reference.',
+            );
+            invalidReference.code = 'INVALID_ENCRYPTED_EVENT_REFERENCE';
+            throw invalidReference;
+          }
+          const targetKinds =
+            event.kind === 'edit'
+              ? ['message']
+              : ['message', 'attachment'];
+          if (!targetKinds.includes(target.event_kind)) {
+            const invalidReference = new Error(
+              'Invalid encrypted event root reference.',
+            );
+            invalidReference.code = 'INVALID_ENCRYPTED_EVENT_REFERENCE';
+            throw invalidReference;
+          }
+          if (
+            event.kind === 'edit' &&
+            Number(target.sender_user_id) !== Number(req.auth.user.id)
+          ) {
+            const forbidden = new Error('Encrypted edit is not authorized.');
+            forbidden.code = 'FORBIDDEN_ENCRYPTED_EVENT_MUTATION';
+            throw forbidden;
+          }
+          if (
+            event.kind === 'delete' &&
+            Number(target.sender_user_id) !== Number(req.auth.user.id) &&
+            req.auth.user.role !== 'owner'
+          ) {
+            const forbidden = new Error('Encrypted delete is not authorized.');
+            forbidden.code = 'FORBIDDEN_ENCRYPTED_EVENT_MUTATION';
+            throw forbidden;
+          }
+        }
+        db.prepare(`
+          INSERT INTO mls_delivery_messages (
+            id, client_operation_id, channel_id, server_sequence,
+            message_class, accepted_epoch, parent_epoch, uploader_user_id,
+            uploader_device_id,
+            recipient_device_id, wire_message, created_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          id,
+          clientOperationId,
+          channelId,
+          sequence,
+          messageClass,
+          acceptedEpoch,
+          parentEpoch,
+          req.auth.user.id,
+          uploaderDeviceId,
+          recipientDeviceId,
+          wireMessage,
+          createdAt,
+        );
+        if (event) {
+          db.prepare(`
+            INSERT INTO encrypted_message_events (
+              event_id, channel_id, delivery_message_id, server_sequence,
+              sender_user_id, sender_device_id, event_kind, target_event_id,
+              accepted_epoch, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            event.eventId,
+            channelId,
+            id,
+            sequence,
+            req.auth.user.id,
+            uploaderDeviceId,
+            event.kind,
+            event.targetEventId,
+            acceptedEpoch,
+            createdAt,
+          );
+          if (event.encryptedAttachmentIds.length > 0) {
+            const placeholders = event.encryptedAttachmentIds
+              .map(() => '?')
+              .join(',');
+            const linked = db.prepare(`
+              UPDATE encrypted_attachments
+              SET event_id = ?
+              WHERE id IN (${placeholders})
+              AND channel_id = ?
+              AND uploader_user_id = ?
+              AND uploader_device_id = ?
+              AND event_id IS NULL
+              AND deleted_at IS NULL
+              AND (expires_at IS NULL OR expires_at > ?)
+            `).run(
+              event.eventId,
+              ...event.encryptedAttachmentIds,
+              channelId,
+              req.auth.user.id,
+              uploaderDeviceId,
+              createdAt,
+            );
+            if (linked.changes !== event.encryptedAttachmentIds.length) {
+              const invalidReference = new Error(
+                'Invalid encrypted attachment reference.',
+              );
+              invalidReference.code =
+                'INVALID_ENCRYPTED_ATTACHMENT_REFERENCE';
+              throw invalidReference;
+            }
+          }
+        }
+        db.prepare(`
+          UPDATE mls_channel_state
+          SET current_epoch = ?, next_sequence = ?, updated_at = ?
+          WHERE channel_id = ?
+        `).run(
+          messageClass === 'commit' ? acceptedEpoch : currentEpoch,
+          sequence + 1,
+          createdAt,
+          channelId,
+        );
+        return {
+          row: db.prepare(`
+          SELECT mls_delivery_messages.*, encrypted_message_events.event_id,
+                 encrypted_message_events.event_kind,
+                 encrypted_message_events.target_event_id
+          FROM mls_delivery_messages
+          LEFT JOIN encrypted_message_events
+            ON encrypted_message_events.delivery_message_id =
+               mls_delivery_messages.id
+          WHERE mls_delivery_messages.id = ?
+          `).get(id),
+          replayed: false,
+        };
+      })();
+      if (accepted.error) {
+        return apiError(
+          res,
+          409,
+          accepted.error,
+          accepted.error === 'mls_group_not_initialized'
+            ? 'The MLS group is not initialized.'
+            : accepted.error === 'mls_operation_conflict'
+              ? 'That MLS operation id was already used for different data.'
+              : 'The MLS parent epoch was superseded.',
+          accepted.currentEpoch == null
+            ? {}
+            : {
+                currentEpoch: accepted.currentEpoch,
+                nextSequence: accepted.nextSequence,
+              },
+        );
+      }
+      const serialized = serializeMlsDeliveryMessage(accepted.row);
+      if (!accepted.replayed) {
+        for (const liveSocket of io.sockets.sockets.values()) {
+          if (
+            !serialized.recipientDeviceId ||
+            liveSocket.user.mediaDeviceId === serialized.recipientDeviceId
+          ) {
+            liveSocket.emit('mls:message', { message: serialized });
+          }
+        }
+      }
+      return res
+        .status(accepted.replayed ? 200 : 201)
+        .json({ ok: true, replayed: accepted.replayed, message: serialized });
+    } catch (error) {
+      if (error?.code === 'INVALID_ENCRYPTED_EVENT_REFERENCE') {
+        return apiError(
+          res,
+          409,
+          'invalid_encrypted_event_reference',
+          'The encrypted event target does not exist in this channel.',
+        );
+      }
+      if (error?.code === 'FORBIDDEN_ENCRYPTED_EVENT_MUTATION') {
+        return apiError(
+          res,
+          403,
+          'encrypted_event_mutation_forbidden',
+          'That encrypted event change is not authorized.',
+        );
+      }
+      if (error?.code === 'INVALID_ENCRYPTED_ATTACHMENT_REFERENCE') {
+        return apiError(
+          res,
+          409,
+          'invalid_encrypted_attachment_reference',
+          'An encrypted attachment is unavailable or belongs to another sender.',
+        );
+      }
+      if (String(error?.code || '').startsWith('SQLITE_CONSTRAINT')) {
+        const foreignKey =
+          String(error?.code || '') === 'SQLITE_CONSTRAINT_FOREIGNKEY';
+        return apiError(
+          res,
+          409,
+          foreignKey
+            ? 'invalid_encrypted_event_reference'
+            : 'duplicate_encrypted_event',
+          foreignKey
+            ? 'The encrypted event target does not exist.'
+            : 'That encrypted event or delivery sequence already exists.',
+        );
+      }
+      throw error;
+    }
+  },
+);
+
+app.get(
+  '/api/channels/:channelId/mls/messages',
+  authRequired,
+  (req, res) => {
+    const channelId = Number(req.params.channelId);
+    const deviceId = req.auth.session.mediaDeviceId;
+    const after = Number(req.query?.after || 0);
+    const requestedLimit = Number(req.query?.limit || 100);
+    const limit = Math.max(
+      1,
+      Math.min(200, Number.isFinite(requestedLimit) ? requestedLimit : 100),
+    );
+    if (
+      !Number.isInteger(channelId) ||
+      !deviceId ||
+      !Number.isInteger(after) ||
+      after < 0
+    ) {
+      return apiError(
+        res,
+        400,
+        'invalid_mls_delivery_cursor',
+        'Invalid MLS channel, device, or delivery cursor.',
+      );
+    }
+    const state = db.prepare(`
+      SELECT mls_channel_state.*
+      FROM mls_channel_state
+      JOIN channels ON channels.id = mls_channel_state.channel_id
+      WHERE mls_channel_state.channel_id = ?
+      AND channels.type = 'text'
+      AND channels.encryption_mode = 'e2ee'
+      AND channels.encryption_version = 1
+    `).get(channelId);
+    if (!state) {
+      return apiError(
+        res,
+        409,
+        'mls_group_not_initialized',
+        'The encrypted channel MLS group is not initialized.',
+      );
+    }
+    const rows = db.prepare(`
+      SELECT mls_delivery_messages.*, encrypted_message_events.event_id,
+             encrypted_message_events.event_kind,
+             encrypted_message_events.target_event_id
+      FROM mls_delivery_messages
+      LEFT JOIN encrypted_message_events
+        ON encrypted_message_events.delivery_message_id =
+           mls_delivery_messages.id
+      WHERE mls_delivery_messages.channel_id = ?
+      AND mls_delivery_messages.server_sequence > ?
+      AND (
+        mls_delivery_messages.message_class != 'welcome'
+        OR mls_delivery_messages.recipient_device_id = ?
+      )
+      ORDER BY mls_delivery_messages.server_sequence ASC
+      LIMIT ?
+    `).all(channelId, after, deviceId, limit);
+    const deliveredSequence =
+      rows.length === 0
+        ? after
+        : Number(rows[rows.length - 1].server_sequence);
+    if (rows.length > 0) {
+      db.prepare(`
+        INSERT INTO mls_device_cursors (
+          channel_id, device_id, delivered_sequence,
+          acknowledged_sequence, acknowledged_epoch, updated_at
+        )
+        VALUES (?, ?, ?, 0, 0, ?)
+        ON CONFLICT(channel_id, device_id) DO UPDATE SET
+          delivered_sequence = MAX(
+            mls_device_cursors.delivered_sequence,
+            excluded.delivered_sequence
+          ),
+          updated_at = excluded.updated_at
+      `).run(channelId, deviceId, deliveredSequence, nowIso());
+    }
+    return res.json({
+      ok: true,
+      group: {
+        groupId: state.group_id,
+        currentEpoch: Number(state.current_epoch),
+        nextSequence: Number(state.next_sequence),
+      },
+      messages: rows.map(serializeMlsDeliveryMessage),
+      deliveredSequence,
+    });
+  },
+);
+
+app.post(
+  '/api/channels/:channelId/mls/ack',
+  authRequired,
+  accountMutationRateLimit,
+  (req, res) => {
+    const channelId = Number(req.params.channelId);
+    const deviceId = req.auth.session.mediaDeviceId;
+    const acknowledgedSequence = Number(req.body?.acknowledgedSequence);
+    const acknowledgedEpoch = Number(req.body?.acknowledgedEpoch);
+    if (
+      !Number.isInteger(channelId) ||
+      !deviceId ||
+      !Number.isInteger(acknowledgedSequence) ||
+      acknowledgedSequence < 0 ||
+      !Number.isInteger(acknowledgedEpoch) ||
+      acknowledgedEpoch < 0
+    ) {
+      return apiError(
+        res,
+        400,
+        'invalid_mls_acknowledgement',
+        'Invalid MLS delivery acknowledgement.',
+      );
+    }
+    const result = db.transaction(() => {
+      const state = db
+        .prepare('SELECT * FROM mls_channel_state WHERE channel_id = ?')
+        .get(channelId);
+      const cursor = db.prepare(`
+        SELECT *
+        FROM mls_device_cursors
+        WHERE channel_id = ? AND device_id = ?
+      `).get(channelId, deviceId);
+      if (
+        !state ||
+        !cursor ||
+        acknowledgedSequence > Number(cursor.delivered_sequence) ||
+        acknowledgedSequence < Number(cursor.acknowledged_sequence) ||
+        acknowledgedEpoch > Number(state.current_epoch) ||
+        acknowledgedEpoch < Number(cursor.acknowledged_epoch)
+      ) {
+        return null;
+      }
+      db.prepare(`
+        UPDATE mls_device_cursors
+        SET acknowledged_sequence = ?, acknowledged_epoch = ?, updated_at = ?
+        WHERE channel_id = ? AND device_id = ?
+      `).run(
+        acknowledgedSequence,
+        acknowledgedEpoch,
+        nowIso(),
+        channelId,
+        deviceId,
+      );
+      return {
+        deliveredSequence: Number(cursor.delivered_sequence),
+        acknowledgedSequence,
+        acknowledgedEpoch,
+      };
+    })();
+    if (!result) {
+      return apiError(
+        res,
+        409,
+        'mls_acknowledgement_conflict',
+        'The acknowledgement is ahead of delivery or behind saved state.',
+      );
+    }
+    return res.json({ ok: true, cursor: result });
+  },
+);
+
+app.patch(
+  '/api/users/me',
+  authRequired,
+  accountMutationRateLimit,
+  (req, res) => {
   const user = req.auth.user;
   const patch = {};
 
@@ -1779,14 +5183,93 @@ app.patch('/api/users/me', authRequired, (req, res) => {
       voiceState: getVoiceMediaStateForUser(updatedUser.id),
     }),
   });
-});
+  },
+);
 
-app.post('/api/auth/logout', authRequired, (req, res) => {
-  db.prepare('DELETE FROM sessions WHERE token = ?').run(req.auth.token);
+app.post(
+  '/api/auth/logout',
+  authRequired,
+  accountMutationRateLimit,
+  (req, res) => {
+  revokeSession(db, req.auth.token);
+  disconnectSessionSockets(req.auth.session.id);
   res.json({ ok: true });
+  },
+);
+
+app.get('/api/auth/sessions', authRequired, (req, res) => {
+  const sessions = db
+    .prepare(`
+    SELECT id, device_name, created_at, last_seen_at, expires_at, idle_expires_at
+    FROM sessions
+    WHERE user_id = ?
+    ORDER BY last_seen_at DESC, id DESC
+    `)
+    .all(req.auth.user.id)
+    .map((row) => serializeSession(row, req.auth.session.id));
+
+  res.json({ ok: true, sessions });
 });
 
-app.get('/api/channels', (_req, res) => {
+app.post(
+  '/api/auth/session/rotate',
+  authRequired,
+  accountMutationRateLimit,
+  (req, res) => {
+  const token = crypto.randomBytes(32).toString('hex');
+  const idleExpiresAt = nextIdleExpiry();
+  db.prepare(`
+  UPDATE sessions
+  SET token = ?, last_seen_at = ?, idle_expires_at = ?
+  WHERE id = ? AND user_id = ?
+  `).run(
+    sessionTokenStorageValue(token),
+    nowIso(),
+    idleExpiresAt,
+    req.auth.session.id,
+    req.auth.user.id,
+  );
+
+  res.json({ ok: true, token, idleExpiresAt });
+  disconnectSessionSockets(req.auth.session.id);
+  },
+);
+
+app.delete(
+  '/api/auth/sessions/:sessionId',
+  authRequired,
+  accountMutationRateLimit,
+  (req, res) => {
+  const sessionId = Number(req.params.sessionId);
+  if (!Number.isInteger(sessionId) || sessionId <= 0) {
+    return apiError(res, 400, 'invalid_session_id', 'Invalid session id.');
+  }
+
+  const result = db
+    .prepare('DELETE FROM sessions WHERE id = ? AND user_id = ?')
+    .run(sessionId, req.auth.user.id);
+  if (result.changes === 0) {
+    return apiError(res, 404, 'session_not_found', 'Session not found.');
+  }
+
+  disconnectSessionSockets(sessionId);
+  res.json({
+    ok: true,
+    revokedSessionId: toId(sessionId),
+    revokedCurrent: sessionId === Number(req.auth.session.id),
+  });
+  },
+);
+
+function disconnectSessionSockets(sessionId) {
+  for (const socket of io.sockets.sockets.values()) {
+    if (Number(socket.user?.sessionId) === Number(sessionId)) {
+      socket.disconnect(true);
+    }
+  }
+}
+
+app.get('/api/channels', authRequired, (_req, res) => {
   res.json({
     ok: true,
     channels: currentChannels(),
@@ -1836,7 +5319,11 @@ app.get('/api/channels/:channelId/messages', authRequired, (req, res) => {
   res.json({
     ok: true,
     messages: rows.map((row) =>
-    serializeMessage(row, attachmentsMap.get(Number(row.id)) || []),
+    serializeMessage(
+      row,
+      attachmentsMap.get(Number(row.id)) || [],
+      req.auth.user.id,
+    ),
     ),
   });
 });
@@ -1844,7 +5331,8 @@ app.get('/api/channels/:channelId/messages', authRequired, (req, res) => {
 app.post(
   '/api/uploads/attachments',
   authRequired,
-  upload.single('file'),
+  uploadRateLimit,
+  uploadSingleAttachment,
          (req, res) => {
            const uploadedFile = req.file;
            const channelId = Number(req.body?.channelId);
@@ -1858,7 +5346,11 @@ app.post(
              return apiError(res, 400, 'invalid_channel_id', 'Invalid channel id.');
            }
 
-           const channel = db.prepare('SELECT id, type FROM channels WHERE id = ?').get(channelId);
+           const channel = db.prepare(`
+             SELECT id, type, encryption_mode, encryption_version
+             FROM channels
+             WHERE id = ?
+           `).get(channelId);
            if (!channel || channel.type !== 'text') {
              fs.unlink(uploadedFile.path, () => {});
              return apiError(
@@ -1867,6 +5359,10 @@ app.post(
                'channel_not_text',
                'Attachments can only be uploaded to text channels.',
              );
+           }
+           if (rejectPlaintextForEncryptedChannel(res, channel)) {
+             fs.unlink(uploadedFile.path, () => {});
+             return;
            }
 
            const settings = getServerSettings(db);
@@ -1925,18 +5421,26 @@ app.post(
 
            res.status(201).json({
              ok: true,
-             attachment: serializeAttachment(attachment),
+             attachment: serializeAttachment(attachment, req.auth.user.id),
            });
          },
 );
 
-app.post('/api/channels/:channelId/messages', authRequired, (req, res) => {
+app.post(
+  '/api/channels/:channelId/messages',
+  authRequired,
+  contentMutationRateLimit,
+  (req, res) => {
   const channelId = Number(req.params.channelId);
   if (!Number.isInteger(channelId)) {
     return apiError(res, 400, 'invalid_channel_id', 'Invalid channel id.');
   }
 
-  const channel = db.prepare('SELECT id, type FROM channels WHERE id = ?').get(channelId);
+  const channel = db.prepare(`
+    SELECT id, type, encryption_mode, encryption_version
+    FROM channels
+    WHERE id = ?
+  `).get(channelId);
   if (!channel) {
     return apiError(res, 404, 'channel_not_found', 'Channel not found.');
   }
@@ -1947,6 +5451,9 @@ app.post('/api/channels/:channelId/messages', authRequired, (req, res) => {
       'channel_not_text',
       'Messages can only be sent to text channels.',
     );
+  }
+  if (rejectPlaintextForEncryptedChannel(res, channel)) {
+    return;
   }
 
   const content = String(req.body?.content || '').trim();
@@ -1995,17 +5502,26 @@ app.post('/api/channels/:channelId/messages', authRequired, (req, res) => {
     userId: req.auth.user.id,
   });
 
-  const message = buildSerializedMessage(messageId);
+  const message = buildSerializedMessage(messageId, req.auth.user.id);
 
-  io.emit('message:new', { message });
+  for (const liveSocket of io.sockets.sockets.values()) {
+    liveSocket.emit('message:new', {
+      message: buildSerializedMessage(messageId, liveSocket.user.id),
+    });
+  }
 
   res.status(201).json({
     ok: true,
     message,
   });
-});
+  },
+);
 
-app.patch('/api/channels/:channelId/messages/:messageId', authRequired, (req, res) => {
+app.patch(
+  '/api/channels/:channelId/messages/:messageId',
+  authRequired,
+  contentMutationRateLimit,
+  (req, res) => {
   const channelId = Number(req.params.channelId);
   const messageId = Number(req.params.messageId);
 
@@ -2018,9 +5534,11 @@ app.patch('/api/channels/:channelId/messages/:messageId', authRequired, (req, re
   }
 
   const existing = db.prepare(`
-  SELECT id, channel_id, user_id
+  SELECT messages.id, messages.channel_id, messages.user_id,
+         channels.encryption_mode, channels.encryption_version
   FROM messages
-  WHERE id = ?
+  JOIN channels ON channels.id = messages.channel_id
+  WHERE messages.id = ?
   `).get(messageId);
 
   if (!existing || Number(existing.channel_id) !== channelId) {
@@ -2034,6 +5552,9 @@ app.patch('/api/channels/:channelId/messages/:messageId', authRequired, (req, re
       'message_edit_forbidden',
       'You can only edit your own messages.',
     );
+  }
+  if (rejectPlaintextForEncryptedChannel(res, existing)) {
+    return;
   }
 
   const content = String(req.body?.content || '').trim();
@@ -2063,16 +5584,25 @@ app.patch('/api/channels/:channelId/messages/:messageId', authRequired, (req, re
   WHERE id = ?
   `).run(content, nowIso(), messageId);
 
-  const message = buildSerializedMessage(messageId);
-  io.emit('message:update', { message });
+  const message = buildSerializedMessage(messageId, req.auth.user.id);
+  for (const liveSocket of io.sockets.sockets.values()) {
+    liveSocket.emit('message:update', {
+      message: buildSerializedMessage(messageId, liveSocket.user.id),
+    });
+  }
 
   res.json({
     ok: true,
     message,
   });
-});
+  },
+);
 
-app.delete('/api/channels/:channelId/messages/:messageId', authRequired, (req, res) => {
+app.delete(
+  '/api/channels/:channelId/messages/:messageId',
+  authRequired,
+  contentMutationRateLimit,
+  (req, res) => {
   const channelId = Number(req.params.channelId);
   const messageId = Number(req.params.messageId);
 
@@ -2131,7 +5661,8 @@ app.delete('/api/channels/:channelId/messages/:messageId', authRequired, (req, r
     channelId: toId(channelId),
     messageId: toId(messageId),
   });
-});
+  },
+);
 
 app.get('/api/members', authRequired, (_req, res) => {
   res.json({
@@ -2149,7 +5680,12 @@ app.get('/api/presence', authRequired, (_req, res) => {
   });
 });
 
-app.patch('/api/admin/server', authRequired, ownerOnly, (req, res) => {
+app.patch(
+  '/api/admin/server',
+  authRequired,
+  ownerOnly,
+  accountMutationRateLimit,
+  (req, res) => {
   const current = getServerConfig(db);
   const name =
   typeof req.body?.name === 'string' ? req.body.name.trim() : current.name;
@@ -2196,12 +5732,14 @@ app.patch('/api/admin/server', authRequired, ownerOnly, (req, res) => {
     ok: true,
     server: currentServer(),
   });
-});
+  },
+);
 
 app.post(
   '/api/admin/server/:slot',
   authRequired,
   ownerOnly,
+  uploadRateLimit,
   brandingUpload.single('file'),
          (req, res) => {
            const slot =
@@ -2256,7 +5794,12 @@ app.post(
          },
 );
 
-app.post('/api/admin/channels', authRequired, ownerOnly, (req, res) => {
+app.post(
+  '/api/admin/channels',
+  authRequired,
+  ownerOnly,
+  accountMutationRateLimit,
+  (req, res) => {
   const name = String(req.body?.name || '').trim();
   const type = String(req.body?.type || '').trim().toLowerCase();
 
@@ -2295,15 +5838,27 @@ app.post('/api/admin/channels', authRequired, ownerOnly, (req, res) => {
   .get().value;
   const nextPosition = Number(maxPosition) + 1;
   const createdAt = nowIso();
+  const encryptionMode = type === 'text' ? 'e2ee' : 'legacy';
+  const encryptionVersion = type === 'text' ? 1 : 0;
 
   const result = db.prepare(`
-  INSERT INTO channels (name, type, position, created_at)
-  VALUES (?, ?, ?, ?)
-  `).run(name, type, nextPosition, createdAt);
+  INSERT INTO channels (
+    name, type, position, created_at, encryption_mode, encryption_version
+  )
+  VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    name,
+    type,
+    nextPosition,
+    createdAt,
+    encryptionMode,
+    encryptionVersion,
+  );
 
   const channelRow = db
   .prepare(`
-  SELECT id, name, type, position, created_at
+  SELECT id, name, type, position, glyph, created_at,
+         encryption_mode, encryption_version
   FROM channels
   WHERE id = ?
   `)
@@ -2316,7 +5871,185 @@ app.post('/api/admin/channels', authRequired, ownerOnly, (req, res) => {
     channel: serializeChannel(channelRow, currentServer().id),
                        channels: currentChannels(),
   });
-});
+  },
+);
+
+app.patch(
+  '/api/admin/channels/:channelId',
+  authRequired,
+  ownerOnly,
+  accountMutationRateLimit,
+  (req, res) => {
+  const channelId = Number(req.params.channelId);
+  if (!Number.isInteger(channelId)) {
+    return apiError(res, 400, 'invalid_channel_id', 'Invalid channel id.');
+  }
+
+  const existing = db
+    .prepare(`
+    SELECT id, name, type, position, glyph, created_at,
+           encryption_mode, encryption_version
+    FROM channels
+    WHERE id = ?
+    `)
+    .get(channelId);
+
+  if (!existing) {
+    return apiError(res, 404, 'channel_not_found', 'Channel was not found.');
+  }
+
+  const patch = req.body ?? {};
+  const hasName = Object.prototype.hasOwnProperty.call(patch, 'name');
+  const hasGlyph = Object.prototype.hasOwnProperty.call(patch, 'glyph');
+  const hasEncryptionMode = Object.prototype.hasOwnProperty.call(
+    patch,
+    'encryptionMode',
+  );
+  const hasEncryptionVersion = Object.prototype.hasOwnProperty.call(
+    patch,
+    'encryptionVersion',
+  );
+
+  if (hasEncryptionMode || hasEncryptionVersion) {
+    return apiError(
+      res,
+      409,
+      'channel_encryption_immutable',
+      'A channel encryption boundary cannot be changed in place.',
+    );
+  }
+
+  if (!hasName && !hasGlyph) {
+    return apiError(
+      res,
+      400,
+      'missing_channel_patch',
+      'Nothing to update.',
+    );
+  }
+
+  let nextName = existing.name;
+  if (hasName) {
+    const name = String(patch.name || '').trim();
+    if (!name || name.length < 2 || name.length > 40) {
+      return apiError(
+        res,
+        400,
+        'invalid_channel_name',
+        'Channel name must be 2-40 characters.',
+      );
+    }
+
+    const duplicate = db
+      .prepare('SELECT id FROM channels WHERE lower(name) = lower(?) AND id != ?')
+      .get(name, channelId);
+    if (duplicate) {
+      return apiError(
+        res,
+        409,
+        'channel_name_taken',
+        'A channel with that name already exists.',
+      );
+    }
+
+    nextName = name;
+  }
+
+  let nextGlyph = existing.glyph || null;
+  if (hasGlyph) {
+    const glyphResult = normalizeChannelGlyph(patch.glyph);
+    if (!glyphResult.ok) {
+      return apiError(
+        res,
+        glyphResult.status,
+        glyphResult.code,
+        glyphResult.message,
+      );
+    }
+    nextGlyph = glyphResult.value;
+  }
+
+  db.prepare(`
+  UPDATE channels
+  SET name = ?, glyph = ?
+  WHERE id = ?
+  `).run(nextName, nextGlyph, channelId);
+
+  const channelRow = db
+    .prepare(`
+    SELECT id, name, type, position, glyph, created_at,
+           encryption_mode, encryption_version
+    FROM channels
+    WHERE id = ?
+    `)
+    .get(channelId);
+
+  emitServerUpdated();
+
+  res.json({
+    ok: true,
+    channel: serializeChannel(channelRow, currentServer().id),
+    channels: currentChannels(),
+  });
+  },
+);
+
+app.delete(
+  '/api/admin/channels/:channelId',
+  authRequired,
+  ownerOnly,
+  accountMutationRateLimit,
+  (req, res) => {
+  const channelId = Number(req.params.channelId);
+  if (!Number.isInteger(channelId)) {
+    return apiError(res, 400, 'invalid_channel_id', 'Invalid channel id.');
+  }
+
+  const channel = db
+    .prepare('SELECT id, name, type FROM channels WHERE id = ?')
+    .get(channelId);
+  if (!channel) {
+    return apiError(res, 404, 'channel_not_found', 'Channel was not found.');
+  }
+
+  const attachments = db
+    .prepare('SELECT relative_path FROM attachments WHERE channel_id = ?')
+    .all(channelId);
+
+  db.transaction(() => {
+    db.prepare('DELETE FROM attachments WHERE channel_id = ?').run(channelId);
+    db.prepare('DELETE FROM messages WHERE channel_id = ?').run(channelId);
+    db.prepare('DELETE FROM channels WHERE id = ?').run(channelId);
+  })();
+
+  for (const attachment of attachments) {
+    removeAttachmentFile(attachment.relative_path);
+  }
+
+  let presenceChanged = false;
+  for (const [socketId, presence] of socketPresence.entries()) {
+    if (Number(presence.voiceChannelId) !== channelId) {
+      continue;
+    }
+    presence.voiceChannelId = null;
+    presence.voiceJoinedAt = null;
+    presence.voiceState = sanitizeVoiceMediaState();
+    socketPresence.set(socketId, presence);
+    presenceChanged = true;
+  }
+
+  if (presenceChanged) {
+    emitPresence();
+  }
+  emitServerUpdated();
+
+  res.json({
+    ok: true,
+    deletedChannelId: toId(channelId),
+    channels: currentChannels(),
+  });
+  },
+);
 
 app.get('/api/admin/bans', authRequired, ownerOnly, (_req, res) => {
   res.json({
@@ -2325,7 +6058,12 @@ app.get('/api/admin/bans', authRequired, ownerOnly, (_req, res) => {
   });
 });
 
-app.post('/api/admin/bans', authRequired, ownerOnly, (req, res) => {
+app.post(
+  '/api/admin/bans',
+  authRequired,
+  ownerOnly,
+  accountMutationRateLimit,
+  (req, res) => {
   const targetUserId = Number(req.body?.userId);
   const reason = String(req.body?.reason || '').trim();
 
@@ -2388,9 +6126,15 @@ app.post('/api/admin/bans', authRequired, ownerOnly, (req, res) => {
     ban: serializeBan(ban),
     bans: currentBans(),
   });
-});
+  },
+);
 
-app.delete('/api/admin/bans/:banId', authRequired, ownerOnly, (req, res) => {
+app.delete(
+  '/api/admin/bans/:banId',
+  authRequired,
+  ownerOnly,
+  accountMutationRateLimit,
+  (req, res) => {
   const banId = Number(req.params?.banId);
   if (!Number.isInteger(banId)) {
     return apiError(
@@ -2419,9 +6163,13 @@ app.delete('/api/admin/bans/:banId', authRequired, ownerOnly, (req, res) => {
     ban: serializeBan(revoked),
     bans: currentBans(),
   });
-});
+  },
+);
 
 io.use((socket, next) => {
+  if (!allowSocketConnection(socket)) {
+    return next(new Error('Too many realtime connection attempts.'));
+  }
   const token = socket.handshake.auth?.token;
   if (!token) {
     return next(new Error('Missing auth token.'));
@@ -2437,17 +6185,24 @@ io.use((socket, next) => {
     yuid: row.yuid || null,
   });
   if (activeBan) {
-    db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
+    revokeSession(db, token);
     return next(new Error('This account or YUID is banned from this server.'));
   }
+  if (row.media_device_id && row.media_device_revoked_at) {
+    revokeSession(db, token);
+    return next(new Error('This media device identity has been revoked.'));
+  }
 
-  touchSession(db, token);
+  touchSession(db, token, nextIdleExpiry());
   socket.user = {
     id: row.user_id,
     username: row.username,
     role: row.role,
     yuid: row.yuid || null,
     yuidVerified: Boolean(row.yuidVerified || (row.yuid && row.yuid_public_key)),
+    sessionId: row.session_id,
+    mediaDeviceId: row.media_device_id || null,
+    mediaPublicKey: row.media_device_public_key || null,
     token,
   };
   next();
@@ -2457,6 +6212,7 @@ io.on('connection', (socket) => {
   socketPresence.set(socket.id, {
     userId: socket.user.id,
     username: socket.user.username,
+    mediaDeviceId: socket.user.mediaDeviceId,
     voiceChannelId: null,
     voiceJoinedAt: null,
     voiceState: sanitizeVoiceMediaState(),
@@ -2481,10 +6237,22 @@ io.on('connection', (socket) => {
   });
 
   socket.on('presence:ping', () => {
-    touchSession(db, socket.user.token);
+    if (!allowSocketEvent(socket, 'control', socketControlLimit)) return;
+    touchSession(db, socket.user.token, nextIdleExpiry());
   });
 
   socket.on('voice:join', (payload = {}, ack) => {
+    if (!allowSocketEvent(socket, 'control', socketControlLimit, ack)) return;
+    if (!socket.user.mediaDeviceId || !socket.user.mediaPublicKey) {
+      ack?.({
+        ok: false,
+        error: {
+          code: 'media_device_required',
+          message: 'Register this device before joining voice.',
+        },
+      });
+      return;
+    }
     const channelId = Number(payload.channelId);
     if (!Number.isInteger(channelId)) {
       if (typeof ack === 'function') {
@@ -2529,7 +6297,8 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const joiningSameDeck = Number(current.voiceChannelId) === channelId;
+    const previousChannelId = current.voiceChannelId;
+    const joiningSameDeck = Number(previousChannelId) === channelId;
     current.voiceChannelId = channelId;
     current.voiceJoinedAt = joiningSameDeck && current.voiceJoinedAt
     ? current.voiceJoinedAt
@@ -2538,18 +6307,33 @@ io.on('connection', (socket) => {
     socketPresence.set(socket.id, current);
 
     emitPresence();
+    if (!joiningSameDeck && previousChannelId != null) {
+      emitMediaRoomState(previousChannelId);
+    }
+    const mediaState = emitMediaRoomState(channelId);
 
     if (typeof ack === 'function') {
       ack({
         ok: true,
         channelId: toId(channelId),
-          channelName: channel.name,
-          joinedAt: current.voiceJoinedAt,
+        channelName: channel.name,
+        joinedAt: current.voiceJoinedAt,
+        mediaE2ee: mediaState
+          ? {
+              protocol: 'yappa-media-room-v1',
+              serverId,
+              channelId: toId(channelId),
+              epoch: mediaState.epoch,
+              membershipSequence: mediaState.membershipSequence,
+              leaderDeviceId: mediaState.leaderDeviceId,
+            }
+          : null,
       });
     }
   });
 
   socket.on('voice:leave', (_payload = {}, ack) => {
+    if (!allowSocketEvent(socket, 'control', socketControlLimit, ack)) return;
     const current = socketPresence.get(socket.id);
     if (!current) {
       if (typeof ack === 'function') {
@@ -2564,12 +6348,14 @@ io.on('connection', (socket) => {
       return;
     }
 
+    const previousChannelId = current.voiceChannelId;
     current.voiceChannelId = null;
     current.voiceJoinedAt = null;
     current.voiceState = sanitizeVoiceMediaState(current.voiceState);
     socketPresence.set(socket.id, current);
 
     emitPresence();
+    emitMediaRoomState(previousChannelId);
 
     if (typeof ack === 'function') {
       ack({ ok: true });
@@ -2577,6 +6363,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('voice:state', (payload = {}, ack) => {
+    if (!allowSocketEvent(socket, 'control', socketControlLimit, ack)) return;
     const current = socketPresence.get(socket.id);
     if (!current) {
       if (typeof ack === 'function') {
@@ -2591,14 +6378,10 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const nextVoiceState = sanitizeVoiceMediaState({
-      ...current.voiceState,
-      micMuted: payload.micMuted,
-      audioMuted: payload.audioMuted,
-      cameraEnabled: payload.cameraEnabled,
-      screenShareEnabled: payload.screenShareEnabled,
-      speaking: payload.speaking,
-    });
+    const nextVoiceState = mergeVoiceMediaState(
+      current.voiceState,
+      payload,
+    );
 
     const changed = voiceMediaStateChanged(current.voiceState, nextVoiceState);
     current.voiceState = nextVoiceState;
@@ -2616,7 +6399,101 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('media:e2ee:envelope', (payload = {}, ack) => {
+    if (!allowSocketEvent(socket, 'media-envelope', mediaEnvelopeLimit, ack)) {
+      return;
+    }
+    const envelope = payload?.envelope;
+    if (!validateMediaEnvelopePayload(envelope)) {
+      ack?.({
+        ok: false,
+        error: {
+          code: 'invalid_media_envelope',
+          message: 'Invalid media key envelope.',
+        },
+      });
+      return;
+    }
+    const presence = socketPresence.get(socket.id);
+    const channelId = toId(envelope.channelId);
+    if (
+      !presence ||
+      toId(presence.voiceChannelId) !== channelId ||
+      socket.user.mediaDeviceId !== envelope.senderDeviceId
+    ) {
+      ack?.({
+        ok: false,
+        error: {
+          code: 'media_envelope_sender_forbidden',
+          message: 'The sender is not active in this encrypted room.',
+        },
+      });
+      return;
+    }
+    const roomState = mediaRoomStates.get(channelId);
+    if (!roomState || roomState.epoch !== envelope.epoch) {
+      ack?.({
+        ok: false,
+        error: {
+          code: 'stale_media_epoch',
+          message: 'The media key envelope uses a stale room epoch.',
+        },
+      });
+      return;
+    }
+    const members = activeMediaRoomMembers(channelId);
+    const sender = members.find(
+      (member) => member.device.id === envelope.senderDeviceId,
+    );
+    if (
+      !sender ||
+      roomState.leaderDeviceId !== envelope.senderDeviceId ||
+      !verifyRelayedMediaEnvelope(envelope, sender.device)
+    ) {
+      ack?.({
+        ok: false,
+        error: {
+          code: 'invalid_media_envelope_signature',
+          message: 'The media key envelope authorization is invalid.',
+        },
+      });
+      return;
+    }
+    const recipient = members.find(
+      (member) => member.device.id === envelope.recipientDeviceId,
+    );
+    if (!recipient) {
+      ack?.({
+        ok: false,
+        error: {
+          code: 'media_envelope_recipient_forbidden',
+          message: 'The recipient is not active in this encrypted room.',
+        },
+      });
+      return;
+    }
+    const previousSequence =
+      roomState.lastEnvelopeSequenceBySender.get(envelope.senderDeviceId) || 0;
+    if (envelope.messageSequence <= previousSequence) {
+      ack?.({
+        ok: false,
+        error: {
+          code: 'replayed_media_envelope',
+          message: 'The media key envelope sequence was already used.',
+        },
+      });
+      return;
+    }
+    roomState.lastEnvelopeSequenceBySender.set(
+      envelope.senderDeviceId,
+      envelope.messageSequence,
+    );
+    io.to(recipient.socketId).emit('media:e2ee:envelope', { envelope });
+    ack?.({ ok: true });
+  });
+
   socket.on('voice:signal:offer', (payload = {}, ack) => {
+    if (!allowSocketEvent(socket, 'signal', socketSignalLimit, ack)) return;
     try {
       const fromUserId = toId(socket.user.id);
       const { toUserId, channelId, sdp, type } = payload;
@@ -2655,11 +6532,13 @@ io.on('connection', (socket) => {
 
       ack?.({ ok: true });
     } catch (error) {
-      ack?.({ ok: false, error: error.message || 'Failed to relay offer.' });
+      logOperationalFailure('voice offer relay', error);
+      ack?.({ ok: false, error: 'Failed to relay offer.' });
     }
   });
 
   socket.on('voice:signal:answer', (payload = {}, ack) => {
+    if (!allowSocketEvent(socket, 'signal', socketSignalLimit, ack)) return;
     try {
       const fromUserId = toId(socket.user.id);
       const { toUserId, channelId, sdp, type } = payload;
@@ -2698,11 +6577,13 @@ io.on('connection', (socket) => {
 
       ack?.({ ok: true });
     } catch (error) {
-      ack?.({ ok: false, error: error.message || 'Failed to relay answer.' });
+      logOperationalFailure('voice answer relay', error);
+      ack?.({ ok: false, error: 'Failed to relay answer.' });
     }
   });
 
   socket.on('voice:signal:ice-candidate', (payload = {}, ack) => {
+    if (!allowSocketEvent(socket, 'signal', socketSignalLimit, ack)) return;
     try {
       const fromUserId = toId(socket.user.id);
       const { toUserId, channelId, candidate, sdpMid, sdpMLineIndex } = payload;
@@ -2742,80 +6623,121 @@ io.on('connection', (socket) => {
 
       ack?.({ ok: true });
     } catch (error) {
+      logOperationalFailure('voice ICE relay', error);
       ack?.({
         ok: false,
-        error: error.message || 'Failed to relay ICE candidate.',
+        error: 'Failed to relay ICE candidate.',
       });
     }
   });
 
   socket.on('disconnect', () => {
+    const previousChannelId = socketPresence.get(socket.id)?.voiceChannelId;
     socketPresence.delete(socket.id);
     if (onlineUsersById.get(toId(socket.user.id)) === socket.id) {
       onlineUsersById.delete(toId(socket.user.id));
     }
     emitPresence();
+    emitMediaRoomState(previousChannelId);
   });
 });
 
 setInterval(() => {
   const expired = getExpiredAttachments(db, nowIso());
-  if (expired.length === 0) {
-    return;
-  }
+  const expiredEncrypted = db.prepare(`
+    SELECT *
+    FROM encrypted_attachments
+    WHERE deleted_at IS NULL
+    AND expires_at IS NOT NULL
+    AND expires_at <= ?
+    ORDER BY id ASC
+    LIMIT 200
+  `).all(nowIso());
 
   const deletedAt = nowIso();
 
-  for (const attachment of expired) {
+  for (const attachment of [...expired, ...expiredEncrypted]) {
     const absolutePath = path.join(DATA_ROOT, attachment.relative_path);
     try {
       if (fs.existsSync(absolutePath)) {
         fs.unlinkSync(absolutePath);
       }
     } catch (error) {
-      console.error(
-        'Failed to delete expired attachment file:',
-        absolutePath,
-        error.message,
-      );
+      logOperationalFailure('expired attachment cleanup', error);
       continue;
     }
 
-    markAttachmentDeleted(db, attachment.id, deletedAt);
+    if (String(attachment.id).startsWith('eatt_')) {
+      db.prepare(`
+        UPDATE encrypted_attachments
+        SET deleted_at = ?
+        WHERE id = ?
+      `).run(deletedAt, attachment.id);
+    } else {
+      markAttachmentDeleted(db, attachment.id, deletedAt);
+    }
   }
 }, 5 * 60 * 1000);
 
 app.use((error, _req, res, next) => {
+  if (error?.code === 'cors_origin_denied') {
+    return apiError(
+      res,
+      403,
+      'cors_origin_denied',
+      'This browser origin is not allowed by the server.',
+    );
+  }
+
+  if (error?.type === 'entity.too.large') {
+    return apiError(
+      res,
+      413,
+      'request_body_too_large',
+      'The request body exceeds this server limit.',
+    );
+  }
+
   if (error instanceof multer.MulterError) {
     if (error.code === 'LIMIT_FILE_SIZE') {
       return apiError(
         res,
-        400,
+        413,
         'file_too_large',
-        'Uploaded file exceeds the 10 MB branding limit.',
+        'The uploaded file exceeds this server’s configured limit.',
       );
     }
-    return apiError(res, 400, 'upload_error', error.message);
+    return apiError(
+      res,
+      400,
+      'upload_error',
+      'The multipart upload could not be processed.',
+    );
   }
 
   if (error) {
-    console.error(error);
+    const incidentId = crypto.randomUUID();
+    console.error(
+      `[server] Unexpected request failure (incident=${incidentId}, ` +
+        `code=${safeOperationalErrorCode(error)}).`,
+    );
     return apiError(
       res,
       500,
       'internal_error',
       'An internal server error occurred.',
+      { incidentId },
     );
   }
 
   return next();
 });
 
-httpServer.listen(PORT, () => {
-  const server = currentServer();
-  console.log(`Yappa node listening on http://127.0.0.1:${PORT}`);
-  console.log(`Node name: ${server.name}`);
-  console.log(`Server id: ${server.id}`);
-  console.log(`DB path: ${DB_PATH}`);
-  console.log(`Data root: ${DATA_ROOT}`);
+httpServer.listen(PORT, LISTEN_HOST, () => {
+  console.log(`Yappa node listening on configured interface port ${PORT}.`);
+  if (!configuredAttachmentSigningSecret) {
+    console.warn(
+      'Attachment signing is using an ephemeral key; links will be invalidated on restart.',
+    );
+  }
 });

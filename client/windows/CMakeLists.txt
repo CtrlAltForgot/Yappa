@@ -52,6 +52,38 @@ add_subdirectory(${FLUTTER_MANAGED_DIR})
 # Application build; see runner/CMakeLists.txt.
 add_subdirectory("runner")
 
+# Build the pinned native MLS bridge for the active Visual Studio
+# configuration. Cargo's `dev` profile emits into `debug`; all distributable
+# configurations use the optimized `release` profile.
+find_program(CARGO_EXECUTABLE cargo REQUIRED)
+set(YAPPA_MLS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../native/yappa_mls")
+set(YAPPA_MLS_TARGET_DIR "${CMAKE_BINARY_DIR}/yappa_mls")
+file(GLOB_RECURSE YAPPA_MLS_SOURCES CONFIGURE_DEPENDS
+  "${YAPPA_MLS_DIR}/src/*.rs"
+  "${YAPPA_MLS_DIR}/vendor/hpke-rs/src/*.rs"
+)
+add_custom_target(yappa_mls_native ALL
+  # Rust panic/location strings otherwise retain the Windows builder account
+  # through Cargo registry source paths.
+  COMMAND "${CMAKE_COMMAND}" -E env
+    "RUSTFLAGS=--remap-path-prefix=$ENV{USERPROFILE}=/_yappa_build_home"
+    "${CARGO_EXECUTABLE}" build --locked
+    --profile "$<IF:$<CONFIG:Debug>,dev,release>"
+    --manifest-path "${YAPPA_MLS_DIR}/Cargo.toml"
+    --target-dir "${YAPPA_MLS_TARGET_DIR}"
+  BYPRODUCTS
+    "${YAPPA_MLS_TARGET_DIR}/debug/yappa_mls.dll"
+    "${YAPPA_MLS_TARGET_DIR}/release/yappa_mls.dll"
+  SOURCES
+    "${YAPPA_MLS_DIR}/Cargo.toml"
+    "${YAPPA_MLS_DIR}/Cargo.lock"
+    "${YAPPA_MLS_DIR}/vendor/hpke-rs/Cargo.toml"
+    ${YAPPA_MLS_SOURCES}
+  WORKING_DIRECTORY "${YAPPA_MLS_DIR}"
+  VERBATIM
+)
+add_dependencies(${BINARY_NAME} yappa_mls_native)
+
 
 # Generated plugin build rules, which manage building the plugins and adding
 # them to the application.
@@ -80,6 +112,13 @@ install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}
 
 install(FILES "${FLUTTER_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)
+
+install(
+  FILES
+    "$<IF:$<CONFIG:Debug>,${YAPPA_MLS_TARGET_DIR}/debug/yappa_mls.dll,${YAPPA_MLS_TARGET_DIR}/release/yappa_mls.dll>"
+  DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+  COMPONENT Runtime
+)
 
 if(PLUGIN_BUNDLED_LIBRARIES)
   install(FILES "${PLUGIN_BUNDLED_LIBRARIES}"

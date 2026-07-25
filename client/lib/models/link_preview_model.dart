@@ -8,6 +8,7 @@ class LinkPreview {
   final String imageUrl;
   final String iconUrl;
   final String mediaUrl;
+  final double mediaAspectRatio;
   final String kind;
   final String contentType;
 
@@ -21,6 +22,7 @@ class LinkPreview {
     required this.imageUrl,
     required this.iconUrl,
     required this.mediaUrl,
+    required this.mediaAspectRatio,
     required this.kind,
     required this.contentType,
   });
@@ -49,8 +51,14 @@ class LinkPreview {
       imageUrl: (json['imageUrl'] as String?) ?? '',
       iconUrl: (json['iconUrl'] as String?) ?? '',
       mediaUrl: (json['mediaUrl'] as String?) ?? '',
+      mediaAspectRatio: _safeMediaAspectRatio(json['mediaAspectRatio']),
       kind: (json['kind'] as String?) ?? 'link',
       contentType: (json['contentType'] as String?) ?? '',
     );
+  }
+
+  static double _safeMediaAspectRatio(Object? value) {
+    final ratio = value is num ? value.toDouble() : 16 / 9;
+    return ratio.isFinite && ratio >= 0.4 && ratio <= 3 ? ratio : 16 / 9;
   }
 }

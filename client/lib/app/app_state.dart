@@ -9,8 +9,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/api_client.dart';
 import '../data/audio_preferences.dart';
+import '../data/encrypted_attachment_failure.dart';
 import '../data/mic_input_service.dart';
+import '../data/media_device_identity_service.dart';
+import '../data/media_e2ee_coordinator.dart';
+import '../data/mls_attachment_coordinator.dart';
+import '../data/mls_channel_runtime.dart';
+import '../data/mls_delivery_models.dart';
 import '../data/realtime_client.dart';
+import '../data/secret_storage.dart';
 import '../data/voice_transport_service.dart';
 import '../data/yuid_identity_service.dart';
 import '../data/video_preferences.dart';
@@ -28,6 +35,7 @@ class AppState extends ChangeNotifier {
   static const _membersKey = 'yappa_members';
   static const _messagesKey = 'yappa_messages';
   static const _tokensKey = 'yappa_tokens';
+  static const _secureTokensKey = 'yappa.session_tokens.v1';
   static const _rememberedUsersKey = 'yappa_authenticated_users';
   static const _activeServerIdKey = 'yappa_active_server_id';
   static const _currentUsernameKey = 'yappa_current_username';
@@ -38,11 +46,24 @@ class AppState extends ChangeNotifier {
   static const _voiceMemberVolumesKey = 'yappa_voice_member_volumes';
 
   final ApiClient _api = ApiClient();
-  final YuidIdentityService _yuidIdentity = YuidIdentityService();
+  final SecretStorage _secretStorage;
+  late final YuidIdentityService _yuidIdentity = YuidIdentityService(
+    secretStorage: _secretStorage,
+  );
+  late final MediaDeviceIdentityService _mediaDeviceIdentity =
+      MediaDeviceIdentityService(secretStorage: _secretStorage);
   final MicInputService _micInput = MicInputService();
   final VoiceTransportService _voiceTransport = VoiceTransportService();
+  late final MediaE2eeCoordinator _mediaE2ee;
 
   final Map<String, Future<LinkPreview?>> _linkPreviewCache = {};
+  final Set<String> _refreshedMessageChannelIds = {};
+  final Set<String> _rotatedSessionServerIds = {};
+  final Set<String> _registeredMediaDeviceServerIds = {};
+  final Map<String, MlsServerRuntime> _mlsRuntimesByServerId = {};
+  final Map<String, Future<MlsServerRuntime>> _mlsRuntimeFuturesByServerId = {};
+  final Map<String, MlsChannelRuntime> _mlsChannelsByChannelId = {};
+  final Map<String, MlsChannelStartup> _mlsStartupByChannelId = {};
 
   final List<ChatServer> _servers;
   final List<ChatChannel> _channels;
@@ -67,21 +88,27 @@ class AppState extends ChangeNotifier {
   bool? _lastAppliedTransportMuted;
   bool _voiceTransportMuteSyncRunning = false;
   bool _voiceTransportMuteSyncQueued = false;
+  int _voiceJoinGeneration = 0;
+  Future<void> _voiceAbortFuture = Future<void>.value();
   final Set<String> _voiceOfferInFlightPeerIds = {};
 
   static const double _defaultVoiceActivityStartThreshold = 0.12;
   static const double _defaultVoiceActivityStopThreshold = 0.06;
-  static const Duration _voiceActivityReleaseDelay =
-      Duration(milliseconds: 240);
+  static const Duration _voiceActivityReleaseDelay = Duration(
+    milliseconds: 240,
+  );
 
   String? _currentUsername;
   String? _activeServerId;
   String? _selectedServerId;
+  String? _unreachableServerId;
   String? _selectedChannelId;
   String? _lastError;
   bool _isBusy = false;
   String? _globalYuid;
   bool _screenShareSelectionPending = false;
+  bool _screenShareToggleInProgress = false;
+  bool _screenShareTransportSyncInFlight = false;
 
   AppState._({
     required List<ChatServer> servers,
@@ -95,31 +122,67 @@ class AppState extends ChangeNotifier {
     required Map<String, String> userIdByServerId,
     required Map<String, List<VoiceDeckState>> voiceDeckStatesByServerId,
     required Map<String, VoicePresenceState> localVoiceStateByServerId,
+    required SecretStorage secretStorage,
     String? activeServerId,
     String? currentUsername,
     String? selectedServerId,
     String? selectedChannelId,
-  })  : _servers = servers,
-        _channels = channels,
-        _membersByServer = membersByServer,
-        _messagesByChannel = messagesByChannel,
-        _tokensByServerId = tokensByServerId,
-        _rememberedUsersByServer = rememberedUsersByServer,
-        _permissionsByServerId = permissionsByServerId,
-        _serverSettingsByServerId = serverSettingsByServerId,
-        _userIdByServerId = userIdByServerId,
-        _voiceDeckStatesByServerId = voiceDeckStatesByServerId,
-        _localVoiceStateByServerId = localVoiceStateByServerId,
-        _activeServerId = activeServerId,
-        _currentUsername = currentUsername,
-        _selectedServerId = selectedServerId,
-        _selectedChannelId = selectedChannelId {
+  }) : _servers = servers,
+       _channels = channels,
+       _membersByServer = membersByServer,
+       _messagesByChannel = messagesByChannel,
+       _tokensByServerId = tokensByServerId,
+       _rememberedUsersByServer = rememberedUsersByServer,
+       _permissionsByServerId = permissionsByServerId,
+       _serverSettingsByServerId = serverSettingsByServerId,
+       _userIdByServerId = userIdByServerId,
+       _voiceDeckStatesByServerId = voiceDeckStatesByServerId,
+       _localVoiceStateByServerId = localVoiceStateByServerId,
+       _secretStorage = secretStorage,
+       _activeServerId = activeServerId,
+       _currentUsername = currentUsername,
+       _selectedServerId = selectedServerId,
+       _selectedChannelId = selectedChannelId {
     _micInput.addListener(_handleMicInputChanged);
     _voiceTransport.addListener(_handleVoiceTransportChanged);
     _voiceTransport.onLocalIceCandidate = _handleLocalVoiceIceCandidate;
+    _mediaE2ee = MediaE2eeCoordinator(
+      deviceIdentity: _mediaDeviceIdentity,
+      yuidIdentity: _yuidIdentity,
+      sendEnvelope: (envelope) async {
+        final realtime = _realtime;
+        if (realtime == null) {
+          throw StateError('Realtime connection is not active.');
+        }
+        await realtime.sendMediaKeyEnvelope(envelope);
+      },
+      onKeyChanged: (key, participantDeviceIds) {
+        return _voiceTransport.updateMediaEncryptionKey(
+          key: key.bytes,
+          keyIndex: key.keyIndex,
+          participantIds: participantDeviceIds,
+        );
+      },
+      onKeyUnavailable: (keyIndex, participantDeviceIds) {
+        return _voiceTransport.suspendMediaForKeyRotation(
+          keyIndex: keyIndex,
+          participantIds: participantDeviceIds,
+        );
+      },
+      onError: (error) {
+        unawaited(_voiceTransport.failMediaEncryption(error));
+        _lastError =
+            'End-to-end media encryption failed: '
+            '${error.toString().replaceFirst('FormatException: ', '')}';
+        notifyListeners();
+      },
+      onStatusChanged: (_) => notifyListeners(),
+    );
   }
 
-  factory AppState.empty() {
+  factory AppState.empty({
+    SecretStorage secretStorage = const OsSecretStorage(),
+  }) {
     return AppState._(
       servers: [],
       channels: [],
@@ -132,6 +195,7 @@ class AppState extends ChangeNotifier {
       userIdByServerId: {},
       voiceDeckStatesByServerId: {},
       localVoiceStateByServerId: {},
+      secretStorage: secretStorage,
     );
   }
 
@@ -142,6 +206,13 @@ class AppState extends ChangeNotifier {
 
     final state = AppState.empty();
     state._restoreFromPrefs(prefs);
+    await state._restoreSecrets(prefs);
+    final identity = await state._yuidIdentity.getOrCreateIdentity();
+    await state._mediaDeviceIdentity.getOrCreateIdentity();
+    state._globalYuid = identity.yuid;
+    // Persist load-time schema/address normalization before any connection
+    // attempt so retired transport names are not retained or retried.
+    await state._persist();
 
     final activeServerId = state._activeServerId;
     if (activeServerId != null &&
@@ -152,16 +223,8 @@ class AppState extends ChangeNotifier {
           reconnectRealtime: true,
           notify: false,
         );
-      } catch (_) {
-        state._tokensByServerId.remove(activeServerId);
-        state._rememberedUsersByServer.remove(activeServerId);
-        state._permissionsByServerId.remove(activeServerId);
-        state._serverSettingsByServerId.remove(activeServerId);
-        state._userIdByServerId.remove(activeServerId);
-        state._voiceDeckStatesByServerId.remove(activeServerId);
-        state._localVoiceStateByServerId.remove(activeServerId);
-        state._activeServerId = null;
-        state._currentUsername = null;
+      } catch (error) {
+        state._handleSessionRestoreFailure(activeServerId, error);
         await state._persist();
       }
     }
@@ -174,8 +237,25 @@ class AppState extends ChangeNotifier {
       _currentUsername != null &&
       _serverById(_activeServerId!) != null;
 
+  MediaE2eeStatus get mediaE2eeStatus {
+    final coordinated = _mediaE2ee.status;
+    if (coordinated == MediaE2eeStatus.failed ||
+        coordinated == MediaE2eeStatus.idle) {
+      return coordinated;
+    }
+    if (_voiceTransport.e2eeFailed) {
+      return MediaE2eeStatus.failed;
+    }
+    return coordinated == MediaE2eeStatus.encrypted &&
+            _voiceTransport.localE2eeReady
+        ? MediaE2eeStatus.encrypted
+        : MediaE2eeStatus.establishing;
+  }
+
   bool get isBusy => _isBusy;
   String? get lastError => _lastError;
+  bool get isSelectedServerUnreachable =>
+      selectedServerId.isNotEmpty && _unreachableServerId == selectedServerId;
   String get currentUsername => _currentUsername ?? 'Offline';
 
   String get currentDisplayName {
@@ -209,18 +289,21 @@ class AppState extends ChangeNotifier {
 
   livekit.VideoTrack? get localCameraTrack => _voiceTransport.localCameraTrack;
   livekit.VideoTrack? get localScreenShareTrack {
-    if (_screenShareSelectionPending || !selectedLocalVoiceState.screenShareEnabled) {
+    if (_screenShareSelectionPending ||
+        !selectedLocalVoiceState.screenShareEnabled) {
       return null;
     }
     return _voiceTransport.localScreenShareTrack;
   }
+
   Map<String, livekit.VideoTrack> get remoteCameraTracks =>
       _voiceTransport.remoteCameraTracks;
   Map<String, livekit.VideoTrack> get remoteScreenShareTracks =>
       _voiceTransport.remoteScreenShareTracks;
 
   bool get voiceActivityEnabled => _voiceActivityEnabled;
-  YappaVoiceInputMode get voiceInputMode => YappaAudioPreferences.voiceInputMode;
+  YappaVoiceInputMode get voiceInputMode =>
+      YappaAudioPreferences.voiceInputMode;
   String? get preferredOutputDeviceId =>
       YappaAudioPreferences.preferredOutputDeviceId;
 
@@ -279,14 +362,15 @@ class AppState extends ChangeNotifier {
       return const [];
     }
 
-    final filtered = _channels
-        .where((channel) => channel.serverId == selectedServerId)
-        .toList()
-      ..sort((a, b) {
-        final comparePosition = a.position.compareTo(b.position);
-        if (comparePosition != 0) return comparePosition;
-        return a.name.compareTo(b.name);
-      });
+    final filtered =
+        _channels
+            .where((channel) => channel.serverId == selectedServerId)
+            .toList()
+          ..sort((a, b) {
+            final comparePosition = a.position.compareTo(b.position);
+            if (comparePosition != 0) return comparePosition;
+            return a.name.compareTo(b.name);
+          });
 
     return filtered;
   }
@@ -309,12 +393,11 @@ class AppState extends ChangeNotifier {
   }
 
   List<ChatMessage> get selectedMessages => List.unmodifiable(
-        _messagesByChannel[selectedChannelId] ?? const <ChatMessage>[],
-      );
+    _messagesByChannel[selectedChannelId] ?? const <ChatMessage>[],
+  );
 
-  List<Member> get selectedMembers => List.unmodifiable(
-        _membersByServer[selectedServerId] ?? const <Member>[],
-      );
+  List<Member> get selectedMembers =>
+      List.unmodifiable(_membersByServer[selectedServerId] ?? const <Member>[]);
 
   List<VoiceDeckState> get selectedVoiceDeckStates {
     final serverId = selectedServerId;
@@ -328,8 +411,9 @@ class AppState extends ChangeNotifier {
 
     final knownIds = stored.map((item) => item.channelId).toSet();
 
-    for (final channel in channelsForSelectedServer
-        .where((channel) => channel.type == ChannelType.voice)) {
+    for (final channel in channelsForSelectedServer.where(
+      (channel) => channel.type == ChannelType.voice,
+    )) {
       if (!knownIds.contains(channel.id)) {
         stored.add(
           VoiceDeckState(
@@ -431,7 +515,10 @@ class AppState extends ChangeNotifier {
     await _persist();
   }
 
-  List<Member> _applyLocalProfilesToMembers(String serverId, List<Member> members) {
+  List<Member> _applyLocalProfilesToMembers(
+    String serverId,
+    List<Member> members,
+  ) {
     return List<Member>.unmodifiable(members);
   }
 
@@ -448,10 +535,13 @@ class AppState extends ChangeNotifier {
       currentVoiceChannelIdForSelectedServer == channelId;
 
   List<Member> membersForVoiceDeck(String channelId) {
-    final members = (_membersByServer[selectedServerId] ?? const <Member>[])
-        .where((member) => member.voiceChannelId == channelId)
-        .toList()
-      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    final members =
+        (_membersByServer[selectedServerId] ?? const <Member>[])
+            .where((member) => member.voiceChannelId == channelId)
+            .toList()
+          ..sort(
+            (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+          );
     return List.unmodifiable(members);
   }
 
@@ -465,7 +555,8 @@ class AppState extends ChangeNotifier {
       selectedLocalVoiceState.cameraEnabled || localCameraTrack != null;
   bool get selectedScreenShareEnabled =>
       !_screenShareSelectionPending &&
-      selectedLocalVoiceState.screenShareEnabled;
+      selectedLocalVoiceState.screenShareEnabled &&
+      _voiceTransport.localScreenShareTrack != null;
 
   bool get screenShareSelectionPending => _screenShareSelectionPending;
   bool get selectedSpeaking => selectedLocalVoiceState.speaking;
@@ -494,23 +585,28 @@ class AppState extends ChangeNotifier {
 
     try {
       await _restoreSession(serverId, reconnectRealtime: true);
-    } catch (_) {
-      _tokensByServerId.remove(serverId);
-      _rememberedUsersByServer.remove(serverId);
-      _permissionsByServerId.remove(serverId);
-      _serverSettingsByServerId.remove(serverId);
-      _userIdByServerId.remove(serverId);
-      _voiceDeckStatesByServerId.remove(serverId);
-      _localVoiceStateByServerId.remove(serverId);
-
-      if (_activeServerId == serverId) {
-        _disconnectRealtime();
-        _activeServerId = null;
-        _currentUsername = null;
-      }
-
+    } catch (error) {
+      _handleSessionRestoreFailure(serverId, error);
       notifyListeners();
       await _persist();
+    }
+  }
+
+  Future<void> retrySelectedServerConnection() async {
+    final serverId = selectedServerId;
+    if (serverId.isEmpty || !_tokensByServerId.containsKey(serverId)) {
+      return;
+    }
+
+    _setBusy(true);
+    try {
+      await _restoreSession(serverId, reconnectRealtime: true);
+    } catch (error) {
+      _handleSessionRestoreFailure(serverId, error);
+      notifyListeners();
+      await _persist();
+    } finally {
+      _setBusy(false);
     }
   }
 
@@ -519,7 +615,7 @@ class AppState extends ChangeNotifier {
     required String username,
     required String password,
   }) async {
-    final server = _serverById(serverId);
+    var server = _serverById(serverId);
     if (server == null) {
       return 'Select a server node first.';
     }
@@ -538,12 +634,37 @@ class AppState extends ChangeNotifier {
     _setBusy(true);
 
     try {
+      server = await _resolveVerifiedServerRoute(server);
+      final identity = await _api.verifyServerIdentity(
+        baseUrl: server.address,
+        expectedServerId: server.id,
+        expectedPublicKey: server.identityPublicKey,
+      );
+      if (server.identityPublicKey.isEmpty) {
+        _upsertServer(server.copyWith(identityPublicKey: identity.publicKey));
+        await _persist();
+      }
       final challenge = await _api.fetchYuidChallenge(baseUrl: server.address);
+      if (challenge.serverId != server.id) {
+        throw ApiException(
+          'The authentication challenge came from a different Yappa server.',
+          code: 'server_identity_changed',
+        );
+      }
       final proof = await _yuidIdentity.buildAuthProof(
         serverId: challenge.serverId,
         username: cleanedUsername,
         nonce: challenge.nonce,
       );
+      final mediaDevice = await _mediaDeviceIdentity.getOrCreateIdentity();
+      final mediaDeviceSignature = await _yuidIdentity
+          .signMediaDeviceAuthorization(
+            serverId: challenge.serverId,
+            username: cleanedUsername,
+            nonce: challenge.nonce,
+            deviceId: mediaDevice.deviceId,
+            mediaPublicKey: mediaDevice.publicKeyBase64Url,
+          );
       _globalYuid = proof.yuid;
 
       final auth = await _api.authenticate(
@@ -554,9 +675,20 @@ class AppState extends ChangeNotifier {
         yuidPublicKey: proof.publicKeyBase64Url,
         yuidSignature: proof.signatureBase64Url,
         yuidNonce: challenge.nonce,
+        mediaDeviceId: mediaDevice.deviceId,
+        mediaPublicKey: mediaDevice.publicKeyBase64Url,
+        mediaDeviceSignature: mediaDeviceSignature,
       );
+      if (auth.server.id != server.id) {
+        throw ApiException(
+          'The sign-in response came from a different Yappa server.',
+          code: 'server_identity_changed',
+        );
+      }
 
-      _upsertServer(auth.server);
+      _upsertServer(
+        auth.server.copyWith(identityPublicKey: identity.publicKey),
+      );
       _replaceChannelsForServer(auth.server.id, auth.channels);
       _permissionsByServerId[auth.server.id] = auth.permissions;
       _userIdByServerId[auth.server.id] = auth.user.id;
@@ -564,17 +696,18 @@ class AppState extends ChangeNotifier {
 
       if (auth.permissions.isOwner) {
         try {
-          _serverSettingsByServerId[auth.server.id] =
-              await _api.fetchServerSettings(
-            baseUrl: auth.server.address,
-            token: auth.token,
-          );
+          _serverSettingsByServerId[auth.server.id] = await _api
+              .fetchServerSettings(
+                baseUrl: auth.server.address,
+                token: auth.token,
+              );
         } catch (_) {}
       } else {
         _serverSettingsByServerId.remove(auth.server.id);
       }
 
       _tokensByServerId[auth.server.id] = auth.token;
+      _registeredMediaDeviceServerIds.add(auth.server.id);
       _rememberedUsersByServer[auth.server.id] = auth.user.username;
 
       _activateSession(
@@ -621,30 +754,52 @@ class AppState extends ChangeNotifier {
 
     try {
       await _restoreSession(serverId, reconnectRealtime: true);
-    } catch (_) {
-      _tokensByServerId.remove(serverId);
-      _rememberedUsersByServer.remove(serverId);
-      _permissionsByServerId.remove(serverId);
-      _serverSettingsByServerId.remove(serverId);
-      _userIdByServerId.remove(serverId);
-      _voiceDeckStatesByServerId.remove(serverId);
-      _localVoiceStateByServerId.remove(serverId);
-      _disconnectRealtime();
-      _activeServerId = null;
-      _currentUsername = null;
+    } catch (error) {
+      _handleSessionRestoreFailure(serverId, error);
       notifyListeners();
       await _persist();
     }
   }
 
   Future<void> selectChannel(String channelId) async {
+    if (channelId == selectedChannelId) {
+      return;
+    }
+
+    if (!_refreshedMessageChannelIds.contains(channelId)) {
+      final server = _serverById(selectedServerId);
+      final token = _tokensByServerId[selectedServerId];
+      final channel = _channelById(channelId);
+
+      if (server != null &&
+          token != null &&
+          channel != null &&
+          channel.type == ChannelType.text) {
+        try {
+          if (channel.encryptionMode == ChannelEncryptionMode.e2ee &&
+              channel.encryptionVersion == 1) {
+            await _synchronizeEncryptedChannel(
+              server: server,
+              token: token,
+              channel: channel,
+            );
+          } else if (channel.allowsPlaintextMessaging) {
+            final messages = await _api.fetchMessages(
+              baseUrl: server.address,
+              token: token,
+              channelId: channel.id,
+            );
+            _messagesByChannel[channel.id] = messages;
+            _refreshedMessageChannelIds.add(channel.id);
+          }
+        } catch (_) {
+          // Keep the cached feed available during a temporary outage.
+        }
+      }
+    }
+
     _selectedChannelId = channelId;
     notifyListeners();
-
-    try {
-      await _loadSelectedChannelMessages();
-    } catch (_) {}
-
     await _persist();
   }
 
@@ -663,31 +818,91 @@ class AppState extends ChangeNotifier {
       throw Exception('Realtime connection is not active.');
     }
 
+    final serverId = selectedServerId;
+    final joinGeneration = ++_voiceJoinGeneration;
     _setBusy(true);
 
     try {
+      await _voiceAbortFuture;
+      _ensureVoiceJoinCurrent(
+        joinGeneration,
+        serverId: serverId,
+        channelId: channelId,
+        realtime: realtime,
+      );
+      await _mediaE2ee.begin(serverId: serverId, channelId: channelId);
+      _ensureVoiceJoinCurrent(
+        joinGeneration,
+        serverId: serverId,
+        channelId: channelId,
+        realtime: realtime,
+      );
       final result = await realtime.joinVoiceDeck(channelId);
+      _ensureVoiceJoinCurrent(
+        joinGeneration,
+        serverId: serverId,
+        channelId: channelId,
+        realtime: realtime,
+      );
       _applyLocalVoicePresence(
-        serverId: selectedServerId,
+        serverId: serverId,
         voiceChannelId: result.channelId,
         voiceJoinedAt: result.joinedAt,
       );
+      final encryptionKey = await _mediaE2ee.waitForKey();
+      _ensureVoiceJoinCurrent(
+        joinGeneration,
+        serverId: serverId,
+        channelId: channelId,
+        realtime: realtime,
+      );
       await startMicInputCapture();
+      _ensureVoiceJoinCurrent(
+        joinGeneration,
+        serverId: serverId,
+        channelId: channelId,
+        realtime: realtime,
+      );
       await _startVoiceTransportForCurrentDeck(
+        serverId: serverId,
         channelId: result.channelId,
+        encryptionKey: encryptionKey,
+      );
+      _ensureVoiceJoinCurrent(
+        joinGeneration,
+        serverId: serverId,
+        channelId: channelId,
+        realtime: realtime,
       );
       _lastError = null;
       notifyListeners();
     } catch (error) {
+      if (joinGeneration != _voiceJoinGeneration) {
+        return;
+      }
+      _mediaE2ee.end();
+      try {
+        await realtime.leaveVoiceDeck();
+      } catch (_) {}
+      _applyLocalVoicePresence(
+        serverId: serverId,
+        voiceChannelId: null,
+        voiceJoinedAt: null,
+      );
+      await _stopVoiceTransport();
+      await stopMicInputCapture();
       _lastError = error.toString().replaceFirst('Exception: ', '');
       notifyListeners();
       rethrow;
     } finally {
-      _setBusy(false);
+      if (joinGeneration == _voiceJoinGeneration) {
+        _setBusy(false);
+      }
     }
   }
 
   Future<void> leaveVoiceDeck() async {
+    _voiceJoinGeneration += 1;
     if (!hasActiveSession) {
       throw Exception('No active session.');
     }
@@ -700,23 +915,24 @@ class AppState extends ChangeNotifier {
     _setBusy(true);
 
     try {
-      await realtime.leaveVoiceDeck();
+      _mediaE2ee.end();
+      await _stopVoiceTransport();
+      await stopMicInputCapture();
       _applyLocalVoicePresence(
         serverId: selectedServerId,
         voiceChannelId: null,
         voiceJoinedAt: null,
       );
-      _localVoiceStateByServerId[selectedServerId] =
-          selectedLocalVoiceState.copyWith(
-        cameraEnabled: false,
-        screenShareEnabled: false,
-        speaking: false,
-      );
+      _localVoiceStateByServerId[selectedServerId] = selectedLocalVoiceState
+          .copyWith(
+            cameraEnabled: false,
+            screenShareEnabled: false,
+            speaking: false,
+          );
       _voiceActivityReleaseTimer?.cancel();
       _voiceActivityPttOverride = false;
       _voiceOfferInFlightPeerIds.clear();
-      await _stopVoiceTransport();
-      await stopMicInputCapture();
+      await realtime.leaveVoiceDeck();
       _lastError = null;
       notifyListeners();
     } catch (error) {
@@ -725,6 +941,21 @@ class AppState extends ChangeNotifier {
       rethrow;
     } finally {
       _setBusy(false);
+    }
+  }
+
+  void _ensureVoiceJoinCurrent(
+    int generation, {
+    required String serverId,
+    required String channelId,
+    required RealtimeClient realtime,
+  }) {
+    final roomState = _mediaE2ee.roomState;
+    if (generation != _voiceJoinGeneration ||
+        _realtime != realtime ||
+        selectedServerId != serverId ||
+        (roomState != null && roomState.channelId != channelId)) {
+      throw StateError('Voice join was superseded.');
     }
   }
 
@@ -818,6 +1049,7 @@ class AppState extends ChangeNotifier {
   Future<VoicePresenceState?> setSelectedScreenShareEnabled(
     bool enabled, {
     VoiceScreenShareTarget preferredTarget = VoiceScreenShareTarget.any,
+    String? preferredSourceId,
   }) async {
     if (!hasActiveSession) {
       throw Exception('No active session.');
@@ -840,10 +1072,13 @@ class AppState extends ChangeNotifier {
       }
     }
 
+    _screenShareToggleInProgress = true;
+
     try {
       final started = await _voiceTransport.setScreenShareEnabled(
         enabled,
         preferredTarget: preferredTarget,
+        preferredSourceId: preferredSourceId,
       );
 
       if (!started) {
@@ -878,6 +1113,8 @@ class AppState extends ChangeNotifier {
         } catch (_) {}
       }
       rethrow;
+    } finally {
+      _screenShareToggleInProgress = false;
     }
   }
 
@@ -941,6 +1178,12 @@ class AppState extends ChangeNotifier {
     if (channel.type != ChannelType.text) {
       throw Exception('Files can only be uploaded in text channels.');
     }
+    if (!channel.allowsPlaintextMessaging) {
+      throw StateError(
+        'This channel requires end-to-end encrypted messaging. '
+        'Plaintext attachments are disabled while encryption synchronizes.',
+      );
+    }
 
     _setBusy(true);
 
@@ -967,32 +1210,131 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  Future<void> sendEncryptedAttachmentFiles(
+    List<File> files, {
+    String content = '',
+  }) async {
+    if (!hasActiveSession) {
+      throw Exception('No active session.');
+    }
+    final channel = _channelById(selectedChannelId);
+    if (channel == null ||
+        channel.type != ChannelType.text ||
+        channel.encryptionMode != ChannelEncryptionMode.e2ee ||
+        channel.encryptionVersion != 1) {
+      throw StateError('No ready encrypted text channel is selected.');
+    }
+    if (files.isEmpty || files.length > 10 || content.length > 4000) {
+      throw const FormatException('Invalid encrypted attachment message.');
+    }
+    final encrypted = _requireReadyEncryptedChannel(channel.id);
+    _setBusy(true);
+    try {
+      await encrypted.attachments.sendFiles(
+        files: [
+          for (final file in files)
+            MlsAttachmentInput(
+              plaintextPath: file.path,
+              name: file.uri.pathSegments.isEmpty
+                  ? 'attachment'
+                  : file.uri.pathSegments.last,
+              mimeType: _attachmentMimeType(
+                file.uri.pathSegments.isEmpty
+                    ? 'attachment'
+                    : file.uri.pathSegments.last,
+              ),
+            ),
+        ],
+        content: content,
+      );
+      _messagesByChannel[channel.id] = await encrypted.projectedMessages();
+      _lastError = null;
+      notifyListeners();
+      await _persist();
+    } catch (error) {
+      final message = encryptedAttachmentFailureMessage(
+        error,
+        operation: EncryptedAttachmentOperation.send,
+      );
+      _lastError = message;
+      notifyListeners();
+      throw EncryptedAttachmentOperationException(message);
+    } finally {
+      _setBusy(false);
+    }
+  }
 
-  Future<LinkPreview?> fetchLinkPreviewForSelectedServer(String url) {
+  Future<void> downloadEncryptedAttachment({
+    required ChatAttachment attachment,
+    required String outputPath,
+  }) async {
+    final channel = _channelById(attachment.channelId);
+    if (channel == null ||
+        channel.encryptionMode != ChannelEncryptionMode.e2ee ||
+        channel.encryptionVersion != 1 ||
+        attachment.url.isNotEmpty) {
+      throw StateError('This is not an encrypted attachment.');
+    }
+    final encrypted = _requireReadyEncryptedChannel(channel.id);
+    final matches = encrypted.events
+        .where(
+          (event) =>
+              event.eventId == attachment.messageId &&
+              event.kind == EncryptedApplicationEventKind.attachment,
+        )
+        .toList(growable: false);
+    if (matches.length != 1) {
+      throw const FormatException(
+        'The authenticated encrypted attachment event is unavailable.',
+      );
+    }
+    await encrypted.attachments.downloadFile(
+      event: matches.single,
+      attachmentId: attachment.id,
+      plaintextPath: outputPath,
+    );
+  }
+
+  Future<LinkPreview?> fetchLinkPreviewForSelectedServer(String url) async {
     final server = _serverById(selectedServerId);
     final token = _tokensByServerId[selectedServerId];
+    final channel = _channelById(selectedChannelId);
 
-    if (server == null || token == null) {
-      return Future<LinkPreview?>.value(null);
+    if (server == null ||
+        token == null ||
+        channel == null ||
+        !channel.allowsPlaintextMessaging) {
+      return null;
     }
 
     final normalizedUrl = url.trim();
     if (normalizedUrl.isEmpty) {
-      return Future<LinkPreview?>.value(null);
+      return null;
     }
 
     final cacheKey = '${server.id}::$normalizedUrl';
-    return _linkPreviewCache.putIfAbsent(cacheKey, () async {
+    final existing = _linkPreviewCache[cacheKey];
+    if (existing != null) {
+      return existing;
+    }
+    final request = () async {
       try {
         return await _api.fetchLinkPreview(
           baseUrl: server.address,
           token: token,
+          channelId: channel.id,
           url: normalizedUrl,
         );
       } catch (_) {
         return null;
       }
-    });
+    }();
+    _linkPreviewCache[cacheKey] = request;
+    final preview = await request;
+    if (preview == null && identical(_linkPreviewCache[cacheKey], request)) {
+      _linkPreviewCache.remove(cacheKey);
+    }
+    return preview;
   }
 
   Future<void> sendMessage(
@@ -1014,6 +1356,39 @@ class AppState extends ChangeNotifier {
 
     if (channel.type != ChannelType.text) {
       return;
+    }
+    if (channel.encryptionMode == ChannelEncryptionMode.e2ee &&
+        channel.encryptionVersion == 1) {
+      if (attachmentIds.isNotEmpty) {
+        throw StateError(
+          'Legacy attachment ids cannot enter an encrypted message.',
+        );
+      }
+      final encrypted = _requireReadyEncryptedChannel(channel.id);
+      try {
+        await encrypted.sender.send(
+          kind: EncryptedApplicationEventKind.message,
+          body: {'content': text},
+        );
+        _messagesByChannel[channel.id] = await encrypted.projectedMessages();
+        _lastError = null;
+        notifyListeners();
+        await _persist();
+      } catch (error) {
+        _lastError = error.toString();
+        notifyListeners();
+        rethrow;
+      }
+      return;
+    }
+    if (!channel.allowsPlaintextMessaging) {
+      final error = StateError(
+        'This channel requires end-to-end encrypted messaging. '
+        'Plaintext was not sent while encryption synchronizes.',
+      );
+      _lastError = error.message;
+      notifyListeners();
+      throw error;
     }
 
     try {
@@ -1054,6 +1429,20 @@ class AppState extends ChangeNotifier {
     }
 
     try {
+      if (channel.encryptionMode == ChannelEncryptionMode.e2ee &&
+          channel.encryptionVersion == 1) {
+        final encrypted = _requireReadyEncryptedChannel(channel.id);
+        await encrypted.sender.send(
+          kind: EncryptedApplicationEventKind.edit,
+          targetEventId: target.id,
+          body: {'content': text},
+        );
+        _messagesByChannel[channel.id] = await encrypted.projectedMessages();
+        _lastError = null;
+        notifyListeners();
+        await _persist();
+        return;
+      }
       final message = await _api.updateMessage(
         baseUrl: server.address,
         token: token,
@@ -1091,6 +1480,20 @@ class AppState extends ChangeNotifier {
     }
 
     try {
+      if (channel.encryptionMode == ChannelEncryptionMode.e2ee &&
+          channel.encryptionVersion == 1) {
+        final encrypted = _requireReadyEncryptedChannel(channel.id);
+        await encrypted.sender.send(
+          kind: EncryptedApplicationEventKind.delete,
+          targetEventId: target.id,
+          body: const {},
+        );
+        _messagesByChannel[channel.id] = await encrypted.projectedMessages();
+        _lastError = null;
+        notifyListeners();
+        await _persist();
+        return;
+      }
       await _api.deleteMessage(
         baseUrl: server.address,
         token: token,
@@ -1187,11 +1590,7 @@ class AppState extends ChangeNotifier {
       final updatedServer = await _api.updateServerProfile(
         baseUrl: server.address,
         token: token,
-        patch: {
-          'name': name,
-          'description': description,
-          'branding': branding,
-        },
+        patch: {'name': name, 'description': description, 'branding': branding},
       );
 
       _upsertServer(updatedServer);
@@ -1309,6 +1708,15 @@ class AppState extends ChangeNotifier {
 
       _replaceChannelsForServer(server.id, result.channels);
       _selectedChannelId = result.channel.id;
+      if (result.channel.encryptionMode == ChannelEncryptionMode.e2ee &&
+          result.channel.encryptionVersion == 1) {
+        await _synchronizeEncryptedChannel(
+          server: server,
+          token: token,
+          channel: result.channel,
+        );
+        _refreshedMessageChannelIds.add(result.channel.id);
+      }
       _lastError = null;
       notifyListeners();
       await _persist();
@@ -1322,8 +1730,87 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  Future<void> updateChannelOnSelectedServer({
+    required String channelId,
+    required String name,
+    String? glyph,
+  }) async {
+    final server = _serverById(selectedServerId);
+    final token = _tokensByServerId[selectedServerId];
+
+    if (server == null || token == null) {
+      throw Exception('No active owner session for this node.');
+    }
+
+    if (!canManageSelectedServer) {
+      throw Exception('Only the node owner can edit channels.');
+    }
+
+    _setBusy(true);
+
+    try {
+      final result = await _api.updateChannel(
+        baseUrl: server.address,
+        token: token,
+        channelId: channelId,
+        name: name,
+        glyph: glyph,
+      );
+
+      _replaceChannelsForServer(server.id, result.channels);
+      _lastError = null;
+      notifyListeners();
+      await _persist();
+    } on ApiException catch (error) {
+      _lastError = error.message;
+      notifyListeners();
+      throw Exception(error.message);
+    } finally {
+      _setBusy(false);
+    }
+  }
+
+  Future<void> deleteChannelOnSelectedServer(String channelId) async {
+    final server = _serverById(selectedServerId);
+    final token = _tokensByServerId[selectedServerId];
+
+    if (server == null || token == null) {
+      throw Exception('No active owner session for this node.');
+    }
+
+    if (!canManageSelectedServer) {
+      throw Exception('Only the node owner can delete channels.');
+    }
+
+    _setBusy(true);
+
+    try {
+      final channels = await _api.deleteChannel(
+        baseUrl: server.address,
+        token: token,
+        channelId: channelId,
+      );
+
+      _messagesByChannel.remove(channelId);
+      _replaceChannelsForServer(server.id, channels);
+      if (_selectedChannelId == channelId) {
+        _selectedChannelId = _firstChannelIdForServer(server.id);
+      }
+      _lastError = null;
+      notifyListeners();
+      await _persist();
+    } on ApiException catch (error) {
+      _lastError = error.message;
+      notifyListeners();
+      throw Exception(error.message);
+    } finally {
+      _setBusy(false);
+    }
+  }
+
   Future<void> forgetCurrentServerSession() async {
-    final serverId = _activeServerId ??
+    final serverId =
+        _activeServerId ??
         (_selectedServerId != null && _selectedServerId!.isNotEmpty
             ? _selectedServerId
             : null);
@@ -1348,6 +1835,7 @@ class AppState extends ChangeNotifier {
     _userIdByServerId.remove(serverId);
     _voiceDeckStatesByServerId.remove(serverId);
     _localVoiceStateByServerId.remove(serverId);
+    await _closeMlsRuntime(serverId);
 
     if (_activeServerId == serverId) {
       _disconnectRealtime();
@@ -1360,16 +1848,53 @@ class AppState extends ChangeNotifier {
     await _persist();
   }
 
-  Future<void> addServerNode({
-    required String address,
-    String? name,
-  }) async {
+  Future<void> addServerNode({required String address, String? name}) async {
     _setBusy(true);
 
     try {
-      final result = await _api.handshake(address);
-
-      final server = result.server;
+      NodeHandshakeResult result;
+      ChatServer server;
+      try {
+        result = await _api.handshake(address);
+        server = result.server.copyWith(
+          publicAddress: _api.isPrivateOrDevelopmentAddress(address)
+              ? ''
+              : result.server.address,
+        );
+      } catch (publicError) {
+        final expectedAdvertisedAddress = _api.advertisedHostForAddress(
+          address,
+        );
+        if (_api.isPrivateOrDevelopmentAddress(address) ||
+            expectedAdvertisedAddress.isEmpty) {
+          rethrow;
+        }
+        final discovered = await _api.discoverLanServer(
+          expectedAdvertisedAddress: expectedAdvertisedAddress,
+        );
+        if (discovered == null) rethrow;
+        final publicBaseUrl = _api.normalizeBaseUrl(address);
+        _api.setLanRoute(
+          publicBaseUrl: publicBaseUrl,
+          lanHost: discovered.host,
+          lanTlsPort: discovered.tlsPort,
+        );
+        result = await _api.handshake(publicBaseUrl);
+        if (result.server.id != discovered.serverId ||
+            result.server.identityPublicKey != discovered.publicKey) {
+          throw ApiException(
+            'The discovered server did not keep the same identity.',
+            code: 'server_identity_changed',
+          );
+        }
+        server = result.server.copyWith(
+          address: publicBaseUrl,
+          publicAddress: publicBaseUrl,
+          lanAddress: discovered.host,
+          lanTlsPort: discovered.tlsPort,
+          identityPublicKey: discovered.publicKey,
+        );
+      }
 
       _upsertServer(server);
       _replaceChannelsForServer(server.id, result.channels);
@@ -1430,6 +1955,7 @@ class AppState extends ChangeNotifier {
     _userIdByServerId.remove(serverId);
     _voiceDeckStatesByServerId.remove(serverId);
     _localVoiceStateByServerId.remove(serverId);
+    await _closeMlsRuntime(serverId);
 
     if (_activeServerId == serverId) {
       _disconnectRealtime();
@@ -1460,6 +1986,16 @@ class AppState extends ChangeNotifier {
     _voiceTransport.removeListener(_handleVoiceTransportChanged);
     _micInput.dispose();
     _voiceTransport.dispose();
+    for (final runtime in _mlsRuntimesByServerId.values) {
+      unawaited(runtime.close());
+    }
+    for (final opening in _mlsRuntimeFuturesByServerId.values) {
+      unawaited(opening.then((runtime) => runtime.close()).catchError((_) {}));
+    }
+    _mlsRuntimesByServerId.clear();
+    _mlsRuntimeFuturesByServerId.clear();
+    _mlsChannelsByChannelId.clear();
+    _mlsStartupByChannelId.clear();
     super.dispose();
   }
 
@@ -1468,19 +2004,56 @@ class AppState extends ChangeNotifier {
     required bool reconnectRealtime,
     bool notify = true,
   }) async {
-    final server = _serverById(serverId);
-    final token = _tokensByServerId[serverId];
+    var server = _serverById(serverId);
+    var token = _tokensByServerId[serverId];
 
     if (server == null || token == null) {
       throw Exception('Missing saved session.');
     }
 
-    final me = await _api.fetchMe(
+    server = await _resolveVerifiedServerRoute(server);
+    final identity = await _api.verifyServerIdentity(
       baseUrl: server.address,
-      token: token,
+      expectedServerId: server.id,
+      expectedPublicKey: server.identityPublicKey,
     );
+    if (server.identityPublicKey.isEmpty) {
+      _upsertServer(server.copyWith(identityPublicKey: identity.publicKey));
+      await _persist();
+    }
 
-    _upsertServer(me.server);
+    if (!_registeredMediaDeviceServerIds.contains(serverId)) {
+      await _registerMediaDeviceForSession(
+        server: server,
+        token: token,
+        username: _rememberedUsersByServer[serverId] ?? '',
+      );
+      _registeredMediaDeviceServerIds.add(serverId);
+    }
+
+    if (!_rotatedSessionServerIds.contains(serverId)) {
+      final rotatedToken = await _api.rotateSession(
+        baseUrl: server.address,
+        token: token,
+      );
+      if (rotatedToken.isEmpty) {
+        throw Exception('The server returned an invalid rotated session.');
+      }
+      token = rotatedToken;
+      _tokensByServerId[serverId] = rotatedToken;
+      await _persist();
+      _rotatedSessionServerIds.add(serverId);
+    }
+
+    final me = await _api.fetchMe(baseUrl: server.address, token: token);
+    if (me.server.id != server.id) {
+      throw ApiException(
+        'The session response came from a different Yappa server.',
+        code: 'server_identity_changed',
+      );
+    }
+
+    _upsertServer(me.server.copyWith(identityPublicKey: identity.publicKey));
     _replaceChannelsForServer(me.server.id, me.channels);
     _rememberedUsersByServer[me.server.id] = me.user.username;
     _permissionsByServerId[me.server.id] = me.permissions;
@@ -1489,11 +2062,8 @@ class AppState extends ChangeNotifier {
 
     if (me.permissions.isOwner) {
       try {
-        _serverSettingsByServerId[me.server.id] =
-            await _api.fetchServerSettings(
-          baseUrl: me.server.address,
-          token: token,
-        );
+        _serverSettingsByServerId[me.server.id] = await _api
+            .fetchServerSettings(baseUrl: me.server.address, token: token);
       } catch (_) {}
     } else {
       _serverSettingsByServerId.remove(me.server.id);
@@ -1513,12 +2083,246 @@ class AppState extends ChangeNotifier {
     }
 
     _lastError = null;
+    _unreachableServerId = null;
 
     if (notify) {
       notifyListeners();
     }
 
     await _persist();
+  }
+
+  Future<void> _registerMediaDeviceForSession({
+    required ChatServer server,
+    required String token,
+    required String username,
+  }) async {
+    if (username.trim().isEmpty) {
+      throw ApiException(
+        'The saved session is missing its account identity.',
+        code: 'missing_saved_username',
+      );
+    }
+    final challenge = await _api.fetchYuidChallenge(baseUrl: server.address);
+    if (challenge.serverId != server.id) {
+      throw ApiException(
+        'The media device challenge came from a different Yappa server.',
+        code: 'server_identity_changed',
+      );
+    }
+    final yuidProof = await _yuidIdentity.buildAuthProof(
+      serverId: challenge.serverId,
+      username: username,
+      nonce: challenge.nonce,
+    );
+    final mediaDevice = await _mediaDeviceIdentity.getOrCreateIdentity();
+    final mediaSignature = await _yuidIdentity.signMediaDeviceAuthorization(
+      serverId: challenge.serverId,
+      username: username,
+      nonce: challenge.nonce,
+      deviceId: mediaDevice.deviceId,
+      mediaPublicKey: mediaDevice.publicKeyBase64Url,
+    );
+    await _api.registerMediaDevice(
+      baseUrl: server.address,
+      token: token,
+      yuidPublicKey: yuidProof.publicKeyBase64Url,
+      yuidSignature: yuidProof.signatureBase64Url,
+      yuidNonce: challenge.nonce,
+      mediaDeviceId: mediaDevice.deviceId,
+      mediaPublicKey: mediaDevice.publicKeyBase64Url,
+      mediaDeviceSignature: mediaSignature,
+    );
+  }
+
+  Future<ChatServer> _resolveVerifiedServerRoute(ChatServer server) async {
+    final candidates = <String>[];
+    for (final value in [server.publicAddress, server.address]) {
+      final candidate = value.trim();
+      if (candidate.isNotEmpty && !candidates.contains(candidate)) {
+        candidates.add(candidate);
+      }
+    }
+
+    Object? lastError;
+    for (final candidate in candidates) {
+      try {
+        final normalizedCandidate = _api.normalizeBaseUrl(candidate);
+        _api.clearLanRoute(normalizedCandidate);
+        final identity = await _api.verifyServerIdentity(
+          baseUrl: normalizedCandidate,
+          expectedServerId: server.id,
+          expectedPublicKey: server.identityPublicKey,
+        );
+        final updated = server.copyWith(
+          address: normalizedCandidate,
+          publicAddress: server.publicAddress.trim().isEmpty
+              ? server.publicAddress
+              : normalizedCandidate,
+          identityPublicKey: identity.publicKey,
+        );
+        _upsertServer(updated);
+        await _persist();
+        return updated;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    final secureBaseUrl = server.publicAddress.trim().isNotEmpty
+        ? server.publicAddress
+        : server.address;
+    if (server.lanAddress.trim().isNotEmpty &&
+        server.lanTlsPort != null &&
+        Uri.tryParse(secureBaseUrl)?.scheme == 'https') {
+      try {
+        _api.setLanRoute(
+          publicBaseUrl: secureBaseUrl,
+          lanHost: server.lanAddress,
+          lanTlsPort: server.lanTlsPort!,
+        );
+        final identity = await _api.verifyServerIdentity(
+          baseUrl: secureBaseUrl,
+          expectedServerId: server.id,
+          expectedPublicKey: server.identityPublicKey,
+        );
+        final updated = server.copyWith(
+          address: secureBaseUrl,
+          identityPublicKey: identity.publicKey,
+        );
+        _upsertServer(updated);
+        await _persist();
+        return updated;
+      } catch (error) {
+        lastError = error;
+        _api.clearLanRoute(secureBaseUrl);
+      }
+    }
+
+    final discovered = await _api.discoverLanServer(
+      expectedServerId: server.id,
+      expectedPublicKey: server.identityPublicKey,
+      expectedAdvertisedAddress: server.publicAddress.trim().isEmpty
+          ? ''
+          : _api.advertisedHostForAddress(server.publicAddress),
+    );
+    if (discovered != null) {
+      final discoveredSecureBaseUrl = _api.secureBaseUrlForDiscoveredRoute(
+        savedBaseUrl: secureBaseUrl,
+        advertisedAddress: discovered.advertisedAddress,
+      );
+      _api.setLanRoute(
+        publicBaseUrl: discoveredSecureBaseUrl,
+        lanHost: discovered.host,
+        lanTlsPort: discovered.tlsPort,
+      );
+      final identity = await _api.verifyServerIdentity(
+        baseUrl: discoveredSecureBaseUrl,
+        expectedServerId: server.id,
+        expectedPublicKey: server.identityPublicKey,
+      );
+      final updated = server.copyWith(
+        address: discoveredSecureBaseUrl,
+        publicAddress: discoveredSecureBaseUrl,
+        lanAddress: discovered.host,
+        lanTlsPort: discovered.tlsPort,
+        identityPublicKey: identity.publicKey,
+      );
+      _upsertServer(updated);
+      await _persist();
+      return updated;
+    }
+
+    if (lastError != null) throw lastError;
+    throw ApiException(
+      'No verified route to this Yappa server is available.',
+      code: 'server_unreachable',
+    );
+  }
+
+  Future<List<DeviceSession>> fetchCurrentDeviceSessions() async {
+    final server = selectedServer;
+    final token = _tokensByServerId[server.id];
+    if (server.id.isEmpty || token == null) {
+      throw Exception('No active session.');
+    }
+    return _api.fetchSessions(baseUrl: server.address, token: token);
+  }
+
+  Future<void> revokeDeviceSession(DeviceSession session) async {
+    final server = selectedServer;
+    final token = _tokensByServerId[server.id];
+    if (server.id.isEmpty || token == null) {
+      throw Exception('No active session.');
+    }
+
+    final revokedCurrent = await _api.revokeSession(
+      baseUrl: server.address,
+      token: token,
+      sessionId: session.id,
+    );
+    if (revokedCurrent) {
+      _handleSessionRestoreFailure(
+        server.id,
+        ApiException(
+          'This device session was revoked.',
+          statusCode: 401,
+          code: 'session_revoked',
+        ),
+      );
+      await _persist();
+      notifyListeners();
+    }
+  }
+
+  void _handleSessionRestoreFailure(String serverId, Object error) {
+    final identityRejected =
+        error is ApiException &&
+        (error.code == 'server_identity_changed' ||
+            error.code == 'server_identity_invalid');
+    if (identityRejected) {
+      _disconnectRealtime();
+      _activeServerId = null;
+      _currentUsername = null;
+      _unreachableServerId = serverId;
+      _lastError = error.message;
+      return;
+    }
+
+    final sessionRejected =
+        error is ApiException &&
+        (error.statusCode == 401 || error.statusCode == 403);
+
+    if (sessionRejected) {
+      _tokensByServerId.remove(serverId);
+      _rememberedUsersByServer.remove(serverId);
+      _permissionsByServerId.remove(serverId);
+      _serverSettingsByServerId.remove(serverId);
+      _userIdByServerId.remove(serverId);
+      _voiceDeckStatesByServerId.remove(serverId);
+      _localVoiceStateByServerId.remove(serverId);
+      _unreachableServerId = null;
+
+      if (_activeServerId == serverId) {
+        _disconnectRealtime();
+        _activeServerId = null;
+        _currentUsername = null;
+      }
+      _lastError = error.message;
+      return;
+    }
+
+    final rememberedUsername = _rememberedUsersByServer[serverId];
+    if (rememberedUsername != null && _serverById(serverId) != null) {
+      _activateSession(
+        serverId: serverId,
+        username: rememberedUsername,
+        notify: false,
+      );
+    }
+    _unreachableServerId = serverId;
+    _lastError =
+        'This server is unreachable right now. Check the connection and try again.';
   }
 
   Future<String?> updateCurrentUserProfile({
@@ -1530,7 +2334,10 @@ class AppState extends ChangeNotifier {
     final server = _serverById(serverId);
     final token = _tokensByServerId[serverId];
     final username = _currentUsername;
-    if (serverId.isEmpty || server == null || token == null || username == null) {
+    if (serverId.isEmpty ||
+        server == null ||
+        token == null ||
+        username == null) {
       return 'Sign in before editing your profile.';
     }
 
@@ -1546,17 +2353,20 @@ class AppState extends ChangeNotifier {
         displayName: cleaned,
         avatarUrl: updateAvatar
             ? (avatarSource == null || avatarSource.trim().isEmpty
-                ? null
-                : avatarSource)
+                  ? null
+                  : avatarSource)
             : ApiClient.avatarUnspecified,
       );
 
-      final members = List<Member>.from(_membersByServer[serverId] ?? const <Member>[]);
+      final members = List<Member>.from(
+        _membersByServer[serverId] ?? const <Member>[],
+      );
       final userId = _userIdByServerId[serverId];
       var replaced = false;
       for (var i = 0; i < members.length; i++) {
         final member = members[i];
-        if ((userId != null && member.id == userId) || member.username == username) {
+        if ((userId != null && member.id == userId) ||
+            member.username == username) {
           members[i] = updatedUser;
           replaced = true;
         }
@@ -1575,14 +2385,15 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<String?> updateCurrentUserAvatar({
-    String? avatarSource,
-  }) async {
+  Future<String?> updateCurrentUserAvatar({String? avatarSource}) async {
     final serverId = selectedServerId;
     final server = _serverById(serverId);
     final token = _tokensByServerId[serverId];
     final username = _currentUsername;
-    if (serverId.isEmpty || server == null || token == null || username == null) {
+    if (serverId.isEmpty ||
+        server == null ||
+        token == null ||
+        username == null) {
       return 'Sign in before editing your profile.';
     }
 
@@ -1590,15 +2401,20 @@ class AppState extends ChangeNotifier {
       final updatedUser = await _api.updateCurrentUserSettings(
         baseUrl: server.address,
         token: token,
-        avatarUrl: avatarSource == null || avatarSource.trim().isEmpty ? null : avatarSource,
+        avatarUrl: avatarSource == null || avatarSource.trim().isEmpty
+            ? null
+            : avatarSource,
       );
 
-      final members = List<Member>.from(_membersByServer[serverId] ?? const <Member>[]);
+      final members = List<Member>.from(
+        _membersByServer[serverId] ?? const <Member>[],
+      );
       final userId = _userIdByServerId[serverId];
       var replaced = false;
       for (var i = 0; i < members.length; i++) {
         final member = members[i];
-        if ((userId != null && member.id == userId) || member.username == username) {
+        if ((userId != null && member.id == userId) ||
+            member.username == username) {
           members[i] = updatedUser;
           replaced = true;
         }
@@ -1629,7 +2445,10 @@ class AppState extends ChangeNotifier {
       token: token,
     );
 
-    _membersByServer[serverId] = _applyLocalProfilesToMembers(serverId, members);
+    _membersByServer[serverId] = _applyLocalProfilesToMembers(
+      serverId,
+      members,
+    );
   }
 
   Future<void> _loadInitialMessagesForServer(
@@ -1639,15 +2458,16 @@ class AppState extends ChangeNotifier {
     final server = _serverById(serverId);
     if (server == null) return;
 
-    final channels = _channelsForServer(serverId)
-        .where((channel) => channel.type == ChannelType.text)
-        .toList();
+    final channels = _channelsForServer(
+      serverId,
+    ).where((channel) => channel.type == ChannelType.text).toList();
 
     if (channels.isEmpty) {
       return;
     }
 
-    final targetChannelId = (_selectedServerId == serverId &&
+    final targetChannelId =
+        (_selectedServerId == serverId &&
             _selectedChannelId != null &&
             _selectedChannelId!.isNotEmpty)
         ? _selectedChannelId!
@@ -1658,6 +2478,16 @@ class AppState extends ChangeNotifier {
       return;
     }
 
+    if (targetChannel.encryptionMode == ChannelEncryptionMode.e2ee &&
+        targetChannel.encryptionVersion == 1) {
+      await _synchronizeEncryptedChannel(
+        server: server,
+        token: token,
+        channel: targetChannel,
+      );
+      return;
+    }
+    if (!targetChannel.allowsPlaintextMessaging) return;
     final messages = await _api.fetchMessages(
       baseUrl: server.address,
       token: token,
@@ -1665,29 +2495,140 @@ class AppState extends ChangeNotifier {
     );
 
     _messagesByChannel[targetChannel.id] = messages;
+    _refreshedMessageChannelIds.add(targetChannel.id);
   }
 
-  Future<void> _loadSelectedChannelMessages() async {
-    final server = _serverById(selectedServerId);
-    final token = _tokensByServerId[selectedServerId];
-    final channel = _channelById(selectedChannelId);
-
-    if (server == null || token == null || channel == null) {
-      return;
+  Future<void> toggleEncryptedReaction({
+    required ChatMessage target,
+    required String emoji,
+  }) async {
+    final channel = _channelById(target.channelId);
+    final userId = currentUserIdForSelectedServer;
+    if (channel == null ||
+        userId == null ||
+        channel.encryptionMode != ChannelEncryptionMode.e2ee ||
+        channel.encryptionVersion != 1) {
+      throw StateError('Reactions require a ready encrypted channel.');
     }
-
-    if (channel.type != ChannelType.text) {
-      return;
+    final normalized = emoji.trim();
+    if (normalized.isEmpty || normalized.length > 64) {
+      throw const FormatException('Invalid reaction.');
     }
+    final encrypted = _requireReadyEncryptedChannel(channel.id);
+    final remove = target.reactions.any(
+      (reaction) =>
+          reaction.emoji == normalized && reaction.includesUser(userId),
+    );
+    try {
+      await encrypted.sender.send(
+        kind: EncryptedApplicationEventKind.reaction,
+        targetEventId: target.id,
+        body: {'emoji': normalized, 'remove': remove},
+      );
+      _messagesByChannel[channel.id] = await encrypted.projectedMessages();
+      _lastError = null;
+      notifyListeners();
+      await _persist();
+    } catch (error) {
+      _lastError = error.toString();
+      notifyListeners();
+      rethrow;
+    }
+  }
 
-    final messages = await _api.fetchMessages(
+  MlsChannelStartup? encryptedChannelStartup(String channelId) =>
+      _mlsStartupByChannelId[channelId];
+
+  MlsChannelRuntime _requireReadyEncryptedChannel(String channelId) {
+    final runtime = _mlsChannelsByChannelId[channelId];
+    final startup = _mlsStartupByChannelId[channelId];
+    if (runtime == null || startup?.readiness != MlsChannelReadiness.ready) {
+      throw StateError(
+        'Encrypted messaging is not synchronized for this device.',
+      );
+    }
+    return runtime;
+  }
+
+  Future<void> _synchronizeEncryptedChannel({
+    required ChatServer server,
+    required String token,
+    required ChatChannel channel,
+  }) async {
+    if (channel.serverId != server.id ||
+        channel.type != ChannelType.text ||
+        channel.encryptionMode != ChannelEncryptionMode.e2ee ||
+        channel.encryptionVersion != 1) {
+      throw StateError('Invalid encrypted channel lifecycle.');
+    }
+    final runtime = await _mlsRuntimeFor(server: server, token: token);
+    final encrypted =
+        _mlsChannelsByChannelId[channel.id] ??
+        await runtime.openChannel(
+          channelId: channel.id,
+          currentUserIsOwner:
+              _permissionsByServerId[server.id]?.isOwner == true,
+          secretStorage: _secretStorage,
+        );
+    _mlsChannelsByChannelId[channel.id] = encrypted;
+    final startup = await encrypted.synchronize();
+    _mlsStartupByChannelId[channel.id] = startup;
+    if (startup.readiness == MlsChannelReadiness.ready) {
+      _messagesByChannel[channel.id] = await encrypted.projectedMessages();
+      _refreshedMessageChannelIds.add(channel.id);
+    } else {
+      _refreshedMessageChannelIds.remove(channel.id);
+    }
+    notifyListeners();
+  }
+
+  Future<MlsServerRuntime> _mlsRuntimeFor({
+    required ChatServer server,
+    required String token,
+  }) async {
+    final current = _mlsRuntimesByServerId[server.id];
+    if (current != null &&
+        current.baseUrl == server.address &&
+        current.token == token) {
+      return current;
+    }
+    if (current != null) await _closeMlsRuntime(server.id);
+    final pending = _mlsRuntimeFuturesByServerId[server.id];
+    if (pending != null) return pending;
+    final opening = MlsServerRuntime.open(
+      api: _api,
       baseUrl: server.address,
       token: token,
-      channelId: channel.id,
+      serverId: server.id,
+      secretStorage: _secretStorage,
+      mediaDeviceIdentity: _mediaDeviceIdentity,
+      yuidIdentity: _yuidIdentity,
     );
+    _mlsRuntimeFuturesByServerId[server.id] = opening;
+    try {
+      final runtime = await opening;
+      _mlsRuntimesByServerId[server.id] = runtime;
+      return runtime;
+    } finally {
+      _mlsRuntimeFuturesByServerId.remove(server.id);
+    }
+  }
 
-    _messagesByChannel[channel.id] = messages;
-    notifyListeners();
+  Future<void> _closeMlsRuntime(String serverId) async {
+    final opening = _mlsRuntimeFuturesByServerId.remove(serverId);
+    MlsServerRuntime? runtime = _mlsRuntimesByServerId.remove(serverId);
+    if (runtime == null && opening != null) {
+      try {
+        runtime = await opening;
+      } catch (_) {}
+    }
+    if (runtime != null) await runtime.close();
+    _mlsChannelsByChannelId.removeWhere(
+      (_, channel) => channel.server.serverId == serverId,
+    );
+    _mlsStartupByChannelId.removeWhere(
+      (channelId, _) => _channelById(channelId)?.serverId == serverId,
+    );
   }
 
   void _connectRealtime(String serverId, String token) {
@@ -1702,13 +2643,17 @@ class AppState extends ChangeNotifier {
       onHello: (server, channels, members, voice, meVoiceState) {
         _upsertServer(server);
         _replaceChannelsForServer(server.id, channels);
-        _membersByServer[server.id] = _applyLocalProfilesToMembers(server.id, members);
+        _membersByServer[server.id] = _applyLocalProfilesToMembers(
+          server.id,
+          members,
+        );
         _voiceDeckStatesByServerId[server.id] = voice;
         _localVoiceStateByServerId[server.id] = meVoiceState;
 
         if (_selectedServerId == server.id &&
-            !_channelsForServer(server.id)
-                .any((channel) => channel.id == _selectedChannelId)) {
+            !_channelsForServer(
+              server.id,
+            ).any((channel) => channel.id == _selectedChannelId)) {
           _selectedChannelId = _firstChannelIdForServer(server.id);
         }
 
@@ -1716,7 +2661,10 @@ class AppState extends ChangeNotifier {
         _persist();
       },
       onPresenceUpdate: (members, voice) {
-        _membersByServer[serverId] = _applyLocalProfilesToMembers(serverId, members);
+        _membersByServer[serverId] = _applyLocalProfilesToMembers(
+          serverId,
+          members,
+        );
         _voiceDeckStatesByServerId[serverId] = voice;
         notifyListeners();
         _persist();
@@ -1742,26 +2690,99 @@ class AppState extends ChangeNotifier {
         _voiceDeckStatesByServerId[server.id] = voice;
 
         if (_selectedServerId == server.id &&
-            !_channelsForServer(server.id)
-                .any((channel) => channel.id == _selectedChannelId)) {
+            !_channelsForServer(
+              server.id,
+            ).any((channel) => channel.id == _selectedChannelId)) {
           _selectedChannelId = _firstChannelIdForServer(server.id);
         }
 
         notifyListeners();
         _persist();
       },
-      onError: (message) {
-        _lastError = message;
+      onMediaRoomState: _mediaE2ee.handleRoomState,
+      onMediaEnvelope: _mediaE2ee.handleEnvelope,
+      onMlsDelivery: (message) {
+        final channel = _channelById(message.channelId);
+        final currentServer = _serverById(serverId);
+        final currentToken = _tokensByServerId[serverId];
+        if (channel == null ||
+            currentServer == null ||
+            currentToken == null ||
+            channel.encryptionMode != ChannelEncryptionMode.e2ee ||
+            channel.encryptionVersion != 1) {
+          return;
+        }
+        unawaited(
+          _synchronizeEncryptedChannel(
+            server: currentServer,
+            token: currentToken,
+            channel: channel,
+          ).catchError((_) {}),
+        );
+      },
+      onConnected: () {
+        if (_activeServerId != serverId) return;
+        _unreachableServerId = null;
+        _lastError = null;
+        notifyListeners();
+      },
+      onUnavailable: () => _handleRealtimeUnavailable(serverId),
+      onError: (_) {
+        if (_activeServerId != serverId) return;
+        _lastError =
+            'Realtime updates are temporarily unavailable. Yappa will keep trying.';
         notifyListeners();
       },
     );
 
-    _realtime!.connect(server: server, token: token);
+    _realtime!.connect(
+      server: server,
+      token: token,
+      useLanRoute: _api.hasLanRoute(server.address),
+    );
   }
 
   void _disconnectRealtime() {
+    _voiceJoinGeneration += 1;
+    _mediaE2ee.end();
+    _voiceAbortFuture = _voiceAbortFuture.catchError((_) {}).then((_) async {
+      try {
+        await _voiceTransport.failMediaEncryption(
+          StateError('Realtime coordination disconnected.'),
+        );
+      } catch (_) {}
+      try {
+        await _voiceTransport.leaveVoiceChannel();
+      } catch (_) {}
+      try {
+        await stopMicInputCapture();
+      } catch (_) {}
+    });
     _realtime?.dispose();
     _realtime = null;
+  }
+
+  void _handleRealtimeUnavailable(String serverId) {
+    if (_activeServerId != serverId) return;
+    _unreachableServerId = serverId;
+    _lastError =
+        'This server is unreachable right now. Yappa will keep trying, or you can retry now.';
+    _voiceJoinGeneration += 1;
+    _mediaE2ee.end();
+    _voiceAbortFuture = _voiceAbortFuture.catchError((_) {}).then((_) async {
+      try {
+        await _voiceTransport.failMediaEncryption(
+          StateError('Realtime coordination disconnected.'),
+        );
+      } catch (_) {}
+      try {
+        await _voiceTransport.leaveVoiceChannel();
+      } catch (_) {}
+      try {
+        await stopMicInputCapture();
+      } catch (_) {}
+    });
+    notifyListeners();
   }
 
   void _activateSession({
@@ -1774,8 +2795,9 @@ class AppState extends ChangeNotifier {
     _selectedServerId = serverId;
 
     if (_selectedChannelId == null ||
-        !_channelsForServer(serverId)
-            .any((channel) => channel.id == _selectedChannelId)) {
+        !_channelsForServer(
+          serverId,
+        ).any((channel) => channel.id == _selectedChannelId)) {
       _selectedChannelId = _firstChannelIdForServer(serverId);
     }
 
@@ -1803,7 +2825,8 @@ class AppState extends ChangeNotifier {
     if (index == -1 && currentUsername != null) {
       index = members.indexWhere(
         (member) =>
-            member.username == currentUsername || member.name == currentUsername,
+            member.username == currentUsername ||
+            member.name == currentUsername,
       );
     }
 
@@ -1819,7 +2842,10 @@ class AppState extends ChangeNotifier {
         clearVoiceChannelId: voiceChannelId == null,
         clearVoiceJoinedAt: voiceJoinedAt == null,
       );
-      _membersByServer[serverId] = _applyLocalProfilesToMembers(serverId, members);
+      _membersByServer[serverId] = _applyLocalProfilesToMembers(
+        serverId,
+        members,
+      );
     }
 
     final states = List<VoiceDeckState>.from(
@@ -1833,8 +2859,9 @@ class AppState extends ChangeNotifier {
       );
       if (oldIndex != -1) {
         final oldState = states[oldIndex];
-        final nextOccupancy =
-            oldState.occupancy > 0 ? oldState.occupancy - 1 : 0;
+        final nextOccupancy = oldState.occupancy > 0
+            ? oldState.occupancy - 1
+            : 0;
         states[oldIndex] = VoiceDeckState(
           channelId: oldState.channelId,
           channelName: oldState.channelName,
@@ -1845,15 +2872,16 @@ class AppState extends ChangeNotifier {
     }
 
     if (voiceChannelId != null) {
-      final newIndex =
-          states.indexWhere((state) => state.channelId == voiceChannelId);
+      final newIndex = states.indexWhere(
+        (state) => state.channelId == voiceChannelId,
+      );
       if (newIndex != -1) {
         final current = states[newIndex];
         final nextOccupancy =
             current.channelId == previousVoiceChannelId &&
-                    previousVoiceChannelId != null
-                ? current.occupancy
-                : current.occupancy + 1;
+                previousVoiceChannelId != null
+            ? current.occupancy
+            : current.occupancy + 1;
 
         states[newIndex] = VoiceDeckState(
           channelId: current.channelId,
@@ -1878,14 +2906,21 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _startVoiceTransportForCurrentDeck({
+    required String serverId,
     required String channelId,
+    required MediaE2eeSessionKey encryptionKey,
   }) async {
-    final userId = currentUserIdForSelectedServer;
-    final server = _serverById(selectedServerId);
-    final token = _tokensByServerId[selectedServerId];
+    final userId = _userIdByServerId[serverId];
+    final server = _serverById(serverId);
+    final token = _tokensByServerId[serverId];
 
-    if (userId == null || userId.isEmpty || server == null || token == null) {
-      return;
+    if (userId == null ||
+        userId.isEmpty ||
+        server == null ||
+        token == null ||
+        encryptionKey.serverId != serverId ||
+        encryptionKey.channelId != channelId) {
+      throw StateError('Encrypted voice join context changed.');
     }
 
     final credentials = await _api.fetchVoiceConnection(
@@ -1899,7 +2934,14 @@ class AppState extends ChangeNotifier {
       voiceChannelId: channelId,
       serverUrl: credentials.serverUrl,
       participantToken: credentials.participantToken,
+      encryptionKey: encryptionKey.bytes,
+      encryptionKeyIndex: encryptionKey.keyIndex,
+      encryptionParticipantIds: _mediaE2ee.roomState!.devices
+          .map((device) => device.id)
+          .toList(growable: false),
       roomName: credentials.roomName,
+      lanHost: _api.hasLanRoute(server.address) ? server.lanAddress : null,
+      lanTlsPort: _api.hasLanRoute(server.address) ? server.lanTlsPort : null,
     );
 
     await _applyStoredVoiceMemberVolumesToTransport();
@@ -1924,7 +2966,56 @@ class AppState extends ChangeNotifier {
 
   void _handleVoiceTransportChanged() {
     _syncVoiceActivityFromMic();
+    _syncScreenShareStateFromTransport();
     notifyListeners();
+  }
+
+  void _syncScreenShareStateFromTransport() {
+    if (_screenShareSelectionPending ||
+        _screenShareToggleInProgress ||
+        _screenShareTransportSyncInFlight ||
+        !hasActiveSession) {
+      return;
+    }
+
+    final serverId = selectedServerId;
+    if (serverId.isEmpty) {
+      return;
+    }
+
+    final current = _localVoiceStateByServerId[serverId];
+    if (current == null || !current.screenShareEnabled) {
+      return;
+    }
+
+    if (_voiceTransport.localScreenShareTrack != null) {
+      return;
+    }
+
+    debugPrint(
+      '[YappaScreenShare] Clearing presence because the local transport '
+      'no longer reports a screen track.',
+    );
+    _localVoiceStateByServerId[serverId] = current.copyWith(
+      screenShareEnabled: false,
+    );
+
+    final realtime = _realtime;
+    if (realtime == null) {
+      return;
+    }
+
+    _screenShareTransportSyncInFlight = true;
+    realtime
+        .updateVoiceState(screenShareEnabled: false)
+        .then((next) {
+          _localVoiceStateByServerId[serverId] = next;
+        })
+        .catchError((_) {})
+        .whenComplete(() {
+          _screenShareTransportSyncInFlight = false;
+          notifyListeners();
+        });
   }
 
   Future<void> _handleLocalVoiceIceCandidate(
@@ -2036,7 +3127,8 @@ class AppState extends ChangeNotifier {
     if (!hasActiveSession) return;
 
     final serverId = selectedServerId;
-    final current = _localVoiceStateByServerId[serverId] ??
+    final current =
+        _localVoiceStateByServerId[serverId] ??
         const VoicePresenceState.defaults();
 
     if (current.speaking == speaking) return;
@@ -2048,10 +3140,13 @@ class AppState extends ChangeNotifier {
     final realtime = _realtime;
     if (realtime == null) return;
 
-    realtime.setSpeaking(speaking).then((next) {
-      _localVoiceStateByServerId[serverId] = next;
-      notifyListeners();
-    }).catchError((_) {});
+    realtime
+        .setSpeaking(speaking)
+        .then((next) {
+          _localVoiceStateByServerId[serverId] = next;
+          notifyListeners();
+        })
+        .catchError((_) {});
   }
 
   bool _desiredTransportMuted() {
@@ -2174,6 +3269,16 @@ class AppState extends ChangeNotifier {
             : server.accentColor,
         iconUrl: server.iconUrl ?? existing.iconUrl,
         bannerUrl: server.bannerUrl ?? existing.bannerUrl,
+        identityPublicKey: server.identityPublicKey.trim().isEmpty
+            ? existing.identityPublicKey
+            : server.identityPublicKey,
+        publicAddress: server.publicAddress.trim().isEmpty
+            ? existing.publicAddress
+            : server.publicAddress,
+        lanAddress: server.lanAddress.trim().isEmpty
+            ? existing.lanAddress
+            : server.lanAddress,
+        lanTlsPort: server.lanTlsPort ?? existing.lanTlsPort,
       );
     }
 
@@ -2229,7 +3334,6 @@ class AppState extends ChangeNotifier {
     _decodeChannels(prefs.getString(_channelsKey));
     _decodeMembers(prefs.getString(_membersKey));
     _decodeMessages(prefs.getString(_messagesKey));
-    _decodeTokens(prefs.getString(_tokensKey));
     _decodeRememberedUsers(prefs.getString(_rememberedUsersKey));
     _decodeVoiceMemberVolumes(prefs.getString(_voiceMemberVolumesKey));
 
@@ -2243,7 +3347,10 @@ class AppState extends ChangeNotifier {
     _localAvatarSourcesByAccount.clear();
 
     for (final entry in _membersByServer.entries.toList()) {
-      _membersByServer[entry.key] = _applyLocalProfilesToMembers(entry.key, entry.value);
+      _membersByServer[entry.key] = _applyLocalProfilesToMembers(
+        entry.key,
+        entry.value,
+      );
     }
 
     if (_activeServerId != null && _serverById(_activeServerId) == null) {
@@ -2256,13 +3363,17 @@ class AppState extends ChangeNotifier {
       _selectedChannelId = null;
     }
 
-    if (_selectedChannelId != null && _channelById(_selectedChannelId) == null) {
+    if (_selectedChannelId != null &&
+        _channelById(_selectedChannelId) == null) {
       _selectedChannelId = null;
     }
   }
 
   Future<void> _persist() async {
     final prefs = await SharedPreferences.getInstance();
+
+    await _secretStorage.write(_secureTokensKey, jsonEncode(_tokensByServerId));
+    await prefs.remove(_tokensKey);
 
     await prefs.setString(
       _serversKey,
@@ -2290,7 +3401,6 @@ class AppState extends ChangeNotifier {
       }),
     );
 
-    await prefs.setString(_tokensKey, jsonEncode(_tokensByServerId));
     await prefs.setString(
       _rememberedUsersKey,
       jsonEncode(_rememberedUsersByServer),
@@ -2377,9 +3487,9 @@ class AppState extends ChangeNotifier {
     _servers
       ..clear()
       ..addAll(
-        decoded
-            .whereType<Map>()
-            .map((item) => ChatServer.fromJson(Map<String, dynamic>.from(item))),
+        decoded.whereType<Map>().map(
+          (item) => ChatServer.fromJson(Map<String, dynamic>.from(item)),
+        ),
       );
   }
 
@@ -2392,11 +3502,9 @@ class AppState extends ChangeNotifier {
     _channels
       ..clear()
       ..addAll(
-        decoded
-            .whereType<Map>()
-            .map(
-              (item) => ChatChannel.fromJson(Map<String, dynamic>.from(item)),
-            ),
+        decoded.whereType<Map>().map(
+          (item) => ChatChannel.fromJson(Map<String, dynamic>.from(item)),
+        ),
       );
   }
 
@@ -2436,9 +3544,8 @@ class AppState extends ChangeNotifier {
             (value as List)
                 .whereType<Map>()
                 .map(
-                  (item) => ChatMessage.fromJson(
-                    Map<String, dynamic>.from(item),
-                  ),
+                  (item) =>
+                      ChatMessage.fromJson(Map<String, dynamic>.from(item)),
                 )
                 .toList(),
           ),
@@ -2459,6 +3566,24 @@ class AppState extends ChangeNotifier {
       );
   }
 
+  Future<void> _restoreSecrets(SharedPreferences prefs) async {
+    final securelyStoredTokens = await _secretStorage.read(_secureTokensKey);
+    if ((securelyStoredTokens ?? '').isNotEmpty) {
+      _decodeTokens(securelyStoredTokens);
+      await prefs.remove(_tokensKey);
+      return;
+    }
+
+    final legacyTokens = prefs.getString(_tokensKey);
+    if ((legacyTokens ?? '').isEmpty) {
+      return;
+    }
+
+    _decodeTokens(legacyTokens);
+    await _secretStorage.write(_secureTokensKey, jsonEncode(_tokensByServerId));
+    await prefs.remove(_tokensKey);
+  }
+
   void _decodeRememberedUsers(String? raw) {
     if (raw == null || raw.isEmpty) return;
 
@@ -2471,4 +3596,28 @@ class AppState extends ChangeNotifier {
         decoded.map((key, value) => MapEntry(key.toString(), value.toString())),
       );
   }
+}
+
+String _attachmentMimeType(String name) {
+  final extension = name.contains('.')
+      ? name.split('.').last.toLowerCase()
+      : '';
+  return const {
+        'png': 'image/png',
+        'jpg': 'image/jpeg',
+        'jpeg': 'image/jpeg',
+        'gif': 'image/gif',
+        'webp': 'image/webp',
+        'mp4': 'video/mp4',
+        'webm': 'video/webm',
+        'mp3': 'audio/mpeg',
+        'wav': 'audio/wav',
+        'ogg': 'audio/ogg',
+        'pdf': 'application/pdf',
+        'txt': 'text/plain',
+        'md': 'text/markdown',
+        'json': 'application/json',
+        'zip': 'application/zip',
+      }[extension] ??
+      'application/octet-stream';
 }

@@ -194,8 +194,9 @@ class _ConnectScreenState extends State<ConnectScreen> {
   }
 
   Future<void> _confirmRemoveServer(String serverId) async {
-    final matches =
-        widget.appState.servers.where((server) => server.id == serverId).toList();
+    final matches = widget.appState.servers
+        .where((server) => server.id == serverId)
+        .toList();
     if (matches.isEmpty) return;
     final server = matches.first;
 
@@ -232,8 +233,8 @@ class _ConnectScreenState extends State<ConnectScreen> {
     setState(() {
       _selectedServerId = widget.appState.servers.isNotEmpty
           ? (widget.appState.selectedServerId.isEmpty
-              ? widget.appState.servers.first.id
-              : widget.appState.selectedServerId)
+                ? widget.appState.servers.first.id
+                : widget.appState.selectedServerId)
           : null;
       _errorText = null;
       _useDifferentIdentity = false;
@@ -314,10 +315,7 @@ class _PortalSettingsButton extends StatelessWidget {
             borderRadius: BorderRadius.circular(20),
           ),
         ),
-        child: Icon(
-          Icons.settings_rounded,
-          color: NewChatColors.textMuted,
-        ),
+        child: Icon(Icons.settings_rounded, color: NewChatColors.textMuted),
       ),
     );
   }
@@ -528,9 +526,7 @@ class _IntroPanel extends StatelessWidget {
         Positioned(
           top: 26,
           right: 6,
-          child: _PortalSettingsButton(
-            onPressed: onOpenSettings,
-          ),
+          child: _PortalSettingsButton(onPressed: onOpenSettings),
         ),
       ],
     );
@@ -611,7 +607,8 @@ class _ServerPickerCard extends StatelessWidget {
     final hasSelection =
         selectedServerId != null && selectedServerId!.isNotEmpty;
     final selectedIsOwner =
-        hasSelection && appState.permissionsForServer(selectedServerId!).isOwner;
+        hasSelection &&
+        appState.permissionsForServer(selectedServerId!).isOwner;
 
     return Container(
       decoration: BoxDecoration(
@@ -637,8 +634,8 @@ class _ServerPickerCard extends StatelessWidget {
                     Text(
                       rememberedUsername != null
                           ? selectedIsOwner
-                              ? 'A saved owner session is ready on the selected node.'
-                              : 'A saved local session is ready on the selected node.'
+                                ? 'A saved owner session is ready on the selected node.'
+                                : 'A saved local session is ready on the selected node.'
                           : 'Pick the node you want to enter, or add a new one by IP or host.',
                       style: TextStyle(color: NewChatColors.textMuted),
                     ),
@@ -695,13 +692,16 @@ class _ServerPickerCard extends StatelessWidget {
                     itemBuilder: (context, index) {
                       final server = servers[index];
                       final selected = server.id == selectedServerId;
-                      final isOwner =
-                          appState.permissionsForServer(server.id).isOwner;
+                      final isOwner = appState
+                          .permissionsForServer(server.id)
+                          .isOwner;
                       return _ServerPickerTile(
                         server: server,
                         selected: selected,
                         isOwner: isOwner,
-                        rememberedUsername: selected ? rememberedUsername : null,
+                        rememberedUsername: selected
+                            ? rememberedUsername
+                            : null,
                         iconUrl: _resolvedAssetUrl(server, server.iconUrl),
                         bannerUrl: _resolvedAssetUrl(server, server.bannerUrl),
                         onTap: () => onServerSelected(server.id),
@@ -723,8 +723,8 @@ class _ServerPickerCard extends StatelessWidget {
               label: Text(
                 rememberedUsername != null
                     ? selectedIsOwner
-                        ? 'Continue as owner'
-                        : 'Continue as $rememberedUsername'
+                          ? 'Continue as owner'
+                          : 'Continue as $rememberedUsername'
                     : 'Start Chatting',
               ),
             ),
@@ -921,7 +921,7 @@ class _ServerPickerTile extends StatelessWidget {
                             children: [
                               _NodeMetaChip(
                                 icon: Icons.dns_rounded,
-                                label: server.address,
+                                label: server.joinAddress,
                               ),
                               if (hasSavedSession)
                                 _NodeMetaChip(
@@ -957,10 +957,7 @@ class _NodeMetaChip extends StatelessWidget {
   final IconData icon;
   final String label;
 
-  const _NodeMetaChip({
-    required this.icon,
-    required this.label,
-  });
+  const _NodeMetaChip({required this.icon, required this.label});
 
   @override
   Widget build(BuildContext context) {

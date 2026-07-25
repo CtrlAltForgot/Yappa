@@ -1,0 +1,15 @@
+{
+	default_sni {$YAPPA_DEFAULT_SNI:localhost}
+	# Public-IP certificates use Let's Encrypt's short-lived profile. Caddy
+	# persists and renews their account/key material under /data.
+	cert_issuer acme {
+		dir https://acme-v02.api.letsencrypt.org/directory
+		profile shortlived
+	}
+}
+
+{$YAPPA_SITE_ADDRESS:http://:80} {
+	@livekit path /rtc*
+	reverse_proxy @livekit host.docker.internal:7880
+	reverse_proxy newchat-node:4100
+}

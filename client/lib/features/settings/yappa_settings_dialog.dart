@@ -242,26 +242,27 @@ Future<void> showYappaSettingsDialog({
                           Expanded(
                             child: switch (selectedTab) {
                               0 => _AppearanceSettingsTab(
-                                  onChanged: refreshAll,
-                                ),
+                                onChanged: refreshAll,
+                              ),
                               1 => _AudioSettingsTab(
-                                  appState: appState,
-                                  onChanged: refreshAll,
-                                ),
-                              2 => Platform.isLinux
-                                  ? const _VideoSettingsTab()
-                                  : const _SettingsPlaceholderTab(
-                                      title: 'Video settings',
-                                      description:
-                                          'Later this is where Yappa will expose cameras, screen share quality, capture sources, and device preview controls.',
-                                      icon: Icons.videocam_rounded,
-                                    ),
+                                appState: appState,
+                                onChanged: refreshAll,
+                              ),
+                              2 =>
+                                Platform.isLinux
+                                    ? const _VideoSettingsTab()
+                                    : const _SettingsPlaceholderTab(
+                                        title: 'Video settings',
+                                        description:
+                                            'Later this is where Yappa will expose cameras, screen share quality, capture sources, and device preview controls.',
+                                        icon: Icons.videocam_rounded,
+                                      ),
                               3 => const _SettingsPlaceholderTab(
-                                  title: 'Plugins and themes',
-                                  description:
-                                      'Later this is where custom plugins, theme packs, and extension management will live.',
-                                  icon: Icons.extension_rounded,
-                                ),
+                                title: 'Plugins and themes',
+                                description:
+                                    'Later this is where custom plugins, theme packs, and extension management will live.',
+                                icon: Icons.extension_rounded,
+                              ),
                               _ => const _InfoSettingsTab(),
                             },
                           ),
@@ -269,7 +270,8 @@ Future<void> showYappaSettingsDialog({
                           Align(
                             alignment: Alignment.centerRight,
                             child: TextButton(
-                              onPressed: () => Navigator.of(dialogContext).pop(),
+                              onPressed: () =>
+                                  Navigator.of(dialogContext).pop(),
                               child: const Text('Close'),
                             ),
                           ),
@@ -306,10 +308,7 @@ class _SettingsSidebarSection extends StatelessWidget {
   final String title;
   final List<Widget> children;
 
-  const _SettingsSidebarSection({
-    required this.title,
-    required this.children,
-  });
+  const _SettingsSidebarSection({required this.title, required this.children});
 
   @override
   Widget build(BuildContext context) {
@@ -347,14 +346,9 @@ class _SettingsSidebarItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final background = selected
-        ? const Color(0xFF1A212D)
-        : Colors.transparent;
-    final borderColor = selected
-        ? NewChatColors.outline
-        : Colors.transparent;
-    final foreground =
-        selected ? Colors.white : NewChatColors.textMuted;
+    final background = selected ? const Color(0xFF1A212D) : Colors.transparent;
+    final borderColor = selected ? NewChatColors.outline : Colors.transparent;
+    final foreground = selected ? Colors.white : NewChatColors.textMuted;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
@@ -393,7 +387,6 @@ class _SettingsSidebarItem extends StatelessWidget {
     );
   }
 }
-
 
 class _AppearanceSettingsTab extends StatefulWidget {
   final VoidCallback onChanged;
@@ -473,25 +466,16 @@ class _AppearanceSettingsTabState extends State<_AppearanceSettingsTab> {
 
     return ListView(
       children: [
-        Text(
-          'Appearance',
-          style: Theme.of(context).textTheme.headlineMedium,
-        ),
+        Text('Appearance', style: Theme.of(context).textTheme.headlineMedium),
         const SizedBox(height: 10),
         Text(
           'Customize the core Yappa look. These settings persist on this machine.',
-          style: TextStyle(
-            color: NewChatColors.textMuted,
-            height: 1.45,
-          ),
+          style: TextStyle(color: NewChatColors.textMuted, height: 1.45),
         ),
         const SizedBox(height: 24),
         const Text(
           'Accent color',
-          style: TextStyle(
-            fontWeight: FontWeight.w800,
-            fontSize: 16,
-          ),
+          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
         ),
         const SizedBox(height: 14),
         SingleChildScrollView(
@@ -561,10 +545,7 @@ class _AppearanceSettingsTabState extends State<_AppearanceSettingsTab> {
               children: [
                 const Text(
                   'Custom accent',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w800,
-                    fontSize: 15,
-                  ),
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
                 ),
                 const SizedBox(height: 14),
                 Row(
@@ -619,10 +600,7 @@ class _AppearanceSettingsTabState extends State<_AppearanceSettingsTab> {
         const SizedBox(height: 28),
         const Text(
           'Font style',
-          style: TextStyle(
-            fontWeight: FontWeight.w800,
-            fontSize: 16,
-          ),
+          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
         ),
         const SizedBox(height: 14),
         Wrap(
@@ -641,8 +619,7 @@ class _AppearanceSettingsTabState extends State<_AppearanceSettingsTab> {
             ),
             _FontChoiceChip(
               label: 'Monospace',
-              selected:
-                  YappaAppearance.fontPreset == YappaFontPreset.monospace,
+              selected: YappaAppearance.fontPreset == YappaFontPreset.monospace,
               onTap: () => _setFont(YappaFontPreset.monospace),
             ),
           ],
@@ -656,10 +633,7 @@ class _AudioSettingsTab extends StatefulWidget {
   final AppState appState;
   final VoidCallback onChanged;
 
-  const _AudioSettingsTab({
-    required this.appState,
-    required this.onChanged,
-  });
+  const _AudioSettingsTab({required this.appState, required this.onChanged});
 
   @override
   State<_AudioSettingsTab> createState() => _AudioSettingsTabState();
@@ -695,8 +669,12 @@ class _AudioSettingsTabState extends State<_AudioSettingsTab> {
     try {
       await YappaAudioPreferences.load();
       final devices = await navigator.mediaDevices.enumerateDevices();
-      final inputs = devices.where((d) => d.kind == 'audioinput').toList();
-      final outputs = devices.where((d) => d.kind == 'audiooutput').toList();
+      final inputs = _uniqueDevices(
+        devices.where((device) => device.kind == 'audioinput'),
+      );
+      final outputs = _uniqueDevices(
+        devices.where((device) => device.kind == 'audiooutput'),
+      );
 
       if (!mounted) return;
       setState(() {
@@ -712,6 +690,26 @@ class _AudioSettingsTabState extends State<_AudioSettingsTab> {
         _loadingDevices = false;
       });
     }
+  }
+
+  List<MediaDeviceInfo> _uniqueDevices(Iterable<MediaDeviceInfo> devices) {
+    final seenIds = <String>{};
+    return devices.where((device) {
+      final id = device.deviceId.trim();
+      return id.isNotEmpty && seenIds.add(id);
+    }).toList();
+  }
+
+  String? _availableDeviceId(
+    String? preferredId,
+    List<MediaDeviceInfo> devices,
+  ) {
+    if (preferredId == null) {
+      return null;
+    }
+    return devices.any((device) => device.deviceId == preferredId)
+        ? preferredId
+        : null;
   }
 
   Future<void> _run(Future<void> Function() action) async {
@@ -869,22 +867,15 @@ class _AudioSettingsTabState extends State<_AudioSettingsTab> {
         YappaAudioPreferences.voiceInputMode ==
         YappaVoiceInputMode.voiceActivityDetection;
     final isPtt =
-        YappaAudioPreferences.voiceInputMode ==
-        YappaVoiceInputMode.pushToTalk;
+        YappaAudioPreferences.voiceInputMode == YappaVoiceInputMode.pushToTalk;
 
     return ListView(
       children: [
-        Text(
-          'Audio',
-          style: Theme.of(context).textTheme.headlineMedium,
-        ),
+        Text('Audio', style: Theme.of(context).textTheme.headlineMedium),
         const SizedBox(height: 10),
         Text(
           'Set your microphone up the way people expect: choose the device, watch live mic feedback at all times, and tune voice activity detection or Push to Talk.',
-          style: TextStyle(
-            color: NewChatColors.textMuted,
-            height: 1.45,
-          ),
+          style: TextStyle(color: NewChatColors.textMuted, height: 1.45),
         ),
         const SizedBox(height: 24),
         _SettingsCard(
@@ -898,7 +889,10 @@ class _AudioSettingsTabState extends State<_AudioSettingsTab> {
                 const LinearProgressIndicator()
               else ...[
                 DropdownButtonFormField<String?>(
-                  initialValue: YappaAudioPreferences.preferredInputDeviceId,
+                  initialValue: _availableDeviceId(
+                    YappaAudioPreferences.preferredInputDeviceId,
+                    _inputDevices,
+                  ),
                   items: [
                     const DropdownMenuItem<String?>(
                       value: null,
@@ -908,9 +902,7 @@ class _AudioSettingsTabState extends State<_AudioSettingsTab> {
                       final device = _inputDevices[index];
                       return DropdownMenuItem<String?>(
                         value: device.deviceId,
-                        child: Text(
-                          _deviceLabel(device, index, 'Microphone'),
-                        ),
+                        child: Text(_deviceLabel(device, index, 'Microphone')),
                       );
                     }),
                   ],
@@ -929,7 +921,10 @@ class _AudioSettingsTabState extends State<_AudioSettingsTab> {
                 ),
                 const SizedBox(height: 14),
                 DropdownButtonFormField<String?>(
-                  initialValue: YappaAudioPreferences.preferredOutputDeviceId,
+                  initialValue: _availableDeviceId(
+                    YappaAudioPreferences.preferredOutputDeviceId,
+                    _outputDevices,
+                  ),
                   items: [
                     const DropdownMenuItem<String?>(
                       value: null,
@@ -939,9 +934,7 @@ class _AudioSettingsTabState extends State<_AudioSettingsTab> {
                       final device = _outputDevices[index];
                       return DropdownMenuItem<String?>(
                         value: device.deviceId,
-                        child: Text(
-                          _deviceLabel(device, index, 'Output'),
-                        ),
+                        child: Text(_deviceLabel(device, index, 'Output')),
                       );
                     }),
                   ],
@@ -1029,9 +1022,7 @@ class _AudioSettingsTabState extends State<_AudioSettingsTab> {
                     ),
                     child: Text(
                       YappaAudioPreferences.pushToTalkKeyLabel,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                      ),
+                      style: const TextStyle(fontWeight: FontWeight.w800),
                     ),
                   ),
                 ),
@@ -1039,9 +1030,7 @@ class _AudioSettingsTabState extends State<_AudioSettingsTab> {
                 OutlinedButton.icon(
                   onPressed: _capturingBinding ? null : _capturePushToTalkKey,
                   icon: const Icon(Icons.keyboard_rounded, size: 18),
-                  label: Text(
-                    _capturingBinding ? 'Waiting…' : 'Set key',
-                  ),
+                  label: Text(_capturingBinding ? 'Waiting…' : 'Set key'),
                 ),
               ],
             ),
@@ -1078,18 +1067,14 @@ class _AudioSettingsTabState extends State<_AudioSettingsTab> {
                 ],
               ),
               const SizedBox(height: 14),
-              _LevelBar(
-                value: level,
-                peak: peak,
-                threshold: threshold,
-              ),
+              _LevelBar(value: level, peak: peak, threshold: threshold),
               const SizedBox(height: 8),
               Text(
                 appState.micInputError?.trim().isNotEmpty == true
                     ? appState.micInputError!
                     : isVad
-                        ? 'Input ${(level * 100).round()}% • Peak ${(peak * 100).round()}% • VAD ${(threshold * 100).round()}%'
-                        : 'Input ${(level * 100).round()}% • Peak ${(peak * 100).round()}% • Threshold ${(threshold * 100).round()}%',
+                    ? 'Input ${(level * 100).round()}% • Peak ${(peak * 100).round()}% • VAD ${(threshold * 100).round()}%'
+                    : 'Input ${(level * 100).round()}% • Peak ${(peak * 100).round()}% • Threshold ${(threshold * 100).round()}%',
                 style: TextStyle(
                   color: appState.micInputError?.trim().isNotEmpty == true
                       ? const Color(0xFFFFB4BF)
@@ -1130,10 +1115,7 @@ class _AudioSettingsTabState extends State<_AudioSettingsTab> {
               const SizedBox(height: 8),
               Text(
                 'Green is comfortable, yellow means you are getting hot, and red means your mic is very loud. Keep the threshold marker above room noise but below normal speech.',
-                style: TextStyle(
-                  color: NewChatColors.textMuted,
-                  fontSize: 12,
-                ),
+                style: TextStyle(color: NewChatColors.textMuted, fontSize: 12),
               ),
             ],
           ),
@@ -1141,8 +1123,7 @@ class _AudioSettingsTabState extends State<_AudioSettingsTab> {
         const SizedBox(height: 18),
         _SettingsCard(
           title: 'Voice processing',
-          subtitle:
-              'Cleanup options for echo, noise, and automatic leveling.',
+          subtitle: 'Cleanup options for echo, noise, and automatic leveling.',
           child: Column(
             children: [
               SwitchListTile.adaptive(
@@ -1249,9 +1230,26 @@ class _VideoSettingsTabState extends State<_VideoSettingsTab> {
     });
   }
 
+  Future<void> _setScreenShareQuality(YappaScreenShareQuality value) async {
+    setState(() {
+      _saving = true;
+    });
+
+    await YappaVideoPreferences.setScreenShareQuality(value);
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _saving = false;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final backend = YappaVideoPreferences.linuxScreenShareBackend;
+    final quality = YappaVideoPreferences.screenShareQuality;
     final detectedSession = YappaVideoPreferences.detectedLinuxSessionType;
     final effectivePath = YappaVideoPreferences.effectiveLinuxScreenSharePath;
     final blockMessage = YappaVideoPreferences.linuxScreenShareBlockMessage();
@@ -1271,19 +1269,60 @@ class _VideoSettingsTabState extends State<_VideoSettingsTab> {
 
     return ListView(
       children: [
-        Text(
-          'Video',
-          style: Theme.of(context).textTheme.headlineMedium,
-        ),
+        Text('Video', style: Theme.of(context).textTheme.headlineMedium),
         const SizedBox(height: 10),
         Text(
           'Linux screen sharing can behave differently depending on whether the desktop session is Wayland or X11. This setting does not change your desktop session; it only changes how Yappa responds.',
-          style: TextStyle(
-            color: NewChatColors.textMuted,
-            height: 1.45,
-          ),
+          style: TextStyle(color: NewChatColors.textMuted, height: 1.45),
         ),
         const SizedBox(height: 24),
+        _SettingsCard(
+          title: 'Screen share quality',
+          subtitle:
+              'Choose the maximum capture quality. Yappa can reduce bitrate or delivered quality when the network cannot sustain this ceiling.',
+          headerTrailing: _saving
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : null,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: YappaScreenShareQuality.values
+                    .map(
+                      (value) => ChoiceChip(
+                        label: Text(value.label),
+                        selected: quality == value,
+                        onSelected: _saving
+                            ? null
+                            : (_) => _setScreenShareQuality(value),
+                      ),
+                    )
+                    .toList(),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                quality.description,
+                style: TextStyle(color: NewChatColors.textMuted, height: 1.45),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Maximum upload: about ${(quality.maxBitrate / 1000000).round()} Mbps. The selection applies the next time screen sharing starts.',
+                style: TextStyle(
+                  color: NewChatColors.textMuted,
+                  fontSize: 12,
+                  height: 1.45,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
         _SettingsCard(
           title: 'Session detection',
           subtitle:
@@ -1295,10 +1334,7 @@ class _VideoSettingsTabState extends State<_VideoSettingsTab> {
                 spacing: 10,
                 runSpacing: 10,
                 children: [
-                  const _StatusPill(
-                    label: 'Linux build',
-                    active: true,
-                  ),
+                  const _StatusPill(label: 'Linux build', active: true),
                   _StatusPill(
                     label: 'Detected: $detectedSession',
                     active: detectedSession != 'Unknown',
@@ -1314,8 +1350,8 @@ class _VideoSettingsTabState extends State<_VideoSettingsTab> {
                 detectedSession == 'Wayland'
                     ? 'Wayland uses the desktop portal chooser directly, so the system picker is expected to own the final share selection.'
                     : detectedSession == 'X11'
-                        ? 'X11 now uses the native Linux share flow in Auto mode first, with a legacy X11 fallback only when Yappa needs it.'
-                        : 'Yappa could not confidently detect the desktop session, so Auto will fall back to the safest built-in path.',
+                    ? 'X11 now uses the native Linux share flow in Auto mode first, with a legacy X11 fallback only when Yappa needs it.'
+                    : 'Yappa could not confidently detect the desktop session, so Auto will fall back to the safest built-in path.',
                 style: TextStyle(
                   color: NewChatColors.textMuted,
                   fontSize: 12,
@@ -1358,37 +1394,34 @@ class _VideoSettingsTabState extends State<_VideoSettingsTab> {
                     onSelected: _saving
                         ? null
                         : (_) => _setBackend(
-                              YappaLinuxScreenShareBackend.nativePortal,
-                            ),
+                            YappaLinuxScreenShareBackend.nativePortal,
+                          ),
                   ),
                   ChoiceChip(
                     label: const Text('X11 only'),
                     selected: backend == YappaLinuxScreenShareBackend.x11Only,
                     onSelected: _saving
                         ? null
-                        : (_) => _setBackend(
-                              YappaLinuxScreenShareBackend.x11Only,
-                            ),
+                        : (_) =>
+                              _setBackend(YappaLinuxScreenShareBackend.x11Only),
                   ),
                   ChoiceChip(
                     label: const Text('Disable on Wayland'),
                     selected:
-                        backend == YappaLinuxScreenShareBackend.disableOnWayland,
+                        backend ==
+                        YappaLinuxScreenShareBackend.disableOnWayland,
                     onSelected: _saving
                         ? null
                         : (_) => _setBackend(
-                              YappaLinuxScreenShareBackend.disableOnWayland,
-                            ),
+                            YappaLinuxScreenShareBackend.disableOnWayland,
+                          ),
                   ),
                 ],
               ),
               const SizedBox(height: 14),
               Text(
                 backendSummary(),
-                style: TextStyle(
-                  color: NewChatColors.textMuted,
-                  height: 1.45,
-                ),
+                style: TextStyle(color: NewChatColors.textMuted, height: 1.45),
               ),
               if (blockMessage != null) ...[
                 const SizedBox(height: 12),
@@ -1513,9 +1546,7 @@ class _FontChoiceChip extends StatelessWidget {
       side: BorderSide(
         color: selected ? NewChatColors.accentGlow : NewChatColors.outline,
       ),
-      labelStyle: TextStyle(
-        color: selected ? Colors.white : null,
-      ),
+      labelStyle: TextStyle(color: selected ? Colors.white : null),
     );
   }
 }
@@ -1568,10 +1599,7 @@ class _SettingsCard extends StatelessWidget {
             const SizedBox(height: 6),
             Text(
               subtitle,
-              style: TextStyle(
-                color: NewChatColors.textMuted,
-                height: 1.35,
-              ),
+              style: TextStyle(color: NewChatColors.textMuted, height: 1.35),
             ),
             const SizedBox(height: 14),
           ] else
@@ -1587,10 +1615,7 @@ class _StatusPill extends StatelessWidget {
   final String label;
   final bool active;
 
-  const _StatusPill({
-    required this.label,
-    required this.active,
-  });
+  const _StatusPill({required this.label, required this.active});
 
   @override
   Widget build(BuildContext context) {
@@ -1640,8 +1665,10 @@ class _LevelBar extends StatelessWidget {
           final width = constraints.maxWidth;
           final levelWidth = width * value.clamp(0.0, 1.0);
           final peakLeft = (width * peak.clamp(0.0, 1.0)).clamp(0.0, width - 2);
-          final thresholdLeft =
-              (width * threshold.clamp(0.0, 1.0)).clamp(0.0, width - 2);
+          final thresholdLeft = (width * threshold.clamp(0.0, 1.0)).clamp(
+            0.0,
+            width - 2,
+          );
 
           final greenEnd = width * 0.60;
           final yellowEnd = width * 0.82;
@@ -1652,21 +1679,15 @@ class _LevelBar extends StatelessWidget {
                 children: [
                   Container(
                     width: greenEnd,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFF1E5E3B),
-                    ),
+                    decoration: const BoxDecoration(color: Color(0xFF1E5E3B)),
                   ),
                   Container(
                     width: yellowEnd - greenEnd,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFF8A6A18),
-                    ),
+                    decoration: const BoxDecoration(color: Color(0xFF8A6A18)),
                   ),
                   Expanded(
                     child: Container(
-                      decoration: const BoxDecoration(
-                        color: Color(0xFF7C2525),
-                      ),
+                      decoration: const BoxDecoration(color: Color(0xFF7C2525)),
                     ),
                   ),
                 ],
@@ -1736,7 +1757,8 @@ class _LabeledSliderRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final display = displayText ??
+    final display =
+        displayText ??
         (max == 360 ? value.round().toString() : '${(value * 100).round()}%');
 
     return Padding(
@@ -1808,10 +1830,7 @@ class _SettingsPlaceholderTab extends StatelessWidget {
             Text(
               description,
               textAlign: TextAlign.center,
-              style: TextStyle(
-                color: NewChatColors.textMuted,
-                height: 1.45,
-              ),
+              style: TextStyle(color: NewChatColors.textMuted, height: 1.45),
             ),
           ],
         ),
@@ -1953,9 +1972,9 @@ class _InfoSettingsTabState extends State<_InfoSettingsTab> {
           children: [
             Text(
               'Info',
-              style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.displaySmall?.copyWith(fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 12),
             Wrap(
@@ -1992,10 +2011,7 @@ class _InfoSettingsTabState extends State<_InfoSettingsTab> {
                         padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
                         child: SelectableText(
                           data.changelog,
-                          style: const TextStyle(
-                            height: 1.5,
-                            fontSize: 14,
-                          ),
+                          style: const TextStyle(height: 1.5, fontSize: 14),
                         ),
                       ),
                     ),
@@ -2026,10 +2042,7 @@ class _InfoPill extends StatelessWidget {
   final String label;
   final String value;
 
-  const _InfoPill({
-    required this.label,
-    required this.value,
-  });
+  const _InfoPill({required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {

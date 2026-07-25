@@ -1,8 +1,16 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
+import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart' as hashes;
+import 'package:cryptography/cryptography.dart';
 import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
 
+import 'attachment_secretstream.dart';
+import 'mls_delivery_models.dart';
 import '../models/channel_model.dart';
 import '../models/link_preview_model.dart';
 import '../models/member_model.dart';
@@ -10,10 +18,42 @@ import '../models/message_model.dart';
 import '../models/server_model.dart';
 import '../models/server_permissions.dart';
 
+bool _constantTimeBytesEqual(List<int> first, List<int> second) {
+  if (first.length != second.length) return false;
+  var difference = 0;
+  for (var index = 0; index < first.length; index++) {
+    difference |= first[index] ^ second[index];
+  }
+  return difference == 0;
+}
+
+bool _sameStrings(List<String> first, List<String> second) {
+  if (first.length != second.length) return false;
+  for (var index = 0; index < first.length; index++) {
+    if (first[index] != second[index]) return false;
+  }
+  return true;
+}
+
+class _ApiDigestSink implements Sink<hashes.Digest> {
+  hashes.Digest? value;
+
+  @override
+  void add(hashes.Digest data) {
+    if (value != null) throw StateError('Digest emitted more than once.');
+    value = data;
+  }
+
+  @override
+  void close() {}
+}
+
 class ApiException implements Exception {
   final String message;
+  final int? statusCode;
+  final String? code;
 
-  ApiException(this.message);
+  ApiException(this.message, {this.statusCode, this.code});
 
   @override
   String toString() => message;
@@ -23,12 +63,41 @@ class NodeHandshakeResult {
   final ChatServer server;
   final List<ChatChannel> channels;
 
-  NodeHandshakeResult({
-    required this.server,
-    required this.channels,
+  NodeHandshakeResult({required this.server, required this.channels});
+}
+
+class VerifiedServerIdentity {
+  final String serverId;
+  final String publicKey;
+
+  const VerifiedServerIdentity({
+    required this.serverId,
+    required this.publicKey,
   });
 }
 
+class LanServerRoute {
+  final String host;
+  final int tlsPort;
+  final String serverId;
+  final String publicKey;
+  final String advertisedAddress;
+
+  const LanServerRoute({
+    required this.host,
+    required this.tlsPort,
+    required this.serverId,
+    required this.publicKey,
+    required this.advertisedAddress,
+  });
+}
+
+class _LanDialTarget {
+  final String host;
+  final int port;
+
+  const _LanDialTarget(this.host, this.port);
+}
 
 class YuidChallenge {
   final String serverId;
@@ -88,14 +157,46 @@ class AuthSessionResult extends SessionBundle {
   });
 }
 
+class DeviceSession {
+  final String id;
+  final String deviceName;
+  final DateTime? createdAt;
+  final DateTime? lastSeenAt;
+  final DateTime? expiresAt;
+  final DateTime? idleExpiresAt;
+  final bool current;
+
+  const DeviceSession({
+    required this.id,
+    required this.deviceName,
+    required this.createdAt,
+    required this.lastSeenAt,
+    required this.expiresAt,
+    required this.idleExpiresAt,
+    required this.current,
+  });
+
+  factory DeviceSession.fromJson(Map<String, dynamic> json) {
+    DateTime? date(dynamic value) =>
+        value == null ? null : DateTime.tryParse(value.toString());
+
+    return DeviceSession(
+      id: (json['id'] ?? '').toString(),
+      deviceName: (json['deviceName'] ?? 'Yappa client').toString(),
+      createdAt: date(json['createdAt']),
+      lastSeenAt: date(json['lastSeenAt']),
+      expiresAt: date(json['expiresAt']),
+      idleExpiresAt: date(json['idleExpiresAt']),
+      current: json['current'] == true,
+    );
+  }
+}
+
 class AdminChannelCreateResult {
   final ChatChannel channel;
   final List<ChatChannel> channels;
 
-  AdminChannelCreateResult({
-    required this.channel,
-    required this.channels,
-  });
+  AdminChannelCreateResult({required this.channel, required this.channels});
 }
 
 class BrandingUploadResult {
@@ -107,6 +208,28 @@ class BrandingUploadResult {
     required this.slot,
     required this.assetUrl,
     required this.server,
+  });
+}
+
+class EncryptedAttachmentUploadReceipt {
+  final String id;
+  final String channelId;
+  final Uint8List secretstreamHeader;
+  final int ciphertextSizeBytes;
+  final String ciphertextSha256;
+  final int chunkCount;
+  final DateTime? createdAt;
+  final DateTime? expiresAt;
+
+  const EncryptedAttachmentUploadReceipt({
+    required this.id,
+    required this.channelId,
+    required this.secretstreamHeader,
+    required this.ciphertextSizeBytes,
+    required this.ciphertextSha256,
+    required this.chunkCount,
+    required this.createdAt,
+    required this.expiresAt,
   });
 }
 
@@ -169,7 +292,6 @@ class ServerSettings {
   }
 }
 
-
 class VoiceConnectionCredentials {
   final String serverUrl;
   final String participantToken;
@@ -183,8 +305,14 @@ class VoiceConnectionCredentials {
 }
 
 class ApiClient {
+  final Map<String, _LanDialTarget> _lanRoutes = {};
+  final http.Client Function(Uri uri)? _clientFactory;
+
   static const Object _avatarUnspecified = Object();
   static Object get avatarUnspecified => _avatarUnspecified;
+
+  ApiClient({http.Client Function(Uri uri)? clientFactory})
+    : _clientFactory = clientFactory;
 
   String normalizeBaseUrl(String input) {
     final trimmed = input.trim();
@@ -192,9 +320,17 @@ class ApiClient {
       throw ApiException('Enter a server IP or host.');
     }
 
-    final hasScheme =
-        trimmed.startsWith('http://') || trimmed.startsWith('https://');
-    final withScheme = hasScheme ? trimmed : 'http://$trimmed';
+    final explicitScheme = RegExp(
+      r'^([a-z][a-z0-9+.-]*)://',
+      caseSensitive: false,
+    ).firstMatch(trimmed);
+    final suppliedScheme = explicitScheme?.group(1)?.toLowerCase();
+    if (suppliedScheme != null &&
+        suppliedScheme != 'http' &&
+        suppliedScheme != 'https') {
+      throw ApiException('Server addresses must use http:// or https://.');
+    }
+    final withScheme = suppliedScheme == null ? 'http://$trimmed' : trimmed;
 
     late final Uri uri;
     try {
@@ -207,13 +343,123 @@ class ApiClient {
       throw ApiException('Enter a valid server IP or host.');
     }
 
+    if ((uri.path.isNotEmpty && uri.path != '/') ||
+        uri.hasQuery ||
+        uri.hasFragment ||
+        uri.userInfo.isNotEmpty) {
+      throw ApiException('Enter only the server host and optional port.');
+    }
+
+    final allowsInsecureTransport = _isPrivateOrDevelopmentHost(uri.host);
+    final scheme =
+        suppliedScheme ?? (allowsInsecureTransport ? 'http' : 'https');
+    if (scheme == 'http' && !allowsInsecureTransport) {
+      throw ApiException(
+        'Public Yappa servers must use HTTPS. Use an https:// address.',
+        code: 'insecure_transport',
+      );
+    }
+
     final normalized = Uri(
-      scheme: uri.scheme.isEmpty ? 'http' : uri.scheme,
+      scheme: scheme,
       host: uri.host,
-      port: uri.hasPort ? uri.port : 4100,
+      port: uri.hasPort ? uri.port : (scheme == 'http' ? 4100 : null),
     ).toString();
 
     return normalized.replaceFirst(RegExp(r'/*$'), '');
+  }
+
+  String addressHost(String input) {
+    final trimmed = input.trim();
+    final withScheme =
+        RegExp(r'^[a-z][a-z0-9+.-]*://', caseSensitive: false).hasMatch(trimmed)
+        ? trimmed
+        : 'http://$trimmed';
+    return Uri.tryParse(withScheme)?.host.trim().toLowerCase() ?? '';
+  }
+
+  String advertisedHostForAddress(String input) {
+    return addressHost(input);
+  }
+
+  bool isPrivateOrDevelopmentAddress(String input) =>
+      _isPrivateOrDevelopmentHost(addressHost(input));
+
+  String secureBaseUrlForDiscoveredRoute({
+    required String savedBaseUrl,
+    required String advertisedAddress,
+  }) {
+    final saved = normalizeBaseUrl(savedBaseUrl);
+    final savedUri = Uri.parse(saved);
+    if (savedUri.scheme == 'https') return saved;
+
+    final advertised = normalizeBaseUrl(advertisedAddress);
+    if (Uri.parse(advertised).scheme != 'https') {
+      throw ApiException(
+        'The discovered server did not advertise a secure public route.',
+        code: 'invalid_lan_route',
+      );
+    }
+    return advertised;
+  }
+
+  void setLanRoute({
+    required String publicBaseUrl,
+    required String lanHost,
+    required int lanTlsPort,
+  }) {
+    final publicUri = Uri.parse(normalizeBaseUrl(publicBaseUrl));
+    if (publicUri.scheme != 'https' ||
+        !_isPrivateOrDevelopmentHost(lanHost) ||
+        lanTlsPort < 1 ||
+        lanTlsPort > 65535) {
+      throw ApiException(
+        'The discovered LAN route is not a valid secure fallback.',
+        code: 'invalid_lan_route',
+      );
+    }
+    _lanRoutes[publicUri.origin] = _LanDialTarget(lanHost, lanTlsPort);
+  }
+
+  void clearLanRoute(String publicBaseUrl) {
+    final publicUri = Uri.parse(normalizeBaseUrl(publicBaseUrl));
+    _lanRoutes.remove(publicUri.origin);
+  }
+
+  bool hasLanRoute(String publicBaseUrl) {
+    final publicUri = Uri.parse(normalizeBaseUrl(publicBaseUrl));
+    return _lanRoutes.containsKey(publicUri.origin);
+  }
+
+  bool _isPrivateOrDevelopmentHost(String input) {
+    final host = input.trim().toLowerCase();
+    if (host == 'localhost' ||
+        host.endsWith('.localhost') ||
+        host.endsWith('.local') ||
+        host.endsWith('.internal') ||
+        !host.contains('.')) {
+      return true;
+    }
+
+    final address = InternetAddress.tryParse(host);
+    if (address == null) {
+      return false;
+    }
+
+    final bytes = address.rawAddress;
+    if (address.type == InternetAddressType.IPv4) {
+      return bytes[0] == 10 ||
+          bytes[0] == 127 ||
+          (bytes[0] == 169 && bytes[1] == 254) ||
+          (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) ||
+          (bytes[0] == 192 && bytes[1] == 168);
+    }
+
+    final isLoopback =
+        bytes.take(15).every((value) => value == 0) && bytes[15] == 1;
+    final isUniqueLocal = (bytes[0] & 0xFE) == 0xFC;
+    final isLinkLocal = bytes[0] == 0xFE && (bytes[1] & 0xC0) == 0x80;
+    return isLoopback || isUniqueLocal || isLinkLocal;
   }
 
   ChatMessage _resolveMessageUrls(ChatMessage message, String baseUrl) {
@@ -233,6 +479,11 @@ class ApiClient {
 
     final serverJson = Map<String, dynamic>.from(json['server'] as Map)
       ..['address'] = baseUrl;
+    final identity = await verifyServerIdentity(
+      baseUrl: baseUrl,
+      expectedServerId: serverJson['id']?.toString() ?? '',
+    );
+    serverJson['identityPublicKey'] = identity.publicKey;
     final channelsJson = (json['channels'] as List? ?? const [])
         .map((item) => Map<String, dynamic>.from(item as Map))
         .toList();
@@ -243,20 +494,223 @@ class ApiClient {
     );
   }
 
+  Future<VerifiedServerIdentity> verifyServerIdentity({
+    required String baseUrl,
+    required String expectedServerId,
+    String expectedPublicKey = '',
+  }) async {
+    final normalized = normalizeBaseUrl(baseUrl);
+    final random = Random.secure();
+    final nonce = base64Url
+        .encode(List<int>.generate(32, (_) => random.nextInt(256)))
+        .replaceAll('=', '');
+    final json = await _requestJson(
+      'GET',
+      '$normalized/api/server/identity?nonce=${Uri.encodeQueryComponent(nonce)}',
+    );
+    final identity = Map<String, dynamic>.from(
+      json['identity'] as Map? ?? const {},
+    );
+    final serverId = identity['serverId']?.toString() ?? '';
+    final algorithm = identity['algorithm']?.toString() ?? '';
+    final publicKey = identity['publicKey']?.toString() ?? '';
+    final returnedNonce = identity['nonce']?.toString() ?? '';
+    final encodedSignature = identity['signature']?.toString() ?? '';
 
-Future<YuidChallenge> fetchYuidChallenge({
-  required String baseUrl,
-}) async {
-  final normalized = normalizeBaseUrl(baseUrl);
-  final json = await _requestJson(
-    'GET',
-    '$normalized/api/auth/yuid/challenge',
-  );
+    if (serverId != expectedServerId ||
+        returnedNonce != nonce ||
+        algorithm != 'Ed25519' ||
+        publicKey.isEmpty ||
+        encodedSignature.isEmpty) {
+      throw ApiException(
+        'The server could not prove its expected identity.',
+        code: 'server_identity_invalid',
+      );
+    }
+    if (expectedPublicKey.isNotEmpty && publicKey != expectedPublicKey) {
+      throw ApiException(
+        'This address now belongs to a different Yappa server. Your saved '
+        'session was not sent.',
+        code: 'server_identity_changed',
+      );
+    }
 
-  return YuidChallenge.fromJson(
-    Map<String, dynamic>.from(json['challenge'] as Map),
-  );
-}
+    try {
+      final signature = Signature(
+        _decodeBase64Url(encodedSignature),
+        publicKey: SimplePublicKey(
+          _decodeBase64Url(publicKey),
+          type: KeyPairType.ed25519,
+        ),
+      );
+      final verified = await Ed25519().verify(
+        utf8.encode('yappa-server-proof-v1|$serverId|$nonce'),
+        signature: signature,
+      );
+      if (!verified) {
+        throw const FormatException('Invalid identity signature.');
+      }
+    } catch (_) {
+      throw ApiException(
+        'The server identity signature was invalid.',
+        code: 'server_identity_invalid',
+      );
+    }
+
+    return VerifiedServerIdentity(serverId: serverId, publicKey: publicKey);
+  }
+
+  Future<LanServerRoute?> discoverLanServer({
+    String expectedServerId = '',
+    String expectedPublicKey = '',
+    String expectedAdvertisedAddress = '',
+    Duration timeout = const Duration(milliseconds: 1400),
+  }) async {
+    const discoveryPort = 41200;
+    final socket = await RawDatagramSocket.bind(
+      InternetAddress.anyIPv4,
+      0,
+      reuseAddress: true,
+    );
+    socket.broadcastEnabled = true;
+    final random = Random.secure();
+    final nonce = base64Url
+        .encode(List<int>.generate(32, (_) => random.nextInt(256)))
+        .replaceAll('=', '');
+    final request = utf8.encode(
+      jsonEncode({'protocol': 'yappa-lan-discovery-v1', 'nonce': nonce}),
+    );
+    final result = Completer<LanServerRoute?>();
+    late final StreamSubscription<RawSocketEvent> subscription;
+
+    Future<void> consider(Datagram datagram) async {
+      if (datagram.data.length > 2048 ||
+          !_isPrivateOrDevelopmentHost(datagram.address.address)) {
+        return;
+      }
+      try {
+        final decoded = jsonDecode(utf8.decode(datagram.data));
+        if (decoded is! Map) return;
+        final response = Map<String, dynamic>.from(decoded);
+        final serverId = response['serverId']?.toString() ?? '';
+        final publicKey = response['publicKey']?.toString() ?? '';
+        final algorithm = response['algorithm']?.toString() ?? '';
+        final returnedNonce = response['nonce']?.toString() ?? '';
+        final advertisedAddress =
+            response['advertisedAddress']?.toString().trim().toLowerCase() ??
+            '';
+        final signatureText = response['signature']?.toString() ?? '';
+        final tlsPort = (response['tlsPort'] as num?)?.toInt() ?? 0;
+        if (response['protocol'] != 'yappa-lan-discovery-v1' ||
+            algorithm != 'Ed25519' ||
+            serverId.isEmpty ||
+            publicKey.isEmpty ||
+            returnedNonce != nonce ||
+            tlsPort < 1 ||
+            tlsPort > 65535 ||
+            (expectedServerId.isNotEmpty && serverId != expectedServerId) ||
+            (expectedPublicKey.isNotEmpty && publicKey != expectedPublicKey) ||
+            (expectedAdvertisedAddress.isNotEmpty &&
+                advertisedAddress !=
+                    expectedAdvertisedAddress.trim().toLowerCase())) {
+          return;
+        }
+
+        final proof =
+            'yappa-lan-discovery-v1|$serverId|$nonce|'
+            '$tlsPort|$advertisedAddress';
+        final signature = Signature(
+          _decodeBase64Url(signatureText),
+          publicKey: SimplePublicKey(
+            _decodeBase64Url(publicKey),
+            type: KeyPairType.ed25519,
+          ),
+        );
+        if (!await Ed25519().verify(utf8.encode(proof), signature: signature)) {
+          return;
+        }
+
+        if (!result.isCompleted) {
+          result.complete(
+            LanServerRoute(
+              host: datagram.address.address,
+              tlsPort: tlsPort,
+              serverId: serverId,
+              publicKey: publicKey,
+              advertisedAddress: advertisedAddress,
+            ),
+          );
+        }
+      } catch (_) {
+        // Ignore malformed, untrusted, or unreachable discovery responses.
+      }
+    }
+
+    subscription = socket.listen((event) {
+      if (event != RawSocketEvent.read) return;
+      Datagram? datagram;
+      while ((datagram = socket.receive()) != null) {
+        consider(datagram!);
+      }
+    });
+    socket.send(request, InternetAddress('255.255.255.255'), discoveryPort);
+    Timer(timeout, () {
+      if (!result.isCompleted) result.complete(null);
+    });
+
+    try {
+      return await result.future;
+    } finally {
+      await subscription.cancel();
+      socket.close();
+    }
+  }
+
+  List<int> _decodeBase64Url(String value) {
+    final normalized = value.padRight(
+      value.length + ((4 - value.length % 4) % 4),
+      '=',
+    );
+    return base64Url.decode(normalized);
+  }
+
+  Future<YuidChallenge> fetchYuidChallenge({required String baseUrl}) async {
+    final normalized = normalizeBaseUrl(baseUrl);
+    final json = await _requestJson(
+      'GET',
+      '$normalized/api/auth/yuid/challenge',
+    );
+
+    return YuidChallenge.fromJson(
+      Map<String, dynamic>.from(json['challenge'] as Map),
+    );
+  }
+
+  Future<void> registerMediaDevice({
+    required String baseUrl,
+    required String token,
+    required String yuidPublicKey,
+    required String yuidSignature,
+    required String yuidNonce,
+    required String mediaDeviceId,
+    required String mediaPublicKey,
+    required String mediaDeviceSignature,
+  }) async {
+    final normalized = normalizeBaseUrl(baseUrl);
+    await _requestJson(
+      'POST',
+      '$normalized/api/media/devices/register',
+      token: token,
+      body: {
+        'yuidPublicKey': yuidPublicKey,
+        'yuidSignature': yuidSignature,
+        'yuidNonce': yuidNonce,
+        'mediaDeviceId': mediaDeviceId,
+        'mediaPublicKey': mediaPublicKey,
+        'mediaDeviceSignature': mediaDeviceSignature,
+      },
+    );
+  }
 
   Future<AuthSessionResult> authenticate({
     required String baseUrl,
@@ -266,6 +720,9 @@ Future<YuidChallenge> fetchYuidChallenge({
     required String yuidPublicKey,
     required String yuidSignature,
     required String yuidNonce,
+    required String mediaDeviceId,
+    required String mediaPublicKey,
+    required String mediaDeviceSignature,
   }) async {
     final normalized = normalizeBaseUrl(baseUrl);
     final json = await _requestJson(
@@ -274,10 +731,14 @@ Future<YuidChallenge> fetchYuidChallenge({
       body: {
         'username': username,
         'password': password,
+        'deviceName': 'Yappa on ${_devicePlatformName()}',
         'yuid': yuid,
         'yuidPublicKey': yuidPublicKey,
         'yuidSignature': yuidSignature,
         'yuidNonce': yuidNonce,
+        'mediaDeviceId': mediaDeviceId,
+        'mediaPublicKey': mediaPublicKey,
+        'mediaDeviceSignature': mediaDeviceSignature,
       },
     );
 
@@ -329,7 +790,6 @@ Future<YuidChallenge> fetchYuidChallenge({
     );
   }
 
-
   Future<Member> updateCurrentUserSettings({
     required String baseUrl,
     required String token,
@@ -366,9 +826,7 @@ Future<YuidChallenge> fetchYuidChallenge({
       'POST',
       '$normalized/api/voice/token',
       token: token,
-      body: {
-        'channelId': channelId,
-      },
+      body: {'channelId': channelId},
     );
 
     return VoiceConnectionCredentials(
@@ -457,26 +915,10 @@ Future<YuidChallenge> fetchYuidChallenge({
         ),
       );
 
-    final streamed = await request.send();
-    final response = await http.Response.fromStream(streamed);
-
-    Map<String, dynamic> decoded = const {};
-    if (response.body.isNotEmpty) {
-      final dynamic parsed = jsonDecode(response.body);
-      if (parsed is Map<String, dynamic>) {
-        decoded = parsed;
-      }
-    }
-
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      final errorMap = decoded['error'];
-      if (errorMap is Map<String, dynamic> && errorMap['message'] is String) {
-        throw ApiException(errorMap['message'] as String);
-      }
-      throw ApiException(
-        'Branding upload failed with status ${response.statusCode}.',
-      );
-    }
+    final decoded = await _sendMultipartJson(
+      request,
+      failureLabel: 'Branding upload',
+    );
 
     final serverJson = Map<String, dynamic>.from(decoded['server'] as Map)
       ..['address'] = normalized;
@@ -499,10 +941,7 @@ Future<YuidChallenge> fetchYuidChallenge({
       'POST',
       '$normalized/api/admin/channels',
       token: token,
-      body: {
-        'name': name,
-        'type': type,
-      },
+      body: {'name': name, 'type': type},
     );
 
     final channelJson = Map<String, dynamic>.from(json['channel'] as Map);
@@ -514,6 +953,50 @@ Future<YuidChallenge> fetchYuidChallenge({
       channel: ChatChannel.fromJson(channelJson),
       channels: channelsJson.map(ChatChannel.fromJson).toList(),
     );
+  }
+
+  Future<AdminChannelCreateResult> updateChannel({
+    required String baseUrl,
+    required String token,
+    required String channelId,
+    required String name,
+    String? glyph,
+  }) async {
+    final normalized = normalizeBaseUrl(baseUrl);
+    final json = await _requestJson(
+      'PATCH',
+      '$normalized/api/admin/channels/$channelId',
+      token: token,
+      body: {'name': name, 'glyph': glyph},
+    );
+
+    final channelJson = Map<String, dynamic>.from(json['channel'] as Map);
+    final channelsJson = (json['channels'] as List? ?? const [])
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .toList();
+
+    return AdminChannelCreateResult(
+      channel: ChatChannel.fromJson(channelJson),
+      channels: channelsJson.map(ChatChannel.fromJson).toList(),
+    );
+  }
+
+  Future<List<ChatChannel>> deleteChannel({
+    required String baseUrl,
+    required String token,
+    required String channelId,
+  }) async {
+    final normalized = normalizeBaseUrl(baseUrl);
+    final json = await _requestJson(
+      'DELETE',
+      '$normalized/api/admin/channels/$channelId',
+      token: token,
+    );
+
+    final channelsJson = (json['channels'] as List? ?? const [])
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .toList();
+    return channelsJson.map(ChatChannel.fromJson).toList();
   }
 
   Future<List<Member>> fetchMembers({
@@ -532,6 +1015,283 @@ Future<YuidChallenge> fetchYuidChallenge({
         .toList();
 
     return membersJson.map(Member.fromJson).toList();
+  }
+
+  Future<MlsKeyPackageInventory> fetchMlsKeyPackageInventory({
+    required String baseUrl,
+    required String token,
+  }) async {
+    final normalized = normalizeBaseUrl(baseUrl);
+    final json = await _requestJson(
+      'GET',
+      '$normalized/api/mls/key-packages',
+      token: token,
+    );
+    return _parseMlsResponse(() => MlsKeyPackageInventory.fromJson(json));
+  }
+
+  Future<void> registerMlsKeyPackages({
+    required String baseUrl,
+    required String token,
+    required String expectedDeviceId,
+    required List<MlsKeyPackageRegistration> packages,
+  }) async {
+    if (packages.isEmpty || packages.length > 2) {
+      throw ApiException(
+        'Register one or two MLS KeyPackages at a time.',
+        code: 'invalid_mls_key_packages',
+      );
+    }
+    final normalized = normalizeBaseUrl(baseUrl);
+    final json = await _requestJson(
+      'POST',
+      '$normalized/api/mls/key-packages',
+      token: token,
+      body: {'packages': packages.map((item) => item.toJson()).toList()},
+    );
+    final returnedDeviceId = json['deviceId']?.toString();
+    final registered = (json['registered'] as num?)?.toInt();
+    if (returnedDeviceId != expectedDeviceId || registered != packages.length) {
+      throw ApiException(
+        'The server returned mismatched MLS KeyPackage registration metadata.',
+        code: 'invalid_mls_response',
+      );
+    }
+  }
+
+  Future<ClaimedMlsKeyPackage> claimMlsKeyPackage({
+    required String baseUrl,
+    required String token,
+    required String targetDeviceId,
+  }) async {
+    final normalized = normalizeBaseUrl(baseUrl);
+    final json = await _requestJson(
+      'POST',
+      '$normalized/api/mls/key-packages/claim',
+      token: token,
+      body: {'deviceId': targetDeviceId},
+    );
+    final raw = json['keyPackage'];
+    final claimed = _parseMlsResponse(
+      () =>
+          ClaimedMlsKeyPackage.fromJson(Map<String, dynamic>.from(raw as Map)),
+    );
+    if (claimed.deviceId != targetDeviceId) {
+      throw ApiException(
+        'The server returned a KeyPackage for a different device.',
+        code: 'invalid_mls_response',
+      );
+    }
+    return claimed;
+  }
+
+  Future<List<MlsDeviceCredential>> fetchMlsDeviceCredentials({
+    required String baseUrl,
+    required String token,
+  }) async {
+    final normalized = normalizeBaseUrl(baseUrl);
+    final json = await _requestJson(
+      'GET',
+      '$normalized/api/mls/device-credentials',
+      token: token,
+    );
+    final raw = json['credentials'];
+    return _parseMlsResponse(
+      () => (raw as List)
+          .map(
+            (item) => MlsDeviceCredential.fromJson(
+              Map<String, dynamic>.from(item as Map),
+            ),
+          )
+          .toList(growable: false),
+    );
+  }
+
+  Future<MlsChannelInitialization> initializeMlsChannel({
+    required String baseUrl,
+    required String token,
+    required String serverId,
+    required String channelId,
+  }) async {
+    final normalized = normalizeBaseUrl(baseUrl);
+    final json = await _requestJson(
+      'POST',
+      '$normalized/api/channels/$channelId/mls/initialize',
+      token: token,
+      body: const {},
+    );
+    final raw = json['group'];
+    final created = json['created'];
+    final group = _parseMlsResponse(
+      () => MlsChannelGroup.fromJson(Map<String, dynamic>.from(raw as Map)),
+    );
+    if (created is! bool ||
+        group.groupId != 'yappa-text-v1|$serverId|$channelId') {
+      throw ApiException(
+        'The server returned the wrong MLS group identity.',
+        code: 'invalid_mls_response',
+      );
+    }
+    return MlsChannelInitialization(group: group, created: created);
+  }
+
+  Future<MlsDeliveryMessage> submitMlsDeliveryMessage({
+    required String baseUrl,
+    required String token,
+    required String channelId,
+    required String clientOperationId,
+    required MlsDeliveryMessageClass messageClass,
+    required int acceptedEpoch,
+    required Uint8List wireMessage,
+    int? parentEpoch,
+    String? recipientDeviceId,
+    EncryptedApplicationEventRouting? event,
+  }) async {
+    if (!RegExp(r'^mlsop_[A-Za-z0-9_-]{22}$').hasMatch(clientOperationId) ||
+        acceptedEpoch < 0 ||
+        wireMessage.isEmpty ||
+        wireMessage.length > 131072 ||
+        switch (messageClass) {
+          MlsDeliveryMessageClass.commit =>
+            parentEpoch == null ||
+                acceptedEpoch != parentEpoch + 1 ||
+                recipientDeviceId != null ||
+                event != null,
+          MlsDeliveryMessageClass.proposal =>
+            parentEpoch == null ||
+                acceptedEpoch != parentEpoch ||
+                recipientDeviceId != null ||
+                event != null,
+          MlsDeliveryMessageClass.welcome =>
+            parentEpoch != null || recipientDeviceId == null || event != null,
+          MlsDeliveryMessageClass.application =>
+            parentEpoch != null || recipientDeviceId != null || event == null,
+        }) {
+      throw ApiException(
+        'Invalid MLS delivery message.',
+        code: 'invalid_mls_delivery_message',
+      );
+    }
+    if (event != null) {
+      _parseMlsResponse(
+        () => EncryptedApplicationEventRouting.fromJson(event.toJson()),
+      );
+    }
+    final normalized = normalizeBaseUrl(baseUrl);
+    final wireText = base64Url.encode(wireMessage).replaceAll('=', '');
+    final json = await _requestJson(
+      'POST',
+      '$normalized/api/channels/$channelId/mls/messages',
+      token: token,
+      body: {
+        'clientOperationId': clientOperationId,
+        'messageClass': messageClass.name,
+        'acceptedEpoch': acceptedEpoch,
+        'parentEpoch': ?parentEpoch,
+        'recipientDeviceId': ?recipientDeviceId,
+        'wireMessage': wireText,
+        if (event != null) 'event': event.toJson(),
+      },
+    );
+    final raw = json['message'];
+    final delivery = _parseMlsResponse(
+      () => MlsDeliveryMessage.fromJson(Map<String, dynamic>.from(raw as Map)),
+    );
+    if (delivery.channelId != channelId ||
+        delivery.clientOperationId != clientOperationId ||
+        delivery.messageClass != messageClass ||
+        delivery.acceptedEpoch != acceptedEpoch ||
+        delivery.parentEpoch != parentEpoch ||
+        delivery.recipientDeviceId != recipientDeviceId ||
+        !_constantTimeBytesEqual(delivery.wireMessage, wireMessage) ||
+        delivery.event?.eventId != event?.eventId ||
+        delivery.event?.kind != event?.kind ||
+        delivery.event?.targetEventId != event?.targetEventId ||
+        !_sameStrings(
+          delivery.event?.encryptedAttachmentIds ?? const [],
+          event?.encryptedAttachmentIds ?? const [],
+        )) {
+      throw ApiException(
+        'The server substituted MLS delivery metadata.',
+        code: 'invalid_mls_response',
+      );
+    }
+    return delivery;
+  }
+
+  Future<MlsDeliveryBatch> fetchMlsDeliveryMessages({
+    required String baseUrl,
+    required String token,
+    required String serverId,
+    required String channelId,
+    required int after,
+    int limit = 100,
+  }) async {
+    if (after < 0 || limit < 1 || limit > 200) {
+      throw ApiException(
+        'Invalid MLS delivery cursor.',
+        code: 'invalid_mls_delivery_cursor',
+      );
+    }
+    final normalized = normalizeBaseUrl(baseUrl);
+    final uri = Uri.parse('$normalized/api/channels/$channelId/mls/messages')
+        .replace(
+          queryParameters: {
+            'after': after.toString(),
+            'limit': limit.toString(),
+          },
+        );
+    final json = await _requestJson('GET', uri.toString(), token: token);
+    final batch = _parseMlsResponse(
+      () => MlsDeliveryBatch.fromJson(json, after: after),
+    );
+    if (batch.group.groupId != 'yappa-text-v1|$serverId|$channelId' ||
+        batch.messages.any((message) => message.channelId != channelId)) {
+      throw ApiException(
+        'The server returned messages for the wrong MLS group.',
+        code: 'invalid_mls_response',
+      );
+    }
+    return batch;
+  }
+
+  Future<MlsDeliveryAcknowledgement> acknowledgeMlsDelivery({
+    required String baseUrl,
+    required String token,
+    required String channelId,
+    required int acknowledgedSequence,
+    required int acknowledgedEpoch,
+  }) async {
+    if (acknowledgedSequence < 0 || acknowledgedEpoch < 0) {
+      throw ApiException(
+        'Invalid MLS acknowledgement.',
+        code: 'invalid_mls_acknowledgement',
+      );
+    }
+    final normalized = normalizeBaseUrl(baseUrl);
+    final json = await _requestJson(
+      'POST',
+      '$normalized/api/channels/$channelId/mls/ack',
+      token: token,
+      body: {
+        'acknowledgedSequence': acknowledgedSequence,
+        'acknowledgedEpoch': acknowledgedEpoch,
+      },
+    );
+    final raw = json['cursor'];
+    final cursor = _parseMlsResponse(
+      () => MlsDeliveryAcknowledgement.fromJson(
+        Map<String, dynamic>.from(raw as Map),
+      ),
+    );
+    if (cursor.acknowledgedSequence != acknowledgedSequence ||
+        cursor.acknowledgedEpoch != acknowledgedEpoch) {
+      throw ApiException(
+        'The server returned a mismatched MLS acknowledgement.',
+        code: 'invalid_mls_response',
+      );
+    }
+    return cursor;
   }
 
   Future<List<ChatMessage>> fetchMessages({
@@ -579,24 +1339,7 @@ Future<YuidChallenge> fetchYuidChallenge({
         ),
       );
 
-    final streamed = await request.send();
-    final response = await http.Response.fromStream(streamed);
-
-    Map<String, dynamic> decoded = const {};
-    if (response.body.isNotEmpty) {
-      final dynamic parsed = jsonDecode(response.body);
-      if (parsed is Map<String, dynamic>) {
-        decoded = parsed;
-      }
-    }
-
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      final errorMap = decoded['error'];
-      if (errorMap is Map<String, dynamic> && errorMap['message'] is String) {
-        throw ApiException(errorMap['message'] as String);
-      }
-      throw ApiException('Upload failed with status ${response.statusCode}.');
-    }
+    final decoded = await _sendMultipartJson(request, failureLabel: 'Upload');
 
     return _resolveAttachmentUrl(
       ChatAttachment.fromJson(
@@ -604,6 +1347,216 @@ Future<YuidChallenge> fetchYuidChallenge({
       ),
       normalized,
     );
+  }
+
+  Future<EncryptedAttachmentUploadReceipt> uploadEncryptedAttachment({
+    required String baseUrl,
+    required String token,
+    required String channelId,
+    required String attachmentId,
+    required EncryptedAttachmentObject encrypted,
+  }) async {
+    final normalized = normalizeBaseUrl(baseUrl);
+    final uri = Uri.parse(
+      '$normalized/api/channels/$channelId/encrypted-attachments',
+    );
+    final headerText = base64Url.encode(encrypted.header).replaceAll('=', '');
+    final request = http.MultipartRequest('POST', uri)
+      ..headers['Accept'] = 'application/json'
+      ..headers['Authorization'] = 'Bearer $token'
+      ..fields['attachmentId'] = attachmentId
+      ..fields['secretstreamHeader'] = headerText
+      ..fields['ciphertextSha256'] = encrypted.ciphertextSha256
+      ..fields['chunkCount'] = encrypted.chunkCount.toString()
+      ..files.add(
+        await http.MultipartFile.fromPath(
+          'ciphertext',
+          encrypted.ciphertextPath,
+          filename: 'ciphertext.bin',
+        ),
+      );
+    final decoded = await _sendMultipartJson(
+      request,
+      failureLabel: 'Encrypted attachment upload',
+    );
+    final rawAttachment = decoded['attachment'];
+    if (rawAttachment is! Map) {
+      throw ApiException(
+        'The server returned invalid encrypted attachment metadata.',
+        code: 'invalid_encrypted_attachment_response',
+      );
+    }
+    final attachment = Map<String, dynamic>.from(rawAttachment);
+    Uint8List returnedHeader;
+    try {
+      returnedHeader = Uint8List.fromList(
+        _decodeBase64Url((attachment['secretstreamHeader'] ?? '').toString()),
+      );
+    } catch (_) {
+      throw ApiException(
+        'The server returned an invalid secretstream header.',
+        code: 'invalid_encrypted_attachment_response',
+      );
+    }
+    final receipt = EncryptedAttachmentUploadReceipt(
+      id: (attachment['id'] ?? '').toString(),
+      channelId: (attachment['channelId'] ?? '').toString(),
+      secretstreamHeader: returnedHeader,
+      ciphertextSizeBytes:
+          (attachment['ciphertextSizeBytes'] as num?)?.toInt() ?? -1,
+      ciphertextSha256: (attachment['ciphertextSha256'] ?? '').toString(),
+      chunkCount: (attachment['chunkCount'] as num?)?.toInt() ?? -1,
+      createdAt: DateTime.tryParse((attachment['createdAt'] ?? '').toString()),
+      expiresAt: attachment['expiresAt'] == null
+          ? null
+          : DateTime.tryParse(attachment['expiresAt'].toString()),
+    );
+    if (receipt.id != attachmentId ||
+        receipt.channelId != channelId ||
+        receipt.ciphertextSizeBytes != encrypted.ciphertextSizeBytes ||
+        receipt.ciphertextSha256 != encrypted.ciphertextSha256 ||
+        receipt.chunkCount != encrypted.chunkCount ||
+        !_constantTimeBytesEqual(
+          receipt.secretstreamHeader,
+          encrypted.header,
+        )) {
+      throw ApiException(
+        'The server returned mismatched encrypted attachment metadata.',
+        code: 'encrypted_attachment_metadata_mismatch',
+      );
+    }
+    return receipt;
+  }
+
+  Future<void> downloadEncryptedAttachment({
+    required String baseUrl,
+    required String token,
+    required String channelId,
+    required String attachmentId,
+    required String outputPath,
+    required Uint8List expectedSecretstreamHeader,
+    required String expectedCiphertextSha256,
+    required int expectedCiphertextSizeBytes,
+    required int expectedChunkCount,
+  }) async {
+    final output = File(outputPath);
+    final partial = File('$outputPath.partial');
+    if (await output.exists() || await partial.exists()) {
+      throw ApiException(
+        'Refusing to overwrite an existing encrypted attachment file.',
+        code: 'encrypted_attachment_output_exists',
+      );
+    }
+    final normalized = normalizeBaseUrl(baseUrl);
+    final uri = Uri.parse(
+      '$normalized/api/channels/$channelId/encrypted-attachments/$attachmentId',
+    );
+    final request = http.Request('GET', uri)
+      ..headers['Accept'] = 'application/octet-stream'
+      ..headers['Authorization'] = 'Bearer $token';
+    final client = _clientFor(uri);
+    RandomAccessFile? destination;
+    try {
+      final response = await client
+          .send(request)
+          .timeout(const Duration(minutes: 2));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        final errorBody = await response.stream.bytesToString().timeout(
+          const Duration(seconds: 10),
+        );
+        Map<String, dynamic> decoded = const {};
+        try {
+          final parsed = jsonDecode(errorBody);
+          if (parsed is Map<String, dynamic>) decoded = parsed;
+        } catch (_) {
+          // The structured status below remains safe for a non-JSON response.
+        }
+        final errorMap = decoded['error'];
+        throw ApiException(
+          errorMap is Map && errorMap['message'] is String
+              ? errorMap['message'] as String
+              : 'Encrypted attachment download failed with status '
+                    '${response.statusCode}.',
+          statusCode: response.statusCode,
+          code: errorMap is Map ? errorMap['code']?.toString() : null,
+        );
+      }
+      Uint8List returnedHeader;
+      try {
+        returnedHeader = Uint8List.fromList(
+          _decodeBase64Url(
+            response.headers['x-yappa-secretstream-header'] ?? '',
+          ),
+        );
+      } catch (_) {
+        throw ApiException(
+          'The server returned invalid encrypted attachment metadata.',
+          code: 'encrypted_attachment_metadata_mismatch',
+        );
+      }
+      final returnedDigest =
+          response.headers['x-yappa-ciphertext-sha256'] ?? '';
+      final returnedSize = int.tryParse(
+        response.headers['x-yappa-ciphertext-size'] ?? '',
+      );
+      final returnedChunks = int.tryParse(
+        response.headers['x-yappa-chunk-count'] ?? '',
+      );
+      if (!_constantTimeBytesEqual(
+            returnedHeader,
+            expectedSecretstreamHeader,
+          ) ||
+          returnedDigest != expectedCiphertextSha256 ||
+          returnedSize != expectedCiphertextSizeBytes ||
+          returnedChunks != expectedChunkCount ||
+          response.contentLength != null &&
+              response.contentLength != expectedCiphertextSizeBytes) {
+        throw ApiException(
+          'The server returned mismatched encrypted attachment metadata.',
+          code: 'encrypted_attachment_metadata_mismatch',
+        );
+      }
+
+      destination = await partial.open(mode: FileMode.writeOnly);
+      final digestSink = _ApiDigestSink();
+      final digestInput = hashes.sha256.startChunkedConversion(digestSink);
+      var received = 0;
+      await for (final chunk in response.stream.timeout(
+        const Duration(minutes: 2),
+      )) {
+        received += chunk.length;
+        if (received > expectedCiphertextSizeBytes) {
+          throw ApiException(
+            'The encrypted attachment exceeded its authenticated size.',
+            code: 'encrypted_attachment_size_mismatch',
+          );
+        }
+        digestInput.add(chunk);
+        await destination.writeFrom(chunk);
+      }
+      digestInput.close();
+      if (received != expectedCiphertextSizeBytes ||
+          digestSink.value?.toString() != expectedCiphertextSha256) {
+        throw ApiException(
+          'The encrypted attachment failed size or digest verification.',
+          code: 'encrypted_attachment_digest_mismatch',
+        );
+      }
+      await destination.close();
+      destination = null;
+      await partial.rename(outputPath);
+    } on TimeoutException {
+      throw ApiException(
+        'The server did not finish the download in time.',
+        code: 'connection_timeout',
+      );
+    } finally {
+      await destination?.close();
+      client.close();
+      if (await partial.exists()) {
+        await partial.delete();
+      }
+    }
   }
 
   Future<ChatMessage> sendMessage({
@@ -618,20 +1571,14 @@ Future<YuidChallenge> fetchYuidChallenge({
       'POST',
       '$normalized/api/channels/$channelId/messages',
       token: token,
-      body: {
-        'content': content,
-        'attachmentIds': attachmentIds,
-      },
+      body: {'content': content, 'attachmentIds': attachmentIds},
     );
 
     return _resolveMessageUrls(
-      ChatMessage.fromJson(
-        Map<String, dynamic>.from(json['message'] as Map),
-      ),
+      ChatMessage.fromJson(Map<String, dynamic>.from(json['message'] as Map)),
       normalized,
     );
   }
-
 
   Future<ChatMessage> updateMessage({
     required String baseUrl,
@@ -645,15 +1592,11 @@ Future<YuidChallenge> fetchYuidChallenge({
       'PATCH',
       '$normalized/api/channels/$channelId/messages/$messageId',
       token: token,
-      body: {
-        'content': content,
-      },
+      body: {'content': content},
     );
 
     return _resolveMessageUrls(
-      ChatMessage.fromJson(
-        Map<String, dynamic>.from(json['message'] as Map),
-      ),
+      ChatMessage.fromJson(Map<String, dynamic>.from(json['message'] as Map)),
       normalized,
     );
   }
@@ -675,20 +1618,15 @@ Future<YuidChallenge> fetchYuidChallenge({
   Future<LinkPreview?> fetchLinkPreview({
     required String baseUrl,
     required String token,
+    required String channelId,
     required String url,
   }) async {
     final normalized = normalizeBaseUrl(baseUrl);
-    final uri = Uri.parse('$normalized/api/link-preview').replace(
-      queryParameters: {
-        'url': url,
-      },
-    );
+    final uri = Uri.parse(
+      '$normalized/api/link-preview',
+    ).replace(queryParameters: {'channelId': channelId, 'url': url});
 
-    final json = await _requestJson(
-      'GET',
-      uri.toString(),
-      token: token,
-    );
+    final json = await _requestJson('GET', uri.toString(), token: token);
 
     final previewJson = json['preview'];
     if (previewJson is! Map) {
@@ -698,16 +1636,60 @@ Future<YuidChallenge> fetchYuidChallenge({
     return LinkPreview.fromJson(Map<String, dynamic>.from(previewJson));
   }
 
-  Future<void> logout({
+  Future<void> logout({required String baseUrl, required String token}) async {
+    final normalized = normalizeBaseUrl(baseUrl);
+    await _requestJson('POST', '$normalized/api/auth/logout', token: token);
+  }
+
+  Future<String> rotateSession({
     required String baseUrl,
     required String token,
   }) async {
     final normalized = normalizeBaseUrl(baseUrl);
-    await _requestJson(
+    final json = await _requestJson(
       'POST',
-      '$normalized/api/auth/logout',
+      '$normalized/api/auth/session/rotate',
       token: token,
     );
+    return (json['token'] ?? '').toString();
+  }
+
+  Future<List<DeviceSession>> fetchSessions({
+    required String baseUrl,
+    required String token,
+  }) async {
+    final normalized = normalizeBaseUrl(baseUrl);
+    final json = await _requestJson(
+      'GET',
+      '$normalized/api/auth/sessions',
+      token: token,
+    );
+    return (json['sessions'] as List? ?? const [])
+        .map((item) => DeviceSession.fromJson(Map<String, dynamic>.from(item)))
+        .toList();
+  }
+
+  Future<bool> revokeSession({
+    required String baseUrl,
+    required String token,
+    required String sessionId,
+  }) async {
+    final normalized = normalizeBaseUrl(baseUrl);
+    final json = await _requestJson(
+      'DELETE',
+      '$normalized/api/auth/sessions/$sessionId',
+      token: token,
+    );
+    return json['revokedCurrent'] == true;
+  }
+
+  String _devicePlatformName() {
+    if (Platform.isWindows) return 'Windows';
+    if (Platform.isMacOS) return 'macOS';
+    if (Platform.isLinux) return 'Linux';
+    if (Platform.isAndroid) return 'Android';
+    if (Platform.isIOS) return 'iOS';
+    return 'Desktop';
   }
 
   Future<Map<String, dynamic>> _requestJson(
@@ -716,41 +1698,51 @@ Future<YuidChallenge> fetchYuidChallenge({
     String? token,
     Map<String, dynamic>? body,
   }) async {
-    final headers = <String, String>{
-      'Accept': 'application/json',
-    };
+    final headers = <String, String>{'Accept': 'application/json'};
 
     if (token != null && token.isNotEmpty) {
       headers['Authorization'] = 'Bearer $token';
     }
 
-    http.Response response;
-
+    final uri = Uri.parse(url);
+    final client = _clientFor(uri);
+    late final Future<http.Response> responseFuture;
     switch (method.toUpperCase()) {
       case 'GET':
-        response = await http.get(Uri.parse(url), headers: headers);
+        responseFuture = client.get(uri, headers: headers);
         break;
       case 'POST':
         headers['Content-Type'] = 'application/json';
-        response = await http.post(
-          Uri.parse(url),
+        responseFuture = client.post(
+          uri,
           headers: headers,
           body: jsonEncode(body ?? const {}),
         );
         break;
       case 'PATCH':
         headers['Content-Type'] = 'application/json';
-        response = await http.patch(
-          Uri.parse(url),
+        responseFuture = client.patch(
+          uri,
           headers: headers,
           body: jsonEncode(body ?? const {}),
         );
         break;
       case 'DELETE':
-        response = await http.delete(Uri.parse(url), headers: headers);
+        responseFuture = client.delete(uri, headers: headers);
         break;
       default:
         throw ApiException('Unsupported HTTP method: $method');
+    }
+    late final http.Response response;
+    try {
+      response = await responseFuture.timeout(const Duration(seconds: 6));
+    } on TimeoutException {
+      throw ApiException(
+        'The server did not respond in time.',
+        code: 'connection_timeout',
+      );
+    } finally {
+      client.close();
     }
 
     Map<String, dynamic> decoded = const {};
@@ -764,11 +1756,105 @@ Future<YuidChallenge> fetchYuidChallenge({
     if (response.statusCode < 200 || response.statusCode >= 300) {
       final errorMap = decoded['error'];
       if (errorMap is Map<String, dynamic> && errorMap['message'] is String) {
-        throw ApiException(errorMap['message'] as String);
+        throw ApiException(
+          errorMap['message'] as String,
+          statusCode: response.statusCode,
+          code: errorMap['code']?.toString(),
+        );
       }
-      throw ApiException('Request failed with status ${response.statusCode}.');
+      throw ApiException(
+        'Request failed with status ${response.statusCode}.',
+        statusCode: response.statusCode,
+      );
     }
 
     return decoded;
+  }
+
+  T _parseMlsResponse<T>(T Function() parse) {
+    try {
+      return parse();
+    } on FormatException {
+      throw ApiException(
+        'The server returned invalid encrypted-messaging data.',
+        code: 'invalid_mls_response',
+      );
+    } on TypeError {
+      throw ApiException(
+        'The server returned invalid encrypted-messaging data.',
+        code: 'invalid_mls_response',
+      );
+    }
+  }
+
+  Future<Map<String, dynamic>> _sendMultipartJson(
+    http.MultipartRequest request, {
+    required String failureLabel,
+  }) async {
+    final client = _clientFor(request.url);
+    late final http.Response response;
+    try {
+      final streamed = await client
+          .send(request)
+          .timeout(const Duration(minutes: 2));
+      response = await http.Response.fromStream(
+        streamed,
+      ).timeout(const Duration(minutes: 2));
+    } on TimeoutException {
+      throw ApiException(
+        'The server did not finish the upload in time.',
+        code: 'connection_timeout',
+      );
+    } finally {
+      client.close();
+    }
+
+    Map<String, dynamic> decoded = const {};
+    if (response.body.isNotEmpty) {
+      final dynamic parsed = jsonDecode(response.body);
+      if (parsed is Map<String, dynamic>) {
+        decoded = parsed;
+      }
+    }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final errorMap = decoded['error'];
+      if (errorMap is Map<String, dynamic> && errorMap['message'] is String) {
+        throw ApiException(
+          errorMap['message'] as String,
+          statusCode: response.statusCode,
+          code: errorMap['code']?.toString(),
+        );
+      }
+      throw ApiException(
+        '$failureLabel failed with status ${response.statusCode}.',
+        statusCode: response.statusCode,
+      );
+    }
+    return decoded;
+  }
+
+  http.Client _clientFor(Uri uri) {
+    final clientFactory = _clientFactory;
+    if (clientFactory != null) return clientFactory(uri);
+    final target = _lanRoutes[uri.origin];
+    if (target == null) return http.Client();
+
+    final ioClient = HttpClient();
+    ioClient.findProxy = (_) => 'DIRECT';
+    ioClient.connectionTimeout = const Duration(seconds: 6);
+    ioClient.connectionFactory = (requestUri, proxyHost, proxyPort) async {
+      if (proxyHost != null ||
+          proxyPort != null ||
+          requestUri.scheme != 'https' ||
+          requestUri.origin != uri.origin) {
+        throw const SocketException('Invalid secure LAN route request.');
+      }
+      final rawTask = await Socket.startConnect(target.host, target.port);
+      final secureSocket = rawTask.socket.then(
+        (socket) => SecureSocket.secure(socket, host: requestUri.host),
+      );
+      return ConnectionTask.fromSocket(secureSocket, rawTask.cancel);
+    };
+    return IOClient(ioClient);
   }
 }

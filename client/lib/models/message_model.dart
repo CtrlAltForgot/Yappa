@@ -90,22 +90,22 @@ class ChatAttachment {
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'serverId': serverId,
-        'channelId': channelId,
-        'messageId': messageId,
-        'kind': kind,
-        'name': name,
-        'originalName': originalName,
-        'storedName': storedName,
-        'mimeType': mimeType,
-        'sizeBytes': sizeBytes,
-        'url': url,
-        'relativePath': relativePath,
-        'createdAt': createdAt.toIso8601String(),
-        'expiresAt': expiresAt?.toIso8601String(),
-        'deletedAt': deletedAt?.toIso8601String(),
-      };
+    'id': id,
+    'serverId': serverId,
+    'channelId': channelId,
+    'messageId': messageId,
+    'kind': kind,
+    'name': name,
+    'originalName': originalName,
+    'storedName': storedName,
+    'mimeType': mimeType,
+    'sizeBytes': sizeBytes,
+    'url': url,
+    'relativePath': relativePath,
+    'createdAt': createdAt.toIso8601String(),
+    'expiresAt': expiresAt?.toIso8601String(),
+    'deletedAt': deletedAt?.toIso8601String(),
+  };
 
   factory ChatAttachment.fromJson(Map<String, dynamic> json) {
     DateTime? parseOptionalDate(dynamic value) {
@@ -121,10 +121,12 @@ class ChatAttachment {
       channelId: json['channelId']?.toString() ?? '',
       messageId: json['messageId']?.toString(),
       kind: (json['kind'] as String?) ?? 'file',
-      name: (json['name'] as String?) ??
+      name:
+          (json['name'] as String?) ??
           (json['originalName'] as String?) ??
           'file',
-      originalName: (json['originalName'] as String?) ??
+      originalName:
+          (json['originalName'] as String?) ??
           (json['name'] as String?) ??
           'file',
       storedName: (json['storedName'] as String?) ?? '',
@@ -132,10 +134,36 @@ class ChatAttachment {
       sizeBytes: (json['sizeBytes'] as num?)?.toInt() ?? 0,
       url: (json['url'] as String?) ?? '',
       relativePath: (json['relativePath'] as String?) ?? '',
-      createdAt: DateTime.tryParse((json['createdAt'] as String?) ?? '') ??
+      createdAt:
+          DateTime.tryParse((json['createdAt'] as String?) ?? '') ??
           DateTime.now(),
       expiresAt: parseOptionalDate(json['expiresAt']),
       deletedAt: parseOptionalDate(json['deletedAt']),
+    );
+  }
+}
+
+class ChatReaction {
+  final String emoji;
+  final List<String> userIds;
+
+  const ChatReaction({required this.emoji, required this.userIds});
+
+  int get count => userIds.length;
+
+  bool includesUser(String? userId) =>
+      userId != null && userIds.contains(userId);
+
+  Map<String, dynamic> toJson() => {'emoji': emoji, 'userIds': userIds};
+
+  factory ChatReaction.fromJson(Map<String, dynamic> json) {
+    return ChatReaction(
+      emoji: json['emoji']?.toString() ?? '',
+      userIds: (json['userIds'] as List? ?? const [])
+          .map((value) => value.toString())
+          .where((value) => value.isNotEmpty)
+          .toSet()
+          .toList(growable: false),
     );
   }
 }
@@ -150,6 +178,7 @@ class ChatMessage {
   final DateTime sentAt;
   final DateTime? updatedAt;
   final List<ChatAttachment> attachments;
+  final List<ChatReaction> reactions;
 
   const ChatMessage({
     required this.id,
@@ -161,6 +190,7 @@ class ChatMessage {
     required this.sentAt,
     required this.updatedAt,
     this.attachments = const [],
+    this.reactions = const [],
   });
 
   bool get hasAttachments => attachments.isNotEmpty;
@@ -176,6 +206,7 @@ class ChatMessage {
     DateTime? sentAt,
     DateTime? updatedAt,
     List<ChatAttachment>? attachments,
+    List<ChatReaction>? reactions,
   }) {
     return ChatMessage(
       id: id ?? this.id,
@@ -187,6 +218,7 @@ class ChatMessage {
       sentAt: sentAt ?? this.sentAt,
       updatedAt: updatedAt ?? this.updatedAt,
       attachments: attachments ?? this.attachments,
+      reactions: reactions ?? this.reactions,
     );
   }
 
@@ -199,16 +231,17 @@ class ChatMessage {
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'channelId': channelId,
-        'author': author,
-        'authorId': authorId,
-        'authorRole': authorRole,
-        'content': content,
-        'sentAt': sentAt.toIso8601String(),
-        'updatedAt': updatedAt?.toIso8601String(),
-        'attachments': attachments.map((item) => item.toJson()).toList(),
-      };
+    'id': id,
+    'channelId': channelId,
+    'author': author,
+    'authorId': authorId,
+    'authorRole': authorRole,
+    'content': content,
+    'sentAt': sentAt.toIso8601String(),
+    'updatedAt': updatedAt?.toIso8601String(),
+    'attachments': attachments.map((item) => item.toJson()).toList(),
+    'reactions': reactions.map((item) => item.toJson()).toList(),
+  };
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
     String author = 'Unknown';
@@ -217,7 +250,8 @@ class ChatMessage {
 
     final authorJson = json['author'];
     if (authorJson is Map<String, dynamic>) {
-      author = (authorJson['name'] as String?) ??
+      author =
+          (authorJson['name'] as String?) ??
           (authorJson['username'] as String?) ??
           'Unknown';
       authorId = authorJson['id']?.toString() ?? '';
@@ -243,6 +277,11 @@ class ChatMessage {
         .whereType<Map>()
         .map((item) => ChatAttachment.fromJson(Map<String, dynamic>.from(item)))
         .toList();
+    final reactionsJson = (json['reactions'] as List? ?? const [])
+        .whereType<Map>()
+        .map((item) => ChatReaction.fromJson(Map<String, dynamic>.from(item)))
+        .where((item) => item.emoji.isNotEmpty && item.userIds.isNotEmpty)
+        .toList(growable: false);
 
     return ChatMessage(
       id: json['id']?.toString() ?? '',
@@ -254,6 +293,7 @@ class ChatMessage {
       sentAt: sentAt,
       updatedAt: updatedAt,
       attachments: attachmentsJson,
+      reactions: reactionsJson,
     );
   }
 }

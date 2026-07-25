@@ -4,10 +4,13 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   desktop_drop
+  flutter_secure_storage_linux
   flutter_webrtc
   livekit_client
+  pasteboard
   record_linux
   url_launcher_linux
+  webview_all_linux
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST

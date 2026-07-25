@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 
 import '../../app/app_state.dart';
 import '../../app/theme.dart';
+import '../../data/api_client.dart';
 import '../../models/member_model.dart';
 import '../../shared/avatar_image.dart';
 
@@ -14,9 +15,9 @@ Future<void> showUserSettingsDialog({
   required BuildContext context,
   required AppState appState,
 }) async {
-  final controller = TextEditingController(
-    text: appState.currentDisplayName,
-  );
+  final controller = TextEditingController(text: appState.currentDisplayName);
+  Future<List<DeviceSession>> sessionsFuture = appState
+      .fetchCurrentDeviceSessions();
 
   await showDialog<void>(
     context: context,
@@ -28,6 +29,38 @@ Future<void> showUserSettingsDialog({
         builder: (dialogContext, setDialogState) {
           final member = appState.currentUserMemberForSelectedServer;
           final yuid = appState.currentYuid;
+
+          Future<void> revokeSession(DeviceSession session) async {
+            setDialogState(() {
+              isSaving = true;
+              statusMessage = null;
+            });
+            try {
+              await appState.revokeDeviceSession(session);
+              if (!session.current) {
+                sessionsFuture = appState.fetchCurrentDeviceSessions();
+              }
+              setDialogState(() {
+                statusMessage = session.current
+                    ? 'This device was logged out.'
+                    : '${session.deviceName} was logged out.';
+              });
+              if (session.current && dialogContext.mounted) {
+                Navigator.of(dialogContext).pop();
+              }
+            } catch (error) {
+              setDialogState(() {
+                statusMessage = error.toString().replaceFirst(
+                  'Exception: ',
+                  '',
+                );
+              });
+            } finally {
+              if (dialogContext.mounted) {
+                setDialogState(() => isSaving = false);
+              }
+            }
+          }
 
           Future<void> saveProfile() async {
             setDialogState(() {
@@ -50,7 +83,11 @@ Future<void> showUserSettingsDialog({
               withData: true,
             );
             final picked = result?.files.single;
-            final bytes = picked?.bytes ?? (picked?.path != null ? await File(picked!.path!).readAsBytes() : null);
+            final bytes =
+                picked?.bytes ??
+                (picked?.path != null
+                    ? await File(picked!.path!).readAsBytes()
+                    : null);
             if (bytes == null || bytes.isEmpty) return;
             if (bytes.length > 1024 * 1024) {
               setDialogState(() {
@@ -65,10 +102,13 @@ Future<void> showUserSettingsDialog({
               isSaving = true;
               statusMessage = null;
             });
-            final error = await appState.updateCurrentUserAvatar(avatarSource: dataUri);
+            final error = await appState.updateCurrentUserAvatar(
+              avatarSource: dataUri,
+            );
             setDialogState(() {
               isSaving = false;
-              statusMessage = error ?? 'Profile picture updated for this server.';
+              statusMessage =
+                  error ?? 'Profile picture updated for this server.';
             });
           }
 
@@ -77,15 +117,21 @@ Future<void> showUserSettingsDialog({
               isSaving = true;
               statusMessage = null;
             });
-            final error = await appState.updateCurrentUserAvatar(avatarSource: null);
+            final error = await appState.updateCurrentUserAvatar(
+              avatarSource: null,
+            );
             setDialogState(() {
               isSaving = false;
-              statusMessage = error ?? 'Profile picture removed for this server.';
+              statusMessage =
+                  error ?? 'Profile picture removed for this server.';
             });
           }
 
           return Dialog(
-            insetPadding: const EdgeInsets.symmetric(horizontal: 120, vertical: 60),
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 120,
+              vertical: 60,
+            ),
             backgroundColor: Colors.transparent,
             child: Container(
               width: 760,
@@ -93,7 +139,7 @@ Future<void> showUserSettingsDialog({
               decoration: BoxDecoration(
                 color: NewChatColors.panel,
                 borderRadius: BorderRadius.circular(24),
-                  boxShadow: const [
+                boxShadow: const [
                   BoxShadow(
                     color: Color(0x66000000),
                     blurRadius: 40,
@@ -109,7 +155,10 @@ Future<void> showUserSettingsDialog({
                   children: [
                     const Text(
                       'User Settings',
-                      style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900),
+                      style: TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     Text(
@@ -128,25 +177,35 @@ Future<void> showUserSettingsDialog({
                           ),
                           const SizedBox(width: 18),
                           Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                            child: ListView(
                               children: [
                                 _ProfileCard(
                                   title: 'Profile',
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
-                                      const Text('Display name', style: TextStyle(fontWeight: FontWeight.w700)),
+                                      const Text(
+                                        'Display name',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
                                       const SizedBox(height: 8),
                                       TextField(
                                         controller: controller,
                                         maxLength: 32,
-                                        decoration: const InputDecoration(hintText: 'Enter a display name'),
+                                        decoration: const InputDecoration(
+                                          hintText: 'Enter a display name',
+                                        ),
                                       ),
                                       const SizedBox(height: 8),
                                       Text(
                                         'Username: ${appState.currentUsername}',
-                                        style: TextStyle(color: NewChatColors.textMuted, fontSize: 12),
+                                        style: TextStyle(
+                                          color: NewChatColors.textMuted,
+                                          fontSize: 12,
+                                        ),
                                       ),
                                     ],
                                   ),
@@ -159,21 +218,93 @@ Future<void> showUserSettingsDialog({
                                       Expanded(
                                         child: SelectableText(
                                           yuid,
-                                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                                          style: const TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w600,
+                                          ),
                                         ),
                                       ),
                                       const SizedBox(width: 12),
                                       OutlinedButton.icon(
                                         onPressed: () {
-                                          Clipboard.setData(ClipboardData(text: yuid));
+                                          Clipboard.setData(
+                                            ClipboardData(text: yuid),
+                                          );
                                           setDialogState(() {
                                             statusMessage = 'YUID copied.';
                                           });
                                         },
-                                        icon: const Icon(Icons.copy_rounded, size: 16),
+                                        icon: const Icon(
+                                          Icons.copy_rounded,
+                                          size: 16,
+                                        ),
                                         label: const Text('Copy'),
                                       ),
                                     ],
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                _ProfileCard(
+                                  title: 'Signed-in devices',
+                                  child: FutureBuilder<List<DeviceSession>>(
+                                    future: sessionsFuture,
+                                    builder: (context, snapshot) {
+                                      if (snapshot.connectionState !=
+                                          ConnectionState.done) {
+                                        return const Center(
+                                          child: CircularProgressIndicator(),
+                                        );
+                                      }
+                                      if (snapshot.hasError) {
+                                        return Text(
+                                          'Could not load sessions: ${snapshot.error}',
+                                          style: const TextStyle(
+                                            color: Color(0xFFFFB4BF),
+                                          ),
+                                        );
+                                      }
+                                      final sessions =
+                                          snapshot.data ?? const [];
+                                      return Column(
+                                        children: [
+                                          for (final session in sessions)
+                                            ListTile(
+                                              contentPadding: EdgeInsets.zero,
+                                              leading: Icon(
+                                                session.current
+                                                    ? Icons.devices_rounded
+                                                    : Icons
+                                                          .desktop_windows_rounded,
+                                              ),
+                                              title: Text(
+                                                session.current
+                                                    ? '${session.deviceName} (this device)'
+                                                    : session.deviceName,
+                                              ),
+                                              subtitle: Text(
+                                                _sessionDescription(session),
+                                                style: TextStyle(
+                                                  color:
+                                                      NewChatColors.textMuted,
+                                                  fontSize: 12,
+                                                ),
+                                              ),
+                                              trailing: TextButton(
+                                                onPressed: isSaving
+                                                    ? null
+                                                    : () => revokeSession(
+                                                        session,
+                                                      ),
+                                                child: Text(
+                                                  session.current
+                                                      ? 'Log out'
+                                                      : 'Revoke',
+                                                ),
+                                              ),
+                                            ),
+                                        ],
+                                      );
+                                    },
                                   ),
                                 ),
                                 if (statusMessage != null) ...[
@@ -181,7 +312,16 @@ Future<void> showUserSettingsDialog({
                                   Text(
                                     statusMessage!,
                                     style: TextStyle(
-                                      color: statusMessage!.toLowerCase().contains('updated') || statusMessage!.toLowerCase().contains('copied') || statusMessage!.toLowerCase().contains('removed')
+                                      color:
+                                          statusMessage!.toLowerCase().contains(
+                                                'updated',
+                                              ) ||
+                                              statusMessage!
+                                                  .toLowerCase()
+                                                  .contains('copied') ||
+                                              statusMessage!
+                                                  .toLowerCase()
+                                                  .contains('removed')
                                           ? const Color(0xFF7DFFAF)
                                           : const Color(0xFFFFB4BF),
                                       fontWeight: FontWeight.w600,
@@ -198,7 +338,9 @@ Future<void> showUserSettingsDialog({
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
                         TextButton(
-                          onPressed: isSaving ? null : () => Navigator.of(dialogContext).pop(),
+                          onPressed: isSaving
+                              ? null
+                              : () => Navigator.of(dialogContext).pop(),
                           child: const Text('Close'),
                         ),
                         const SizedBox(width: 10),
@@ -208,7 +350,9 @@ Future<void> showUserSettingsDialog({
                               ? const SizedBox(
                                   width: 16,
                                   height: 16,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
                                 )
                               : const Icon(Icons.save_rounded, size: 18),
                           label: const Text('Save profile'),
@@ -226,6 +370,25 @@ Future<void> showUserSettingsDialog({
   );
 }
 
+String _sessionDescription(DeviceSession session) {
+  final lastSeen = session.lastSeenAt?.toLocal();
+  final expires = session.expiresAt?.toLocal();
+  final parts = <String>[];
+  if (lastSeen != null) {
+    parts.add('Last active ${_shortDate(lastSeen)}');
+  }
+  if (expires != null) {
+    parts.add('Expires ${_shortDate(expires)}');
+  }
+  return parts.isEmpty ? 'Session details unavailable' : parts.join(' • ');
+}
+
+String _shortDate(DateTime value) {
+  String two(int number) => number.toString().padLeft(2, '0');
+  return '${value.year}-${two(value.month)}-${two(value.day)} '
+      '${two(value.hour)}:${two(value.minute)}';
+}
+
 class _AvatarPanel extends StatelessWidget {
   final Member? member;
   final VoidCallback? onChooseAvatar;
@@ -240,7 +403,9 @@ class _AvatarPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final displayName = member?.name ?? '';
-    final initial = (displayName.isNotEmpty ? displayName.characters.first : '?').toUpperCase();
+    final initial =
+        (displayName.isNotEmpty ? displayName.characters.first : '?')
+            .toUpperCase();
     return SizedBox(
       width: 220,
       child: _ProfileCard(
@@ -290,10 +455,7 @@ class _DialogAvatar extends StatelessWidget {
   final String? source;
   final String fallbackInitial;
 
-  const _DialogAvatar({
-    required this.source,
-    required this.fallbackInitial,
-  });
+  const _DialogAvatar({required this.source, required this.fallbackInitial});
 
   @override
   Widget build(BuildContext context) {
@@ -310,10 +472,7 @@ class _ProfileCard extends StatelessWidget {
   final String title;
   final Widget child;
 
-  const _ProfileCard({
-    required this.title,
-    required this.child,
-  });
+  const _ProfileCard({required this.title, required this.child});
 
   @override
   Widget build(BuildContext context) {
@@ -328,7 +487,10 @@ class _ProfileCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+          Text(
+            title,
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+          ),
           const SizedBox(height: 14),
           child,
         ],

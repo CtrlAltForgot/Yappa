@@ -9,20 +9,82 @@ enum YappaLinuxScreenShareBackend {
   disableOnWayland,
 }
 
+enum YappaScreenShareQuality {
+  efficient720p30,
+  balanced1080p30,
+  smooth1080p60,
+  high1440p60,
+}
+
+extension YappaScreenShareQualityDetails on YappaScreenShareQuality {
+  String get label => switch (this) {
+    YappaScreenShareQuality.efficient720p30 => '720p · 30 FPS',
+    YappaScreenShareQuality.balanced1080p30 => '1080p · 30 FPS',
+    YappaScreenShareQuality.smooth1080p60 => '1080p · 60 FPS',
+    YappaScreenShareQuality.high1440p60 => '1440p · 60 FPS',
+  };
+
+  String get description => switch (this) {
+    YappaScreenShareQuality.efficient720p30 =>
+      'Lower CPU and network use for slower systems or connections.',
+    YappaScreenShareQuality.balanced1080p30 =>
+      'Sharp text and video with moderate resource use.',
+    YappaScreenShareQuality.smooth1080p60 =>
+      'Recommended for games and smooth motion on capable connections.',
+    YappaScreenShareQuality.high1440p60 =>
+      'A demanding ceiling for powerful systems and fast upload speeds.',
+  };
+
+  int get width => switch (this) {
+    YappaScreenShareQuality.efficient720p30 => 1280,
+    YappaScreenShareQuality.balanced1080p30 ||
+    YappaScreenShareQuality.smooth1080p60 => 1920,
+    YappaScreenShareQuality.high1440p60 => 2560,
+  };
+
+  int get height => switch (this) {
+    YappaScreenShareQuality.efficient720p30 => 720,
+    YappaScreenShareQuality.balanced1080p30 ||
+    YappaScreenShareQuality.smooth1080p60 => 1080,
+    YappaScreenShareQuality.high1440p60 => 1440,
+  };
+
+  int get framesPerSecond => switch (this) {
+    YappaScreenShareQuality.efficient720p30 ||
+    YappaScreenShareQuality.balanced1080p30 => 30,
+    YappaScreenShareQuality.smooth1080p60 ||
+    YappaScreenShareQuality.high1440p60 => 60,
+  };
+
+  int get maxBitrate => switch (this) {
+    YappaScreenShareQuality.efficient720p30 => 3_000_000,
+    YappaScreenShareQuality.balanced1080p30 => 5_000_000,
+    YappaScreenShareQuality.smooth1080p60 => 8_000_000,
+    YappaScreenShareQuality.high1440p60 => 14_000_000,
+  };
+}
+
 class YappaVideoPreferences {
-  static const _linuxScreenShareBackendKey =
-      'yappa_linux_screen_share_backend';
+  static const _linuxScreenShareBackendKey = 'yappa_linux_screen_share_backend';
+  static const _screenShareQualityKey = 'yappa_screen_share_quality';
 
   static YappaLinuxScreenShareBackend linuxScreenShareBackend =
       YappaLinuxScreenShareBackend.nativePortal;
+  static YappaScreenShareQuality screenShareQuality =
+      YappaScreenShareQuality.smooth1080p60;
 
   static Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
     final savedBackend = prefs.getString(_linuxScreenShareBackendKey);
+    final savedQuality = prefs.getString(_screenShareQualityKey);
 
     linuxScreenShareBackend = YappaLinuxScreenShareBackend.values.firstWhere(
       (value) => value.name == savedBackend,
       orElse: () => YappaLinuxScreenShareBackend.nativePortal,
+    );
+    screenShareQuality = YappaScreenShareQuality.values.firstWhere(
+      (value) => value.name == savedQuality,
+      orElse: () => YappaScreenShareQuality.smooth1080p60,
     );
   }
 
@@ -32,6 +94,14 @@ class YappaVideoPreferences {
     linuxScreenShareBackend = value;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_linuxScreenShareBackendKey, value.name);
+  }
+
+  static Future<void> setScreenShareQuality(
+    YappaScreenShareQuality value,
+  ) async {
+    screenShareQuality = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_screenShareQualityKey, value.name);
   }
 
   static bool get isLinuxBuild => Platform.isLinux;

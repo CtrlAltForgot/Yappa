@@ -1,28 +1,27 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:flutter_webrtc/yappa_portal_capture.dart';
 import 'package:livekit_client/livekit_client.dart' as livekit;
 
 import 'audio_preferences.dart';
 import 'video_preferences.dart';
 
-enum VoiceTransportQualityPreset {
-  lowLatency,
-  balanced,
-  highQuality,
-}
+enum VoiceTransportQualityPreset { lowLatency, balanced, highQuality }
 
-enum VoiceScreenShareTarget {
-  any,
-  screen,
-  window,
-}
+enum VoiceScreenShareTarget { any, screen, window }
 
-typedef VoiceTransportIceCandidateCallback = FutureOr<void> Function(
-  String peerId,
-  RTCIceCandidate candidate,
-);
+typedef VoiceTransportIceCandidateCallback =
+    FutureOr<void> Function(String peerId, RTCIceCandidate candidate);
+
+bool mediaPublicationAllowed({
+  required bool localE2eeReady,
+  required bool e2eeFailed,
+}) => localE2eeReady && !e2eeFailed;
 
 class VoiceTransportPeerState {
   final String peerId;
@@ -98,17 +97,17 @@ class VoiceTransportSnapshot {
   });
 
   const VoiceTransportSnapshot.idle()
-      : initialized = false,
-        joining = false,
-        joined = false,
-        microphoneReady = false,
-        localTrackEnabled = false,
-        remoteAudioAttached = false,
-        qualityPreset = VoiceTransportQualityPreset.lowLatency,
-        localPeerId = null,
-        voiceChannelId = null,
-        error = null,
-        peers = const {};
+    : initialized = false,
+      joining = false,
+      joined = false,
+      microphoneReady = false,
+      localTrackEnabled = false,
+      remoteAudioAttached = false,
+      qualityPreset = VoiceTransportQualityPreset.lowLatency,
+      localPeerId = null,
+      voiceChannelId = null,
+      error = null,
+      peers = const {};
 
   VoiceTransportSnapshot copyWith({
     bool? initialized,
@@ -135,8 +134,9 @@ class VoiceTransportSnapshot {
       remoteAudioAttached: remoteAudioAttached ?? this.remoteAudioAttached,
       qualityPreset: qualityPreset ?? this.qualityPreset,
       localPeerId: clearLocalPeerId ? null : (localPeerId ?? this.localPeerId),
-      voiceChannelId:
-          clearVoiceChannelId ? null : (voiceChannelId ?? this.voiceChannelId),
+      voiceChannelId: clearVoiceChannelId
+          ? null
+          : (voiceChannelId ?? this.voiceChannelId),
       error: clearError ? null : (error ?? this.error),
       peers: peers ?? this.peers,
     );
@@ -146,10 +146,18 @@ class VoiceTransportSnapshot {
 class VoiceTransportService extends ChangeNotifier {
   VoiceTransportSnapshot _snapshot = const VoiceTransportSnapshot.idle();
   livekit.Room? _room;
+  livekit.EventsListener<livekit.RoomEvent>? _roomEventsListener;
+  livekit.BaseKeyProvider? _e2eeKeyProvider;
+  livekit.LocalVideoTrack? _manualScreenShareTrack;
   bool _liveKitInitialized = false;
   bool _outputMuted = false;
+  bool _manualScreenShareStopInProgress = false;
+  bool _localE2eeReady = false;
+  bool _e2eeFailed = false;
+  Completer<void>? _pendingLocalE2eeReady;
   final Map<String, double> _peerVolumes = <String, double>{};
   Future<void>? _teardownFuture;
+  Future<bool>? _screenShareStartFuture;
 
   VoiceTransportIceCandidateCallback? onLocalIceCandidate;
 
@@ -159,6 +167,8 @@ class VoiceTransportService extends ChangeNotifier {
   bool get joining => _snapshot.joining;
   bool get microphoneReady => _snapshot.microphoneReady;
   bool get localTrackEnabled => _snapshot.localTrackEnabled;
+  bool get localE2eeReady => _localE2eeReady;
+  bool get e2eeFailed => _e2eeFailed;
   String? get localPeerId => _snapshot.localPeerId;
   String? get voiceChannelId => _snapshot.voiceChannelId;
   Map<String, VoiceTransportPeerState> get peers => _snapshot.peers;
@@ -184,23 +194,21 @@ class VoiceTransportService extends ChangeNotifier {
 
   livekit.VideoTrack? get localScreenShareTrack {
     final participant = _room?.localParticipant;
-    if (participant == null) {
-      return null;
-    }
-
-    for (final publication in participant.videoTrackPublications) {
-      if (publication.source == livekit.TrackSource.screenShareVideo) {
-        if (publication.muted) {
-          continue;
-        }
-        final track = publication.track;
-        if (track != null) {
-          return track;
+    if (participant != null) {
+      for (final publication in participant.videoTrackPublications) {
+        if (publication.source == livekit.TrackSource.screenShareVideo) {
+          if (publication.muted) {
+            continue;
+          }
+          final track = publication.track;
+          if (track != null) {
+            return track;
+          }
         }
       }
     }
 
-    return null;
+    return _manualScreenShareTrack;
   }
 
   Map<String, livekit.VideoTrack> get remoteCameraTracks {
@@ -216,7 +224,8 @@ class VoiceTransportService extends ChangeNotifier {
         if (publication.source == livekit.TrackSource.camera) {
           final track = publication.track;
           if (track != null) {
-            tracks[participant.identity] = track as livekit.VideoTrack;
+            tracks[_participantUserId(participant)] =
+                track as livekit.VideoTrack;
           }
           break;
         }
@@ -242,7 +251,8 @@ class VoiceTransportService extends ChangeNotifier {
           }
           final track = publication.track;
           if (track != null) {
-            tracks[participant.identity] = track as livekit.VideoTrack;
+            tracks[_participantUserId(participant)] =
+                track as livekit.VideoTrack;
           }
           break;
         }
@@ -258,7 +268,8 @@ class VoiceTransportService extends ChangeNotifier {
     final preferredInputDeviceId = YappaAudioPreferences.preferredInputDeviceId;
 
     return livekit.AudioCaptureOptions(
-      deviceId: preferredInputDeviceId != null &&
+      deviceId:
+          preferredInputDeviceId != null &&
               preferredInputDeviceId.trim().isNotEmpty
           ? preferredInputDeviceId
           : null,
@@ -296,7 +307,12 @@ class VoiceTransportService extends ChangeNotifier {
     required String voiceChannelId,
     required String serverUrl,
     required String participantToken,
+    required Uint8List encryptionKey,
+    required int encryptionKeyIndex,
+    required List<String> encryptionParticipantIds,
     String? roomName,
+    String? lanHost,
+    int? lanTlsPort,
     VoiceTransportQualityPreset? preset,
   }) async {
     final desiredPreset = preset ?? _snapshot.qualityPreset;
@@ -310,6 +326,35 @@ class VoiceTransportService extends ChangeNotifier {
     await initialize(preset: desiredPreset);
     await leaveVoiceChannel();
 
+    if (encryptionKey.length != 32 ||
+        encryptionKeyIndex < 0 ||
+        encryptionKeyIndex > 255 ||
+        encryptionParticipantIds.isEmpty) {
+      throw const FormatException('Invalid end-to-end media key.');
+    }
+    final nativeKeyOptions = KeyProviderOptions(
+      sharedKey: false,
+      ratchetSalt: Uint8List.fromList('YappaMediaRatchetV1'.codeUnits),
+      ratchetWindowSize: 16,
+      uncryptedMagicBytes: Uint8List.fromList('YAPPA-E2EE'.codeUnits),
+      failureTolerance: 0,
+      keyRingSize: 16,
+      discardFrameWhenCryptorNotReady: true,
+    );
+    final nativeKeyProvider = await frameCryptorFactory
+        .createDefaultKeyProvider(nativeKeyOptions);
+    final e2eeKeyProvider = livekit.BaseKeyProvider(
+      nativeKeyProvider,
+      nativeKeyOptions,
+    );
+    for (final participantId in encryptionParticipantIds.toSet()) {
+      await e2eeKeyProvider.setRawKey(
+        Uint8List.fromList(encryptionKey),
+        participantId: participantId,
+        keyIndex: encryptionKeyIndex,
+      );
+    }
+    _e2eeKeyProvider = e2eeKeyProvider;
     _updateSnapshot(
       _snapshot.copyWith(
         joining: true,
@@ -326,30 +371,66 @@ class VoiceTransportService extends ChangeNotifier {
         adaptiveStream: true,
         dynacast: true,
         defaultAudioCaptureOptions: _audioCaptureOptions(),
+        encryption: livekit.E2EEOptions(keyProvider: e2eeKeyProvider),
       ),
     );
 
     room.addListener(_handleRoomChanged);
+    _roomEventsListener = room.createListener()
+      ..on<livekit.LocalTrackUnpublishedEvent>(_handleLocalTrackUnpublished)
+      ..on<livekit.TrackE2EEStateEvent>(_handleTrackE2eeState)
+      ..on<livekit.RoomDisconnectedEvent>((_) {
+        unawaited(_clearManualScreenShareTrack());
+        _refreshSnapshotFromRoom(clearError: true);
+      });
     _room = room;
 
     try {
-      await room.prepareConnection(serverUrl, participantToken);
-      await room.connect(
-        serverUrl,
-        participantToken,
-        connectOptions: const livekit.ConnectOptions(
-          autoSubscribe: true,
-        ),
-      );
+      final serverUri = Uri.parse(serverUrl);
+      final useSecureLanRoute =
+          serverUri.scheme == 'wss' &&
+          (lanHost ?? '').trim().isNotEmpty &&
+          lanTlsPort != null;
+      Future<void> connectRoom() async {
+        await room.prepareConnection(serverUrl, participantToken);
+        await room.connect(
+          serverUrl,
+          participantToken,
+          connectOptions: const livekit.ConnectOptions(autoSubscribe: true),
+        );
+      }
+
+      if (useSecureLanRoute) {
+        await HttpOverrides.runZoned<Future<void>>(
+          connectRoom,
+          createHttpClient: (context) => _secureLanHttpClient(
+            context: context,
+            expectedHost: serverUri.host,
+            lanHost: lanHost!,
+            lanPort: lanTlsPort,
+          ),
+        );
+      } else {
+        await connectRoom();
+      }
 
       final localParticipant = room.localParticipant;
       if (localParticipant == null) {
         throw Exception('LiveKit connected without a local participant.');
       }
 
+      _localE2eeReady = false;
+      _e2eeFailed = false;
+      _pendingLocalE2eeReady = Completer<void>();
       await localParticipant.setMicrophoneEnabled(
         true,
         audioCaptureOptions: _audioCaptureOptions(),
+      );
+      await _pendingLocalE2eeReady!.future.timeout(
+        const Duration(seconds: 8),
+        onTimeout: () => throw TimeoutException(
+          'LiveKit did not confirm microphone frame encryption.',
+        ),
       );
 
       try {
@@ -375,6 +456,30 @@ class VoiceTransportService extends ChangeNotifier {
     }
   }
 
+  HttpClient _secureLanHttpClient({
+    required SecurityContext? context,
+    required String expectedHost,
+    required String lanHost,
+    required int lanPort,
+  }) {
+    final client = HttpClient(context: context);
+    client.findProxy = (_) => 'DIRECT';
+    client.connectionTimeout = const Duration(seconds: 6);
+    client.connectionFactory = (requestUri, proxyHost, proxyPort) async {
+      if (proxyHost != null ||
+          proxyPort != null ||
+          requestUri.host.toLowerCase() != expectedHost.toLowerCase()) {
+        throw const SocketException('Invalid secure LAN media route.');
+      }
+      final rawTask = await Socket.startConnect(lanHost, lanPort);
+      final secureSocket = rawTask.socket.then(
+        (socket) => SecureSocket.secure(socket, host: requestUri.host),
+      );
+      return ConnectionTask.fromSocket(secureSocket, rawTask.cancel);
+    };
+    return client;
+  }
+
   Future<void> leaveVoiceChannel() async {
     await _teardownRoom();
     _updateSnapshot(
@@ -397,6 +502,15 @@ class VoiceTransportService extends ChangeNotifier {
     final localParticipant = room?.localParticipant;
     if (room == null || localParticipant == null) {
       return;
+    }
+    if (!muted &&
+        !mediaPublicationAllowed(
+          localE2eeReady: _localE2eeReady,
+          e2eeFailed: _e2eeFailed,
+        )) {
+      throw StateError(
+        'Microphone publication requires verified media encryption.',
+      );
     }
 
     final audioPublications = localParticipant.audioTrackPublications;
@@ -426,6 +540,15 @@ class VoiceTransportService extends ChangeNotifier {
     if (room == null || localParticipant == null) {
       return;
     }
+    if (enabled &&
+        !mediaPublicationAllowed(
+          localE2eeReady: _localE2eeReady,
+          e2eeFailed: _e2eeFailed,
+        )) {
+      throw StateError(
+        'Camera publication requires verified media encryption.',
+      );
+    }
 
     await localParticipant.setCameraEnabled(enabled);
     _refreshSnapshotFromRoom(clearError: true);
@@ -434,63 +557,116 @@ class VoiceTransportService extends ChangeNotifier {
   Future<bool> setScreenShareEnabled(
     bool enabled, {
     VoiceScreenShareTarget preferredTarget = VoiceScreenShareTarget.any,
+    String? preferredSourceId,
   }) async {
     final room = _room;
     final localParticipant = room?.localParticipant;
     if (room == null || localParticipant == null) {
       return false;
     }
+    if (enabled &&
+        !mediaPublicationAllowed(
+          localE2eeReady: _localE2eeReady,
+          e2eeFailed: _e2eeFailed,
+        )) {
+      throw StateError(
+        'Screen publication requires verified media encryption.',
+      );
+    }
 
     final existingScreenShare = localParticipant.getTrackPublicationBySource(
       livekit.TrackSource.screenShareVideo,
     );
 
-    if (enabled && existingScreenShare != null && !existingScreenShare.muted) {
+    if (enabled &&
+        existingScreenShare != null &&
+        !existingScreenShare.muted &&
+        localScreenShareTrack != null) {
       _refreshSnapshotFromRoom(clearError: true);
       return true;
     }
 
     if (!enabled) {
-      final screenVideoPublication = localParticipant.getTrackPublicationBySource(
-        livekit.TrackSource.screenShareVideo,
-      );
-      if (screenVideoPublication != null) {
-        await localParticipant.removePublishedTrack(screenVideoPublication.sid);
-      }
-
-      final screenAudioPublication = localParticipant.getTrackPublicationBySource(
-        livekit.TrackSource.screenShareAudio,
-      );
-      if (screenAudioPublication != null) {
-        await localParticipant.removePublishedTrack(screenAudioPublication.sid);
-      }
-
+      _screenShareStartFuture = null;
+      await _removeLocalScreenSharePublications(localParticipant);
       _refreshSnapshotFromRoom(clearError: true);
       return true;
     }
 
+    final inFlightStart = _screenShareStartFuture;
+    if (inFlightStart != null) {
+      return inFlightStart;
+    }
+
+    final startFuture = _startScreenShare(
+      localParticipant,
+      preferredTarget: preferredTarget,
+      preferredSourceId: preferredSourceId,
+    );
+    _screenShareStartFuture = startFuture;
+
     try {
-      if (_useLegacyLinuxDesktopPicker) {
-        final selectedSource = await _pickLinuxDesktopSource(preferredTarget);
-        if (selectedSource == null) {
-          _refreshSnapshotFromRoom(clearError: true);
-          return false;
+      return await startFuture;
+    } finally {
+      if (identical(_screenShareStartFuture, startFuture)) {
+        _screenShareStartFuture = null;
+      }
+    }
+  }
+
+  Future<bool> _startScreenShare(
+    livekit.LocalParticipant localParticipant, {
+    required VoiceScreenShareTarget preferredTarget,
+    String? preferredSourceId,
+  }) async {
+    try {
+      await _removeLocalScreenSharePublications(localParticipant);
+      final quality = YappaVideoPreferences.screenShareQuality;
+      final captureParameters = livekit.VideoParameters(
+        dimensions: livekit.VideoDimensions(quality.width, quality.height),
+        encoding: livekit.VideoEncoding(
+          maxFramerate: quality.framesPerSecond,
+          maxBitrate: quality.maxBitrate,
+        ),
+      );
+
+      if (_requiresManualDesktopSourceSelection) {
+        var sourceId = preferredSourceId?.trim();
+        if (sourceId == null || sourceId.isEmpty) {
+          final selectedSource = await _pickDesktopSource(preferredTarget);
+          if (selectedSource == null) {
+            _refreshSnapshotFromRoom(clearError: true);
+            return false;
+          }
+          sourceId = selectedSource.id;
         }
 
-        final track = await livekit.LocalVideoTrack.createScreenShareTrack(
+        await _createAndPublishScreenShareTracks(
+          localParticipant,
           livekit.ScreenShareCaptureOptions(
-            sourceId: selectedSource.id,
-            maxFrameRate: 15.0,
+            sourceId: sourceId,
+            maxFrameRate: quality.framesPerSecond.toDouble(),
+            params: captureParameters,
+            captureScreenAudio: true,
           ),
         );
-
-        await localParticipant.publishVideoTrack(track);
+      } else if (_useManualNativePortalScreenShareTrack) {
+        await _createAndPublishScreenShareTracks(
+          localParticipant,
+          livekit.ScreenShareCaptureOptions(
+            sourceId: 'yappa-portal',
+            maxFrameRate: quality.framesPerSecond.toDouble(),
+            params: captureParameters,
+            captureScreenAudio: true,
+          ),
+        );
       } else {
-        await localParticipant.setScreenShareEnabled(
-          true,
-          captureScreenAudio: false,
-          screenShareCaptureOptions: const livekit.ScreenShareCaptureOptions(
-            maxFrameRate: 15.0,
+        await _createAndPublishScreenShareTracks(
+          localParticipant,
+          livekit.ScreenShareCaptureOptions(
+            maxFrameRate: quality.framesPerSecond.toDouble(),
+            params: captureParameters,
+            captureScreenAudio: true,
           ),
         );
       }
@@ -498,50 +674,131 @@ class VoiceTransportService extends ChangeNotifier {
       _refreshSnapshotFromRoom(clearError: true);
       return true;
     } catch (error) {
+      await _clearManualScreenShareTrack();
+
       if (_looksLikeCaptureCancellation(error)) {
         _refreshSnapshotFromRoom(clearError: true);
         return false;
       }
 
       _updateSnapshot(
-        _snapshot.copyWith(
-          error: 'Could not start screen share: $error',
-        ),
+        _snapshot.copyWith(error: 'Could not start screen share: $error'),
       );
       rethrow;
     }
   }
 
+  Future<void> _createAndPublishScreenShareTracks(
+    livekit.LocalParticipant localParticipant,
+    livekit.ScreenShareCaptureOptions captureOptions,
+  ) async {
+    final tracks = await livekit
+        .LocalVideoTrack.createScreenShareTracksWithAudio(captureOptions);
+    livekit.LocalVideoTrack? videoTrack;
+
+    for (final track in tracks) {
+      if (track is livekit.LocalVideoTrack) {
+        videoTrack = track;
+        _manualScreenShareTrack = track;
+        await localParticipant.publishVideoTrack(
+          track,
+          publishOptions: livekit.VideoPublishOptions(
+            screenShareEncoding: captureOptions.params.encoding,
+            simulcast: true,
+            degradationPreference: livekit.DegradationPreference.balanced,
+          ),
+        );
+      } else if (track is livekit.LocalAudioTrack) {
+        await localParticipant.publishAudioTrack(track);
+      }
+    }
+
+    if (videoTrack == null) {
+      throw Exception(
+        'The screen capture backend did not create a video track.',
+      );
+    }
+
+    await _waitForScreenShareFrames(videoTrack);
+  }
+
+  Future<void> _waitForScreenShareFrames(livekit.LocalVideoTrack track) async {
+    final deadline = DateTime.now().add(const Duration(minutes: 2));
+
+    while (DateTime.now().isBefore(deadline)) {
+      if (!track.isActive) {
+        throw Exception('Screen selection was cancelled.');
+      }
+
+      try {
+        final stats = await track.getSenderStats();
+        if (stats.any((item) => (item.framesSent ?? 0) > 0)) {
+          debugPrint('[YappaScreenShare] WebRTC sender is delivering frames.');
+          return;
+        }
+      } catch (_) {
+        // The sender can briefly have no stats while LiveKit attaches it.
+      }
+
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+    }
+
+    throw Exception(
+      'Screen capture started, but no video frames were received.',
+    );
+  }
+
   bool get _isLinuxDesktop =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.linux;
 
-  bool get _useLegacyLinuxDesktopPicker {
-    if (!_isLinuxDesktop) {
+  bool get _requiresManualDesktopSourceSelection {
+    if (kIsWeb) {
       return false;
     }
 
-    switch (YappaVideoPreferences.linuxScreenShareBackend) {
-      case YappaLinuxScreenShareBackend.auto:
-      case YappaLinuxScreenShareBackend.nativePortal:
-        return false;
-      case YappaLinuxScreenShareBackend.x11Only:
-        return true;
-      case YappaLinuxScreenShareBackend.disableOnWayland:
-        return YappaVideoPreferences.isX11Session;
+    if (defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.macOS) {
+      return true;
     }
+
+    if (defaultTargetPlatform == TargetPlatform.linux) {
+      return !YappaVideoPreferences.isWaylandSession;
+    }
+
+    return false;
   }
 
-  Future<DesktopCapturerSource?> _pickLinuxDesktopSource(
+  bool get _useManualNativePortalScreenShareTrack {
+    if (kIsWeb) {
+      return false;
+    }
+
+    return defaultTargetPlatform == TargetPlatform.linux &&
+        YappaVideoPreferences.isWaylandSession;
+  }
+
+  List<SourceType> _desktopSourceTypesFor(
+    VoiceScreenShareTarget preferredTarget,
+  ) {
+    if (_isLinuxDesktop && YappaVideoPreferences.isWaylandSession) {
+      return const <SourceType>[SourceType.Screen];
+    }
+
+    return switch (preferredTarget) {
+      VoiceScreenShareTarget.window => const <SourceType>[SourceType.Window],
+      VoiceScreenShareTarget.screen => const <SourceType>[SourceType.Screen],
+      VoiceScreenShareTarget.any => const <SourceType>[
+        SourceType.Screen,
+        SourceType.Window,
+      ],
+    };
+  }
+
+  Future<DesktopCapturerSource?> _pickDesktopSource(
     VoiceScreenShareTarget preferredTarget,
   ) async {
-    final types = switch (preferredTarget) {
-      VoiceScreenShareTarget.window => <SourceType>[SourceType.Window],
-      VoiceScreenShareTarget.screen => <SourceType>[SourceType.Screen],
-      VoiceScreenShareTarget.any => <SourceType>[SourceType.Screen],
-    };
-
     final sources = await desktopCapturer.getSources(
-      types: types,
+      types: _desktopSourceTypesFor(preferredTarget),
     );
 
     if (sources.isEmpty) {
@@ -549,6 +806,115 @@ class VoiceTransportService extends ChangeNotifier {
     }
 
     return sources.first;
+  }
+
+  Future<void> _removeLocalScreenSharePublications(
+    livekit.LocalParticipant localParticipant,
+  ) async {
+    _manualScreenShareStopInProgress = true;
+
+    try {
+      final screenVideoPublication = localParticipant
+          .getTrackPublicationBySource(livekit.TrackSource.screenShareVideo);
+      if (screenVideoPublication != null) {
+        await localParticipant.removePublishedTrack(screenVideoPublication.sid);
+      }
+
+      final screenAudioPublication = localParticipant
+          .getTrackPublicationBySource(livekit.TrackSource.screenShareAudio);
+      if (screenAudioPublication != null) {
+        await localParticipant.removePublishedTrack(screenAudioPublication.sid);
+      }
+    } finally {
+      _manualScreenShareStopInProgress = false;
+      await _clearManualScreenShareTrack();
+    }
+  }
+
+  Future<void> _clearManualScreenShareTrack() async {
+    final track = _manualScreenShareTrack;
+    _manualScreenShareTrack = null;
+
+    if (track != null) {
+      try {
+        await track.stop();
+      } catch (_) {}
+
+      try {
+        await track.dispose();
+      } catch (_) {}
+    }
+
+    if (_useManualNativePortalScreenShareTrack) {
+      try {
+        await YappaPortalCapture.stop();
+      } catch (_) {}
+    }
+  }
+
+  void _handleLocalTrackUnpublished(livekit.LocalTrackUnpublishedEvent event) {
+    if (event.publication.source != livekit.TrackSource.screenShareVideo) {
+      return;
+    }
+
+    debugPrint(
+      '[YappaScreenShare] Local screen track unpublished '
+      '(manualStop=$_manualScreenShareStopInProgress).',
+    );
+    if (!_manualScreenShareStopInProgress) {
+      unawaited(_clearManualScreenShareTrack());
+    }
+    _refreshSnapshotFromRoom(clearError: true);
+  }
+
+  void _handleTrackE2eeState(livekit.TrackE2EEStateEvent event) {
+    final room = _room;
+    if (room == null) return;
+    final isLocal =
+        event.participant.identity == room.localParticipant?.identity;
+    switch (event.state) {
+      case livekit.E2EEState.kOk:
+      case livekit.E2EEState.kKeyRatcheted:
+        if (!isLocal) return;
+        _localE2eeReady = true;
+        _e2eeFailed = false;
+        final pending = _pendingLocalE2eeReady;
+        if (pending != null && !pending.isCompleted) {
+          pending.complete();
+        }
+        notifyListeners();
+      case livekit.E2EEState.kNew:
+        break;
+      case livekit.E2EEState.kMissingKey:
+      case livekit.E2EEState.kEncryptionFailed:
+      case livekit.E2EEState.kDecryptionFailed:
+      case livekit.E2EEState.kInternalError:
+        _localE2eeReady = false;
+        _e2eeFailed = true;
+        final pending = _pendingLocalE2eeReady;
+        if (pending != null && !pending.isCompleted) {
+          pending.completeError(
+            StateError('LiveKit frame encryption failed: ${event.state.name}'),
+          );
+        }
+        unawaited(_stopPublishingForE2eeFailure());
+        notifyListeners();
+    }
+  }
+
+  Future<void> _stopPublishingForE2eeFailure() async {
+    final participant = _room?.localParticipant;
+    if (participant == null) return;
+    try {
+      await participant.setMicrophoneEnabled(false);
+    } catch (_) {}
+    try {
+      await participant.setCameraEnabled(false);
+    } catch (_) {}
+    try {
+      await _removeLocalScreenSharePublications(participant);
+      await _clearManualScreenShareTrack();
+    } catch (_) {}
   }
 
   bool _looksLikeCaptureCancellation(Object error) {
@@ -591,15 +957,11 @@ class VoiceTransportService extends ChangeNotifier {
       ..clear()
       ..addEntries(
         volumes.entries.map(
-          (entry) => MapEntry(
-            entry.key,
-            entry.value.clamp(0.0, 1.5).toDouble(),
-          ),
+          (entry) =>
+              MapEntry(entry.key, entry.value.clamp(0.0, 1.5).toDouble()),
         ),
       );
-    _peerVolumes.removeWhere(
-      (peerId, volume) => (volume - 1.0).abs() < 0.001,
-    );
+    _peerVolumes.removeWhere((peerId, volume) => (volume - 1.0).abs() < 0.001);
     _applyOutputMuteBestEffort();
   }
 
@@ -607,9 +969,86 @@ class VoiceTransportService extends ChangeNotifier {
     if (_snapshot.qualityPreset == preset) return;
 
     _updateSnapshot(
+      _snapshot.copyWith(qualityPreset: preset, clearError: true),
+    );
+  }
+
+  Future<void> updateMediaEncryptionKey({
+    required Uint8List key,
+    required int keyIndex,
+    required List<String> participantIds,
+  }) async {
+    final provider = _e2eeKeyProvider;
+    final room = _room;
+    if (provider == null || room == null) return;
+    if (key.length != 32 ||
+        keyIndex < 0 ||
+        keyIndex > 255 ||
+        participantIds.isEmpty) {
+      throw const FormatException('Invalid end-to-end media key update.');
+    }
+    _localE2eeReady = false;
+    _e2eeFailed = false;
+    _pendingLocalE2eeReady = Completer<void>();
+    notifyListeners();
+    try {
+      for (final participantId in participantIds.toSet()) {
+        await provider.setRawKey(
+          Uint8List.fromList(key),
+          participantId: participantId,
+          keyIndex: keyIndex,
+        );
+        await room.e2eeManager?.setKeyIndex(
+          keyIndex,
+          participantIdentity: participantId,
+        );
+      }
+      await _pendingLocalE2eeReady!.future.timeout(
+        const Duration(seconds: 8),
+        onTimeout: () => throw TimeoutException(
+          'LiveKit did not confirm the rotated frame-encryption key.',
+        ),
+      );
+    } catch (_) {
+      await _stopPublishingForE2eeFailure();
+      rethrow;
+    }
+  }
+
+  Future<void> suspendMediaForKeyRotation({
+    required int keyIndex,
+    required List<String> participantIds,
+  }) async {
+    final random = Random.secure();
+    final quarantineKey = Uint8List.fromList(
+      List<int>.generate(32, (_) => random.nextInt(256)),
+    );
+    try {
+      await updateMediaEncryptionKey(
+        key: quarantineKey,
+        keyIndex: keyIndex,
+        participantIds: participantIds,
+      );
+    } finally {
+      quarantineKey.fillRange(0, quarantineKey.length, 0);
+    }
+  }
+
+  Future<void> failMediaEncryption(Object error) async {
+    _localE2eeReady = false;
+    _e2eeFailed = true;
+    final pending = _pendingLocalE2eeReady;
+    if (pending != null && !pending.isCompleted) {
+      pending.completeError(StateError('End-to-end media encryption failed.'));
+    }
+    await _stopPublishingForE2eeFailure();
+    _updateSnapshot(
       _snapshot.copyWith(
-        qualityPreset: preset,
-        clearError: true,
+        microphoneReady: false,
+        localTrackEnabled: false,
+        error:
+            'End-to-end media encryption failed: '
+            '${error.toString().replaceFirst('FormatException: ', '')}',
       ),
     );
   }
@@ -677,14 +1116,16 @@ class VoiceTransportService extends ChangeNotifier {
 
     final remotePeerStates = <String, VoiceTransportPeerState>{};
     for (final participant in room.remoteParticipants.values) {
-      final peerId = participant.identity;
+      final peerId = _participantUserId(participant);
       final hasRemoteAudio = participant.audioTrackPublications.any(
-        (publication) => publication.subscribed &&
+        (publication) =>
+            publication.subscribed &&
             !publication.muted &&
             publication.track != null,
       );
 
-      final connected = participant.state == livekit.ParticipantState.active ||
+      final connected =
+          participant.state == livekit.ParticipantState.active ||
           participant.state == livekit.ParticipantState.joined;
 
       remotePeerStates[peerId] = VoiceTransportPeerState(
@@ -713,8 +1154,9 @@ class VoiceTransportService extends ChangeNotifier {
         joined: room.connectionState == livekit.ConnectionState.connected,
         microphoneReady: microphoneReady,
         localTrackEnabled: localTrackEnabled,
-        remoteAudioAttached:
-            remotePeerStates.values.any((peer) => peer.hasRemoteAudio),
+        remoteAudioAttached: remotePeerStates.values.any(
+          (peer) => peer.hasRemoteAudio,
+        ),
         peers: remotePeerStates,
         clearError: clearError,
       ),
@@ -726,7 +1168,7 @@ class VoiceTransportService extends ChangeNotifier {
     if (room == null) return;
 
     for (final participant in room.remoteParticipants.values) {
-      final peerId = participant.identity;
+      final peerId = _participantUserId(participant);
       final gain = _outputMuted ? 0.0 : peerVolumeFor(peerId);
 
       try {
@@ -741,6 +1183,22 @@ class VoiceTransportService extends ChangeNotifier {
         } catch (_) {}
       }
     }
+  }
+
+  String _participantUserId(livekit.RemoteParticipant participant) {
+    final metadata = participant.metadata;
+    if (metadata != null && metadata.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(metadata);
+        if (decoded is Map) {
+          final userId = decoded['userId']?.toString().trim() ?? '';
+          if (userId.isNotEmpty) {
+            return userId;
+          }
+        }
+      } catch (_) {}
+    }
+    return participant.identity;
   }
 
   Future<void> _applyPreferredOutputDeviceBestEffort() async {
@@ -786,18 +1244,33 @@ class VoiceTransportService extends ChangeNotifier {
       return;
     }
 
-    final room = _room;
-    _room = null;
-    if (room == null) {
-      return;
-    }
-
     final future = () async {
+      final room = _room;
+      _room = null;
+      _e2eeKeyProvider = null;
+      _localE2eeReady = false;
+      _e2eeFailed = false;
+      _pendingLocalE2eeReady = null;
+
+      _roomEventsListener?.dispose();
+      _roomEventsListener = null;
+
+      if (room == null) {
+        await _clearManualScreenShareTrack();
+        return;
+      }
+
       room.removeListener(_handleRoomChanged);
 
       try {
         await room.disconnect();
       } catch (_) {}
+
+      try {
+        await room.dispose();
+      } catch (_) {}
+
+      await _clearManualScreenShareTrack();
     }();
 
     _teardownFuture = future;

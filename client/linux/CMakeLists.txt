@@ -2,6 +2,11 @@
 cmake_minimum_required(VERSION 3.13)
 project(runner LANGUAGES CXX)
 
+# flutter_webrtc 1.5.2's bundled libwebrtc headers use fixed-width integer
+# types without including <cstdint>. Force the standard header into native
+# translation units so Linux builds remain reproducible across toolchains.
+add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-include>" "$<$<COMPILE_LANGUAGE:CXX>:cstdint>")
+
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.
 set(BINARY_NAME "Yappa")
@@ -60,6 +65,45 @@ add_subdirectory("runner")
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)
 
+# Build the pinned native MLS bridge as part of every desktop client build.
+find_program(CARGO_EXECUTABLE cargo REQUIRED)
+set(YAPPA_MLS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../native/yappa_mls")
+set(YAPPA_MLS_TARGET_DIR "${CMAKE_BINARY_DIR}/yappa_mls")
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+  set(YAPPA_MLS_CARGO_PROFILE dev)
+  set(YAPPA_MLS_PROFILE_DIR debug)
+else()
+  set(YAPPA_MLS_CARGO_PROFILE release)
+  set(YAPPA_MLS_PROFILE_DIR release)
+endif()
+file(GLOB_RECURSE YAPPA_MLS_SOURCES CONFIGURE_DEPENDS
+  "${YAPPA_MLS_DIR}/src/*.rs"
+  "${YAPPA_MLS_DIR}/vendor/hpke-rs/src/*.rs"
+)
+add_custom_command(
+  OUTPUT "${YAPPA_MLS_TARGET_DIR}/${YAPPA_MLS_PROFILE_DIR}/libyappa_mls.so"
+  # Rust panic/location strings otherwise retain the builder's home directory
+  # through registry source paths. Keep diagnostics useful without identifying
+  # the release builder.
+  COMMAND "${CMAKE_COMMAND}" -E env
+    "RUSTFLAGS=--remap-path-prefix=$ENV{HOME}=/_yappa_build_home"
+    "${CARGO_EXECUTABLE}" build --locked
+    --profile "${YAPPA_MLS_CARGO_PROFILE}"
+    --manifest-path "${YAPPA_MLS_DIR}/Cargo.toml"
+    --target-dir "${YAPPA_MLS_TARGET_DIR}"
+  DEPENDS
+    "${YAPPA_MLS_DIR}/Cargo.toml"
+    "${YAPPA_MLS_DIR}/Cargo.lock"
+    "${YAPPA_MLS_DIR}/vendor/hpke-rs/Cargo.toml"
+    ${YAPPA_MLS_SOURCES}
+  WORKING_DIRECTORY "${YAPPA_MLS_DIR}"
+  VERBATIM
+)
+add_custom_target(yappa_mls_native ALL
+  DEPENDS "${YAPPA_MLS_TARGET_DIR}/${YAPPA_MLS_PROFILE_DIR}/libyappa_mls.so"
+)
+add_dependencies(${BINARY_NAME} yappa_mls_native)
+
 # Only the install-generated bundle's copy of the executable will launch
 # correctly, since the resources must in the right relative locations. To avoid
 # people trying to run the unbundled copy, put it in a subdirectory instead of
@@ -73,6 +117,28 @@ set_target_properties(${BINARY_NAME}
 # Generated plugin build rules, which manage building the plugins and adding
 # them to the application.
 include(flutter/generated_plugins.cmake)
+
+# Flutter installs plugin target files by copying their build outputs, so CMake
+# does not get an install-time relink opportunity for them. Force every plugin
+# to use only its eventual bundle directory for Flutter/plugin dependencies.
+# This prevents release artifacts from leaking builder paths or accidentally
+# relying on libraries outside the bundle.
+foreach(plugin ${FLUTTER_PLUGIN_LIST})
+  set_target_properties(${plugin}_plugin PROPERTIES
+    BUILD_WITH_INSTALL_RPATH TRUE
+    BUILD_RPATH "\$ORIGIN"
+    INSTALL_RPATH "\$ORIGIN"
+    INSTALL_RPATH_USE_LINK_PATH FALSE
+  )
+endforeach(plugin)
+
+# The application link still needs to resolve flutter_webrtc_plugin's
+# transitive libwebrtc dependency while build outputs use their final
+# bundle-relative RPATH. rpath-link affects only the linker search and is not
+# written into the release artifact.
+target_link_options(${BINARY_NAME} PRIVATE
+  "-Wl,-rpath-link,${CMAKE_CURRENT_SOURCE_DIR}/flutter/ephemeral/.plugin_symlinks/flutter_webrtc/third_party/libwebrtc/lib"
+)
 
 
 # === Installation ===
@@ -99,6 +165,12 @@ install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}
 
 install(FILES "${FLUTTER_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)
+
+install(
+  FILES "${YAPPA_MLS_TARGET_DIR}/${YAPPA_MLS_PROFILE_DIR}/libyappa_mls.so"
+  DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+  COMPONENT Runtime
+)
 
 foreach(bundled_library ${PLUGIN_BUNDLED_LIBRARIES})
   install(FILES "${bundled_library}"

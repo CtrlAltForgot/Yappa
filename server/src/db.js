@@ -3,6 +3,8 @@ const path = require('path');
 const crypto = require('crypto');
 const Database = require('better-sqlite3');
 
+const CURRENT_SCHEMA_VERSION = 3;
+
 function ensureDirForFile(filePath) {
   const dir = path.dirname(filePath);
   fs.mkdirSync(dir, { recursive: true });
@@ -20,13 +22,54 @@ function randomId(prefix) {
   return `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
 }
 
+function hashSessionToken(token) {
+  return crypto
+    .createHash('sha256')
+    .update(String(token || ''), 'utf8')
+    .digest('hex');
+}
+
+function sessionTokenStorageValue(token) {
+  return `sha256:${hashSessionToken(token)}`;
+}
+
 function hasColumn(db, tableName, columnName) {
   const columns = db.prepare(`PRAGMA table_info(${tableName})`).all();
   return columns.some((column) => column.name === columnName);
 }
 
+function readSchemaVersion(db) {
+  const table = db
+    .prepare(`
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'table' AND name = 'schema_migrations'
+    `)
+    .get();
+  if (!table) return 0;
+  return Number(
+    db
+      .prepare('SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations')
+      .get().version,
+  );
+}
+
+function unsupportedSchemaVersion(version) {
+  const error = new Error(
+    `Database schema version ${version} is newer than supported ` +
+      `version ${CURRENT_SCHEMA_VERSION}. Refusing to open it.`,
+  );
+  error.code = 'unsupported_schema_version';
+  return error;
+}
+
 function createBaseTables(db) {
   db.exec(`
+  CREATE TABLE IF NOT EXISTS schema_migrations (
+    version INTEGER PRIMARY KEY CHECK (version > 0),
+    applied_at TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS server_config (
     id INTEGER PRIMARY KEY CHECK (id = 1),
                                             server_id TEXT NOT NULL UNIQUE,
@@ -61,6 +104,23 @@ function createBaseTables(db) {
     token TEXT NOT NULL UNIQUE,
     created_at TEXT NOT NULL,
     last_seen_at TEXT NOT NULL,
+    expires_at TEXT,
+    idle_expires_at TEXT,
+    device_name TEXT,
+    media_device_id TEXT,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS media_devices (
+    id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    public_key TEXT NOT NULL UNIQUE,
+    yuid_authorization_signature TEXT NOT NULL,
+    authorization_nonce TEXT NOT NULL,
+    authorized_username TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    revoked_at TEXT,
     FOREIGN KEY (user_id) REFERENCES users(id)
   );
 
@@ -69,7 +129,10 @@ function createBaseTables(db) {
     name TEXT NOT NULL UNIQUE,
     type TEXT NOT NULL,
     position INTEGER NOT NULL,
-    created_at TEXT
+    glyph TEXT,
+    created_at TEXT,
+    encryption_mode TEXT NOT NULL DEFAULT 'legacy',
+    encryption_version INTEGER NOT NULL DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS messages (
@@ -129,6 +192,123 @@ function createBaseTables(db) {
     FOREIGN KEY (user_id) REFERENCES users(id),
     FOREIGN KEY (created_by_user_id) REFERENCES users(id)
   );
+
+  CREATE TABLE IF NOT EXISTS mls_key_packages (
+    id TEXT PRIMARY KEY,
+    device_id TEXT NOT NULL,
+    ciphersuite INTEGER NOT NULL CHECK (ciphersuite > 0),
+    signature_public_key TEXT NOT NULL,
+    identity_binding_signature TEXT NOT NULL,
+    key_package BLOB NOT NULL,
+    key_package_hash TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    claimed_at TEXT,
+    claimed_by_device_id TEXT,
+    FOREIGN KEY (device_id) REFERENCES media_devices(id),
+    FOREIGN KEY (claimed_by_device_id) REFERENCES media_devices(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS mls_device_credentials (
+    device_id TEXT NOT NULL,
+    signature_public_key TEXT NOT NULL,
+    identity_binding_signature TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (device_id, signature_public_key),
+    FOREIGN KEY (device_id) REFERENCES media_devices(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS mls_delivery_messages (
+    id TEXT PRIMARY KEY,
+    client_operation_id TEXT NOT NULL,
+    channel_id INTEGER NOT NULL,
+    server_sequence INTEGER NOT NULL,
+    message_class TEXT NOT NULL CHECK (
+      message_class IN ('proposal', 'commit', 'welcome', 'application')
+    ),
+    accepted_epoch INTEGER NOT NULL CHECK (accepted_epoch >= 0),
+    parent_epoch INTEGER CHECK (parent_epoch IS NULL OR parent_epoch >= 0),
+    uploader_user_id INTEGER NOT NULL,
+    uploader_device_id TEXT NOT NULL,
+    recipient_device_id TEXT,
+    wire_message BLOB NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (channel_id) REFERENCES channels(id),
+    FOREIGN KEY (uploader_user_id) REFERENCES users(id),
+    FOREIGN KEY (uploader_device_id) REFERENCES media_devices(id),
+    FOREIGN KEY (recipient_device_id) REFERENCES media_devices(id),
+    UNIQUE (channel_id, server_sequence),
+    UNIQUE (uploader_device_id, client_operation_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS mls_channel_state (
+    channel_id INTEGER PRIMARY KEY,
+    group_id TEXT NOT NULL UNIQUE,
+    current_epoch INTEGER NOT NULL DEFAULT 0 CHECK (current_epoch >= 0),
+    next_sequence INTEGER NOT NULL DEFAULT 1 CHECK (next_sequence >= 1),
+    initialized_by_device_id TEXT NOT NULL,
+    initialized_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (channel_id) REFERENCES channels(id),
+    FOREIGN KEY (initialized_by_device_id) REFERENCES media_devices(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS mls_device_cursors (
+    channel_id INTEGER NOT NULL,
+    device_id TEXT NOT NULL,
+    delivered_sequence INTEGER NOT NULL DEFAULT 0
+      CHECK (delivered_sequence >= 0),
+    acknowledged_sequence INTEGER NOT NULL DEFAULT 0
+      CHECK (acknowledged_sequence >= 0
+        AND acknowledged_sequence <= delivered_sequence),
+    acknowledged_epoch INTEGER NOT NULL DEFAULT 0
+      CHECK (acknowledged_epoch >= 0),
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (channel_id, device_id),
+    FOREIGN KEY (channel_id) REFERENCES channels(id),
+    FOREIGN KEY (device_id) REFERENCES media_devices(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS encrypted_message_events (
+    event_id TEXT PRIMARY KEY,
+    channel_id INTEGER NOT NULL,
+    delivery_message_id TEXT NOT NULL UNIQUE,
+    server_sequence INTEGER NOT NULL,
+    sender_user_id INTEGER NOT NULL,
+    sender_device_id TEXT NOT NULL,
+    event_kind TEXT NOT NULL CHECK (
+      event_kind IN ('message', 'edit', 'delete', 'reaction', 'attachment')
+    ),
+    target_event_id TEXT,
+    accepted_epoch INTEGER NOT NULL CHECK (accepted_epoch >= 0),
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (channel_id) REFERENCES channels(id),
+    FOREIGN KEY (delivery_message_id) REFERENCES mls_delivery_messages(id),
+    FOREIGN KEY (sender_user_id) REFERENCES users(id),
+    FOREIGN KEY (sender_device_id) REFERENCES media_devices(id),
+    FOREIGN KEY (target_event_id) REFERENCES encrypted_message_events(event_id),
+    UNIQUE (channel_id, server_sequence)
+  );
+
+  CREATE TABLE IF NOT EXISTS encrypted_attachments (
+    id TEXT PRIMARY KEY,
+    channel_id INTEGER NOT NULL,
+    event_id TEXT,
+    uploader_user_id INTEGER NOT NULL,
+    uploader_device_id TEXT NOT NULL,
+    relative_path TEXT NOT NULL UNIQUE,
+    secretstream_header BLOB NOT NULL,
+    ciphertext_size_bytes INTEGER NOT NULL CHECK (ciphertext_size_bytes > 0),
+    ciphertext_sha256 TEXT NOT NULL,
+    chunk_count INTEGER NOT NULL CHECK (chunk_count > 0),
+    created_at TEXT NOT NULL,
+    expires_at TEXT,
+    deleted_at TEXT,
+    FOREIGN KEY (channel_id) REFERENCES channels(id),
+    FOREIGN KEY (event_id) REFERENCES encrypted_message_events(event_id),
+    FOREIGN KEY (uploader_user_id) REFERENCES users(id),
+    FOREIGN KEY (uploader_device_id) REFERENCES media_devices(id)
+  );
   `);
 }
 
@@ -161,12 +341,95 @@ function runMigrations(db) {
     db.exec('ALTER TABLE users ADD COLUMN yuid_last_seen_at TEXT');
   }
 
+  if (!hasColumn(db, 'channels', 'glyph')) {
+    db.exec('ALTER TABLE channels ADD COLUMN glyph TEXT');
+  }
   if (!hasColumn(db, 'channels', 'created_at')) {
     db.exec('ALTER TABLE channels ADD COLUMN created_at TEXT');
+  }
+  if (!hasColumn(db, 'channels', 'encryption_mode')) {
+    db.exec(
+      "ALTER TABLE channels ADD COLUMN encryption_mode TEXT NOT NULL DEFAULT 'legacy'",
+    );
+  }
+  if (!hasColumn(db, 'channels', 'encryption_version')) {
+    db.exec(
+      'ALTER TABLE channels ADD COLUMN encryption_version INTEGER NOT NULL DEFAULT 0',
+    );
   }
   if (!hasColumn(db, 'messages', 'updated_at')) {
     db.exec('ALTER TABLE messages ADD COLUMN updated_at TEXT');
   }
+  if (!hasColumn(db, 'sessions', 'expires_at')) {
+    db.exec('ALTER TABLE sessions ADD COLUMN expires_at TEXT');
+  }
+  if (!hasColumn(db, 'sessions', 'idle_expires_at')) {
+    db.exec('ALTER TABLE sessions ADD COLUMN idle_expires_at TEXT');
+  }
+  if (!hasColumn(db, 'sessions', 'device_name')) {
+    db.exec('ALTER TABLE sessions ADD COLUMN device_name TEXT');
+  }
+  if (!hasColumn(db, 'sessions', 'media_device_id')) {
+    db.exec('ALTER TABLE sessions ADD COLUMN media_device_id TEXT');
+  }
+  if (!hasColumn(db, 'mls_key_packages', 'signature_public_key')) {
+    db.exec(
+      'ALTER TABLE mls_key_packages ADD COLUMN signature_public_key TEXT',
+    );
+  }
+  if (!hasColumn(db, 'mls_key_packages', 'identity_binding_signature')) {
+    db.exec(
+      'ALTER TABLE mls_key_packages ADD COLUMN identity_binding_signature TEXT',
+    );
+  }
+  if (!hasColumn(db, 'mls_delivery_messages', 'recipient_device_id')) {
+    db.exec(
+      'ALTER TABLE mls_delivery_messages ADD COLUMN recipient_device_id TEXT',
+    );
+  }
+  if (!hasColumn(db, 'mls_delivery_messages', 'client_operation_id')) {
+    db.exec(
+      'ALTER TABLE mls_delivery_messages ADD COLUMN client_operation_id TEXT',
+    );
+  }
+  db.exec(`
+  CREATE TABLE IF NOT EXISTS mls_device_credentials (
+    device_id TEXT NOT NULL,
+    signature_public_key TEXT NOT NULL,
+    identity_binding_signature TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (device_id, signature_public_key),
+    FOREIGN KEY (device_id) REFERENCES media_devices(id)
+  );
+
+  INSERT OR IGNORE INTO mls_device_credentials (
+    device_id, signature_public_key, identity_binding_signature, created_at
+  )
+  SELECT device_id, signature_public_key, identity_binding_signature,
+         MIN(created_at)
+  FROM mls_key_packages
+  WHERE signature_public_key IS NOT NULL
+    AND signature_public_key != ''
+    AND identity_binding_signature IS NOT NULL
+    AND identity_binding_signature != ''
+  GROUP BY device_id, signature_public_key, identity_binding_signature;
+
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_mls_delivery_device_operation
+  ON mls_delivery_messages (uploader_device_id, client_operation_id)
+  WHERE client_operation_id IS NOT NULL;
+
+  UPDATE sessions
+  SET expires_at = datetime(created_at, '+30 days')
+  WHERE expires_at IS NULL OR expires_at = '';
+
+  UPDATE sessions
+  SET idle_expires_at = datetime(last_seen_at, '+7 days')
+  WHERE idle_expires_at IS NULL OR idle_expires_at = '';
+
+  UPDATE sessions
+  SET device_name = 'Existing Yappa client'
+  WHERE device_name IS NULL OR device_name = '';
+  `);
 
   db.prepare(`
   UPDATE users
@@ -193,6 +456,12 @@ function runMigrations(db) {
   WHERE yuid_public_key IS NOT NULL AND yuid_public_key != '';
 
   CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions (user_id);
+  CREATE INDEX IF NOT EXISTS idx_sessions_media_device_id
+  ON sessions (media_device_id);
+  CREATE INDEX IF NOT EXISTS idx_media_devices_user_id
+  ON media_devices (user_id);
+  CREATE INDEX IF NOT EXISTS idx_media_devices_active
+  ON media_devices (revoked_at);
   CREATE INDEX IF NOT EXISTS idx_messages_channel_id ON messages (channel_id);
   CREATE INDEX IF NOT EXISTS idx_channels_position ON channels (position);
   CREATE INDEX IF NOT EXISTS idx_attachments_channel_id ON attachments (channel_id);
@@ -201,6 +470,43 @@ function runMigrations(db) {
   CREATE INDEX IF NOT EXISTS idx_bans_user_id ON bans (user_id);
   CREATE INDEX IF NOT EXISTS idx_bans_yuid ON bans (yuid);
   CREATE INDEX IF NOT EXISTS idx_bans_revoked_at ON bans (revoked_at);
+  CREATE INDEX IF NOT EXISTS idx_mls_key_packages_device
+  ON mls_key_packages (device_id, claimed_at, expires_at);
+  CREATE INDEX IF NOT EXISTS idx_mls_device_credentials_device
+  ON mls_device_credentials (device_id);
+  CREATE INDEX IF NOT EXISTS idx_mls_delivery_channel_sequence
+  ON mls_delivery_messages (channel_id, server_sequence);
+  CREATE INDEX IF NOT EXISTS idx_mls_delivery_epoch
+  ON mls_delivery_messages (channel_id, accepted_epoch);
+  CREATE INDEX IF NOT EXISTS idx_mls_delivery_recipient
+  ON mls_delivery_messages (channel_id, recipient_device_id, server_sequence);
+  CREATE INDEX IF NOT EXISTS idx_encrypted_events_channel_sequence
+  ON encrypted_message_events (channel_id, server_sequence);
+  CREATE INDEX IF NOT EXISTS idx_encrypted_attachments_channel
+  ON encrypted_attachments (channel_id);
+  CREATE INDEX IF NOT EXISTS idx_encrypted_attachments_expires
+  ON encrypted_attachments (expires_at);
+
+  CREATE TRIGGER IF NOT EXISTS channels_encryption_mode_insert_guard
+  BEFORE INSERT ON channels
+  WHEN NEW.encryption_mode NOT IN ('legacy', 'e2ee')
+    OR (NEW.encryption_mode = 'legacy' AND NEW.encryption_version != 0)
+    OR (NEW.encryption_mode = 'e2ee' AND NEW.encryption_version < 1)
+  BEGIN
+    SELECT RAISE(ABORT, 'invalid channel encryption mode');
+  END;
+
+  CREATE TRIGGER IF NOT EXISTS channels_encryption_mode_update_guard
+  BEFORE UPDATE OF encryption_mode, encryption_version ON channels
+  WHEN NEW.encryption_mode NOT IN ('legacy', 'e2ee')
+    OR (NEW.encryption_mode = 'legacy' AND NEW.encryption_version != 0)
+    OR (NEW.encryption_mode = 'e2ee' AND NEW.encryption_version < 1)
+    OR (OLD.encryption_mode = 'e2ee' AND NEW.encryption_mode != 'e2ee')
+    OR (OLD.encryption_mode = 'e2ee'
+        AND NEW.encryption_version < OLD.encryption_version)
+  BEGIN
+    SELECT RAISE(ABORT, 'channel encryption downgrade forbidden');
+  END;
   `);
 }
 
@@ -322,15 +628,36 @@ function createDb(dbPath, defaults) {
   const db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
+  const existingVersion = readSchemaVersion(db);
+  if (existingVersion > CURRENT_SCHEMA_VERSION) {
+    db.close();
+    throw unsupportedSchemaVersion(existingVersion);
+  }
 
-  createBaseTables(db);
-  runMigrations(db);
-  ensureServerConfig(db, defaults);
-  ensureServerSettings(db);
-  seedDefaultChannels(db);
-  ensureOwnerAssigned(db);
-
-  return db;
+  try {
+    db.transaction(() => {
+      createBaseTables(db);
+      const transactionVersion = readSchemaVersion(db);
+      if (transactionVersion > CURRENT_SCHEMA_VERSION) {
+        throw unsupportedSchemaVersion(transactionVersion);
+      }
+      if (transactionVersion < CURRENT_SCHEMA_VERSION) {
+        runMigrations(db);
+        db.prepare(`
+          INSERT INTO schema_migrations (version, applied_at)
+          VALUES (?, ?)
+        `).run(CURRENT_SCHEMA_VERSION, nowIso());
+      }
+      ensureServerConfig(db, defaults);
+      ensureServerSettings(db);
+      seedDefaultChannels(db);
+      ensureOwnerAssigned(db);
+    })();
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
+  }
 }
 
 function getServerConfig(db) {
@@ -386,7 +713,8 @@ function updateServerSettings(db, patch) {
 
 function getAllChannels(db) {
   return db.prepare(`
-  SELECT id, name, type, position, created_at
+  SELECT id, name, type, position, glyph, created_at,
+         encryption_mode, encryption_version
   FROM channels
   ORDER BY position ASC, id ASC
   `).all();
@@ -504,8 +832,22 @@ function touchUserLogin(db, userId) {
   db.prepare('UPDATE users SET last_login_at = ? WHERE id = ?').run(nowIso(), userId);
 }
 
-function touchSession(db, token) {
-  db.prepare('UPDATE sessions SET last_seen_at = ? WHERE token = ?').run(nowIso(), token);
+function touchSession(db, token, idleExpiresAt = null) {
+  db.prepare(`
+  UPDATE sessions
+  SET last_seen_at = ?, idle_expires_at = COALESCE(?, idle_expires_at)
+  WHERE token = ?
+  `).run(
+    nowIso(),
+    idleExpiresAt,
+    sessionTokenStorageValue(token),
+  );
+}
+
+function revokeSession(db, token) {
+  return db
+    .prepare('DELETE FROM sessions WHERE token = ?')
+    .run(sessionTokenStorageValue(token));
 }
 
 function getActiveBanByUserId(db, userId) {
@@ -554,8 +896,12 @@ function createBan(db, { userId = null, yuid = null, usernameSnapshot = null, re
   const normalizedYuid = String(yuid || '').trim() || null;
   const normalizedUsername = String(usernameSnapshot || '').trim() || null;
   const normalizedReason = String(reason || '').trim() || null;
-  const normalizedUserId = Number.isInteger(Number(userId)) ? Number(userId) : null;
-  const normalizedCreatedBy = Number.isInteger(Number(createdByUserId)) ? Number(createdByUserId) : null;
+  const normalizedUserId =
+    userId != null && Number.isInteger(Number(userId)) ? Number(userId) : null;
+  const normalizedCreatedBy =
+    createdByUserId != null && Number.isInteger(Number(createdByUserId))
+      ? Number(createdByUserId)
+      : null;
 
   const existing =
     (normalizedUserId != null ? getActiveBanByUserId(db, normalizedUserId) : null) ||
@@ -717,6 +1063,7 @@ function markAttachmentDeleted(db, attachmentId, deletedAt) {
 }
 
 module.exports = {
+  CURRENT_SCHEMA_VERSION,
   bindUserYuid,
   createAttachment,
   createDb,
@@ -734,6 +1081,8 @@ module.exports = {
   markAttachmentDeleted,
   nowIso,
   randomId,
+  revokeSession,
+  sessionTokenStorageValue,
   touchSession,
   touchUserLogin,
   touchUserYuid,

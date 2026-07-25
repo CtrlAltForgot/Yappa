@@ -21,7 +21,20 @@ class ChannelSidebar extends StatefulWidget {
   final Future<void> Function(String channelId)? onVoiceDeckDoubleTap;
   final String? currentUserId;
   final double Function(String userId)? voiceMemberVolumeForUserId;
-  final Future<void> Function(String userId, double volume)? onSetVoiceMemberVolume;
+  final Future<void> Function(String userId, double volume)?
+  onSetVoiceMemberVolume;
+  final Future<void> Function({
+    required String channelId,
+    required String name,
+    String? glyph,
+  })?
+  onUpdateChannel;
+  final Future<void> Function({
+    required String name,
+    required ChannelType type,
+  })?
+  onCreateChannel;
+  final Future<void> Function(String channelId)? onDeleteChannel;
   final Widget? bottomDock;
 
   const ChannelSidebar({
@@ -38,6 +51,9 @@ class ChannelSidebar extends StatefulWidget {
     this.currentUserId,
     this.voiceMemberVolumeForUserId,
     this.onSetVoiceMemberVolume,
+    this.onUpdateChannel,
+    this.onCreateChannel,
+    this.onDeleteChannel,
     this.bottomDock,
   });
 
@@ -51,8 +67,6 @@ class _ChannelSidebarState extends State<ChannelSidebar> {
   String? _lastTappedVoiceDeckId;
   DateTime? _lastTappedVoiceDeckAt;
 
-  final Map<String, String> _channelGlyphById = <String, String>{};
-  final Map<String, String> _channelNameOverrideById = <String, String>{};
   final Set<String> _mutedChannelIds = <String>{};
   final Map<String, _ChannelNotificationSettings> _notificationSettingsById =
       <String, _ChannelNotificationSettings>{};
@@ -78,8 +92,9 @@ class _ChannelSidebarState extends State<ChannelSidebar> {
   }
 
   void _syncTicker() {
-    final shouldTick =
-        widget.voiceDeckStates.any((deck) => deck.activeSince != null);
+    final shouldTick = widget.voiceDeckStates.any(
+      (deck) => deck.activeSince != null,
+    );
 
     if (shouldTick && _ticker == null) {
       _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -135,15 +150,16 @@ class _ChannelSidebarState extends State<ChannelSidebar> {
   }
 
   List<Member> _membersForVoiceDeck(String channelId) {
-    final members = widget.members
-        .where((member) => member.voiceChannelId == channelId)
-        .toList()
-      ..sort((a, b) {
-        if (a.isOwner != b.isOwner) {
-          return a.isOwner ? -1 : 1;
-        }
-        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-      });
+    final members =
+        widget.members
+            .where((member) => member.voiceChannelId == channelId)
+            .toList()
+          ..sort((a, b) {
+            if (a.isOwner != b.isOwner) {
+              return a.isOwner ? -1 : 1;
+            }
+            return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+          });
     return members;
   }
 
@@ -170,13 +186,7 @@ class _ChannelSidebarState extends State<ChannelSidebar> {
     return '$mm:$ss';
   }
 
-  String _channelLabel(ChatChannel channel) {
-    final override = _channelNameOverrideById[channel.id]?.trim();
-    if (override != null && override.isNotEmpty) {
-      return override;
-    }
-    return channel.name;
-  }
+  String _channelLabel(ChatChannel channel) => channel.name;
 
   bool _isMuted(ChatChannel channel) => _mutedChannelIds.contains(channel.id);
 
@@ -225,10 +235,7 @@ class _ChannelSidebarState extends State<ChannelSidebar> {
           ),
         ),
         const PopupMenuDivider(),
-        const PopupMenuItem<double>(
-          value: 0.0,
-          child: Text('Mute • 0%'),
-        ),
+        const PopupMenuItem<double>(value: 0.0, child: Text('Mute • 0%')),
         const PopupMenuItem<double>(
           value: 0.25,
           child: Text('Very quiet • 25%'),
@@ -241,14 +248,8 @@ class _ChannelSidebarState extends State<ChannelSidebar> {
           value: 0.75,
           child: Text('Lower volume • 75%'),
         ),
-        const PopupMenuItem<double>(
-          value: 1.0,
-          child: Text('Normal • 100%'),
-        ),
-        const PopupMenuItem<double>(
-          value: 1.25,
-          child: Text('Boost • 125%'),
-        ),
+        const PopupMenuItem<double>(value: 1.0, child: Text('Normal • 100%')),
+        const PopupMenuItem<double>(value: 1.25, child: Text('Boost • 125%')),
         const PopupMenuItem<double>(
           value: 1.5,
           child: Text('Boost more • 150%'),
@@ -302,10 +303,7 @@ class _ChannelSidebarState extends State<ChannelSidebar> {
       context: context,
       color: NewChatColors.panel,
       position: RelativeRect.fromRect(
-        Rect.fromPoints(
-          details.globalPosition,
-          details.globalPosition,
-        ),
+        Rect.fromPoints(details.globalPosition, details.globalPosition),
         Offset.zero & overlay.size,
       ),
       items: const [
@@ -322,7 +320,7 @@ class _ChannelSidebarState extends State<ChannelSidebar> {
 
     switch (selected) {
       case _BlankAreaAction.createChannel:
-        _showCreatePlaceholderDialog();
+        _showCreateChannelDialog();
         break;
       case _BlankAreaAction.createCategory:
         _showInfoSnack('Channel categories are menu-only for now.');
@@ -385,34 +383,193 @@ class _ChannelSidebarState extends State<ChannelSidebar> {
         _showEditChannelDialog(channel);
         break;
       case _ChannelAction.duplicate:
-        _showInfoSnack('Duplicate Channel is menu-only for now.');
+        _duplicateChannel(channel);
         break;
       case _ChannelAction.delete:
-        _showInfoSnack('Delete Channel is menu-only for now.');
+        _confirmDeleteChannel(channel);
         break;
       case null:
         break;
     }
   }
 
-  Future<void> _showCreatePlaceholderDialog() async {
+  Future<void> _showCreateChannelDialog() async {
+    final controller = TextEditingController();
+    var channelType = ChannelType.text;
+    var isSaving = false;
+
     await showDialog<void>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setStateDialog) => AlertDialog(
+          backgroundColor: NewChatColors.panel,
+          title: const Text('Create Channel'),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: controller,
+                  autofocus: true,
+                  decoration: const InputDecoration(labelText: 'Channel name'),
+                ),
+                const SizedBox(height: 16),
+                SegmentedButton<ChannelType>(
+                  segments: const [
+                    ButtonSegment(
+                      value: ChannelType.text,
+                      label: Text('Text'),
+                      icon: Icon(Icons.tag_rounded),
+                    ),
+                    ButtonSegment(
+                      value: ChannelType.voice,
+                      label: Text('Voice'),
+                      icon: Icon(Icons.graphic_eq_rounded),
+                    ),
+                  ],
+                  selected: {channelType},
+                  onSelectionChanged: isSaving
+                      ? null
+                      : (selection) => setStateDialog(() {
+                          channelType = selection.first;
+                        }),
+                ),
+                if (channelType == ChannelType.text) ...[
+                  const SizedBox(height: 14),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.verified_user_rounded,
+                        size: 18,
+                        color: NewChatColors.success,
+                      ),
+                      const SizedBox(width: 9),
+                      Expanded(
+                        child: Text(
+                          'New text feeds use end-to-end encryption. '
+                          'This cannot be downgraded later.',
+                          style: TextStyle(
+                            color: NewChatColors.textMuted,
+                            height: 1.35,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: isSaving ? null : () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: isSaving
+                  ? null
+                  : () async {
+                      final callback = widget.onCreateChannel;
+                      final name = controller.text.trim();
+                      if (callback == null) {
+                        _showInfoSnack('Channel creation is unavailable.');
+                        return;
+                      }
+                      if (name.length < 2) {
+                        _showInfoSnack(
+                          'Channel name must be at least 2 characters.',
+                        );
+                        return;
+                      }
+                      setStateDialog(() => isSaving = true);
+                      try {
+                        await callback(name: name, type: channelType);
+                        if (!mounted || !context.mounted) return;
+                        Navigator.of(context).pop();
+                        _showInfoSnack(
+                          channelType == ChannelType.text
+                              ? 'Encrypted text feed created.'
+                              : 'Voice deck created.',
+                        );
+                      } catch (error) {
+                        if (!mounted) return;
+                        setStateDialog(() => isSaving = false);
+                        _showInfoSnack(
+                          error.toString().replaceFirst('Exception: ', ''),
+                        );
+                      }
+                    },
+              child: isSaving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Create'),
+            ),
+          ],
+        ),
+      ),
+    );
+    controller.dispose();
+  }
+
+  Future<void> _duplicateChannel(ChatChannel channel) async {
+    final callback = widget.onCreateChannel;
+    if (callback == null) {
+      _showInfoSnack('Channel duplication is unavailable.');
+      return;
+    }
+
+    try {
+      await callback(name: '${channel.name} copy', type: channel.type);
+      if (!mounted) return;
+      _showInfoSnack('Channel duplicated.');
+    } catch (error) {
+      if (!mounted) return;
+      _showInfoSnack(error.toString().replaceFirst('Exception: ', ''));
+    }
+  }
+
+  Future<void> _confirmDeleteChannel(ChatChannel channel) async {
+    final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: NewChatColors.panel,
-        title: const Text('Create Channel'),
-        content: Text(
-          'This menu is in place. Live channel creation wiring can be added next.',
-          style: TextStyle(color: NewChatColors.textMuted),
+        title: Text('Delete ${channel.name}?'),
+        content: const Text(
+          'This permanently deletes the channel, its messages, and its uploaded attachments.',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Close'),
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
           ),
         ],
       ),
     );
+
+    if (confirmed != true || !mounted) return;
+    final callback = widget.onDeleteChannel;
+    if (callback == null) {
+      _showInfoSnack('Channel deletion is unavailable.');
+      return;
+    }
+
+    try {
+      await callback(channel.id);
+      if (!mounted) return;
+      _showInfoSnack('Channel deleted.');
+    } catch (error) {
+      if (!mounted) return;
+      _showInfoSnack(error.toString().replaceFirst('Exception: ', ''));
+    }
   }
 
   Future<void> _showMuteDialog(ChatChannel channel) async {
@@ -567,7 +724,8 @@ class _ChannelSidebarState extends State<ChannelSidebar> {
 
   Future<void> _showEditChannelDialog(ChatChannel channel) async {
     final controller = TextEditingController(text: _channelLabel(channel));
-    var selectedGlyph = _channelGlyphById[channel.id];
+    var selectedGlyph = channel.glyph;
+    var isSaving = false;
 
     await showDialog<void>(
       context: context,
@@ -625,7 +783,7 @@ class _ChannelSidebarState extends State<ChannelSidebar> {
                               initialValue: selectedGlyph,
                               channelType: channel.type,
                             );
-                            if (!mounted) return;
+                            if (!mounted || !context.mounted) return;
                             if (picked != null) {
                               setStateDialog(() {
                                 selectedGlyph = picked;
@@ -657,22 +815,56 @@ class _ChannelSidebarState extends State<ChannelSidebar> {
                   child: const Text('Cancel'),
                 ),
                 FilledButton(
-                  onPressed: () {
-                    setState(() {
-                      _channelNameOverrideById[channel.id] =
-                          controller.text.trim().isEmpty
-                              ? channel.name
-                              : controller.text.trim();
+                  onPressed: isSaving
+                      ? null
+                      : () async {
+                          final callback = widget.onUpdateChannel;
+                          if (callback == null) {
+                            _showInfoSnack(
+                              'Channel editing is not connected yet.',
+                            );
+                            return;
+                          }
 
-                      if (selectedGlyph == null || selectedGlyph!.isEmpty) {
-                        _channelGlyphById.remove(channel.id);
-                      } else {
-                        _channelGlyphById[channel.id] = selectedGlyph!;
-                      }
-                    });
-                    Navigator.of(context).pop();
-                  },
-                  child: const Text('Save'),
+                          final trimmedName = controller.text.trim();
+                          final normalizedName = trimmedName.isEmpty
+                              ? channel.name
+                              : trimmedName;
+                          final normalizedGlyph =
+                              (selectedGlyph == null || selectedGlyph!.isEmpty)
+                              ? null
+                              : selectedGlyph;
+
+                          setStateDialog(() {
+                            isSaving = true;
+                          });
+
+                          try {
+                            await callback(
+                              channelId: channel.id,
+                              name: normalizedName,
+                              glyph: normalizedGlyph,
+                            );
+                            if (!mounted || !context.mounted) return;
+                            Navigator.of(context).pop();
+                            _showInfoSnack('Channel updated.');
+                          } catch (error) {
+                            if (!mounted) return;
+                            setStateDialog(() {
+                              isSaving = false;
+                            });
+                            _showInfoSnack(
+                              error.toString().replaceFirst('Exception: ', ''),
+                            );
+                          }
+                        },
+                  child: isSaving
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Save'),
                 ),
               ],
             );
@@ -687,7 +879,8 @@ class _ChannelSidebarState extends State<ChannelSidebar> {
     required ChannelType channelType,
     String? initialValue,
   }) async {
-    _GlyphTab activeTab = initialValue != null && initialValue.startsWith('emoji:')
+    _GlyphTab activeTab =
+        initialValue != null && initialValue.startsWith('emoji:')
         ? _GlyphTab.emojis
         : _GlyphTab.icons;
     String? pendingValue = initialValue;
@@ -759,11 +952,11 @@ class _ChannelSidebarState extends State<ChannelSidebar> {
                               ? GridView.builder(
                                   gridDelegate:
                                       const SliverGridDelegateWithFixedCrossAxisCount(
-                                    crossAxisCount: 5,
-                                    mainAxisSpacing: 10,
-                                    crossAxisSpacing: 10,
-                                    childAspectRatio: 1.2,
-                                  ),
+                                        crossAxisCount: 5,
+                                        mainAxisSpacing: 10,
+                                        crossAxisSpacing: 10,
+                                        childAspectRatio: 1.2,
+                                      ),
                                   itemCount: iconOptions.length,
                                   itemBuilder: (context, index) {
                                     final option = iconOptions[index];
@@ -787,11 +980,11 @@ class _ChannelSidebarState extends State<ChannelSidebar> {
                               : GridView.builder(
                                   gridDelegate:
                                       const SliverGridDelegateWithFixedCrossAxisCount(
-                                    crossAxisCount: 7,
-                                    mainAxisSpacing: 10,
-                                    crossAxisSpacing: 10,
-                                    childAspectRatio: 1.08,
-                                  ),
+                                        crossAxisCount: 7,
+                                        mainAxisSpacing: 10,
+                                        crossAxisSpacing: 10,
+                                        childAspectRatio: 1.08,
+                                      ),
                                   itemCount: _emojiOptions.length,
                                   itemBuilder: (context, index) {
                                     final emoji = _emojiOptions[index];
@@ -805,7 +998,7 @@ class _ChannelSidebarState extends State<ChannelSidebar> {
                                       child: Center(
                                         child: Text(
                                           emoji,
-                                          style: const TextStyle(fontSize: 22),
+                                          style: yappaEmojiTextStyle(22),
                                         ),
                                       ),
                                     );
@@ -857,10 +1050,7 @@ class _ChannelSidebarState extends State<ChannelSidebar> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _ServerHeader(
-            server: widget.server,
-            bannerUrl: bannerUrl,
-          ),
+          _ServerHeader(server: widget.server, bannerUrl: bannerUrl),
           Expanded(
             child: Column(
               children: [
@@ -876,7 +1066,7 @@ class _ChannelSidebarState extends State<ChannelSidebar> {
                                 _ChannelTile(
                                   channel: channel,
                                   displayName: _channelLabel(channel),
-                                  glyph: _channelGlyphById[channel.id],
+                                  glyph: channel.glyph,
                                   selected:
                                       channel.id == widget.selectedChannelId,
                                   muted: _isMuted(channel),
@@ -895,7 +1085,7 @@ class _ChannelSidebarState extends State<ChannelSidebar> {
                                 _VoiceDeckTile(
                                   channel: channel,
                                   displayName: _channelLabel(channel),
-                                  glyph: _channelGlyphById[channel.id],
+                                  glyph: channel.glyph,
                                   selected:
                                       channel.id == widget.selectedChannelId,
                                   muted: _isMuted(channel),
@@ -909,8 +1099,9 @@ class _ChannelSidebarState extends State<ChannelSidebar> {
                                   state: _voiceStateForChannel(channel.id),
                                   members: _membersForVoiceDeck(channel.id),
                                   elapsedLabel: _formatElapsed(
-                                    _voiceStateForChannel(channel.id)
-                                        ?.activeSince,
+                                    _voiceStateForChannel(
+                                      channel.id,
+                                    )?.activeSince,
                                   ),
                                   currentUserId: widget.currentUserId,
                                   voiceMemberVolumeForUserId:
@@ -965,9 +1156,7 @@ class _ChannelSidebarState extends State<ChannelSidebar> {
 class _ChannelListAdminContextRegion extends StatelessWidget {
   final ValueChanged<TapDownDetails> onSecondaryTapDown;
 
-  const _ChannelListAdminContextRegion({
-    required this.onSecondaryTapDown,
-  });
+  const _ChannelListAdminContextRegion({required this.onSecondaryTapDown});
 
   @override
   Widget build(BuildContext context) {
@@ -986,10 +1175,7 @@ class _ServerHeader extends StatelessWidget {
   final ChatServer server;
   final String? bannerUrl;
 
-  const _ServerHeader({
-    required this.server,
-    required this.bannerUrl,
-  });
+  const _ServerHeader({required this.server, required this.bannerUrl});
 
   @override
   Widget build(BuildContext context) {
@@ -1000,9 +1186,7 @@ class _ServerHeader extends StatelessWidget {
       height: 106,
       child: Container(
         decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(color: NewChatColors.outline),
-          ),
+          border: Border(bottom: BorderSide(color: NewChatColors.outline)),
         ),
         child: Stack(
           fit: StackFit.expand,
@@ -1026,10 +1210,7 @@ class _ServerHeader extends StatelessWidget {
                           Color(0x9A090B0E),
                           Color(0xFF0E1013),
                         ]
-                      : [
-                          NewChatColors.panelAlt,
-                          NewChatColors.panel,
-                        ],
+                      : [NewChatColors.panelAlt, NewChatColors.panel],
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                 ),
@@ -1170,8 +1351,9 @@ class _ChannelTileState extends State<_ChannelTile> {
                     child: Text(
                       widget.displayName,
                       style: TextStyle(
-                        fontWeight:
-                            widget.selected ? FontWeight.w800 : FontWeight.w600,
+                        fontWeight: widget.selected
+                            ? FontWeight.w800
+                            : FontWeight.w600,
                         color: widget.selected
                             ? Colors.white
                             : NewChatColors.textMuted,
@@ -1208,7 +1390,7 @@ class _VoiceDeckTile extends StatefulWidget {
   final String? currentUserId;
   final double Function(String userId)? voiceMemberVolumeForUserId;
   final Future<void> Function(Member member, TapDownDetails details)?
-      onVoiceMemberSecondaryTapDown;
+  onVoiceMemberSecondaryTapDown;
   final String? Function(String? rawUrl) resolveAvatarUrl;
 
   const _VoiceDeckTile({
@@ -1347,12 +1529,13 @@ class _VoiceDeckTileState extends State<_VoiceDeckTile> {
                               builder: (context) {
                                 final memberVolume =
                                     widget.voiceMemberVolumeForUserId?.call(
-                                          member.id,
-                                        ) ??
-                                        1.0;
+                                      member.id,
+                                    ) ??
+                                    1.0;
                                 final canAdjustVolume =
                                     member.id != widget.currentUserId &&
-                                    widget.onVoiceMemberSecondaryTapDown != null;
+                                    widget.onVoiceMemberSecondaryTapDown !=
+                                        null;
 
                                 return MouseRegion(
                                   cursor: canAdjustVolume
@@ -1362,10 +1545,11 @@ class _VoiceDeckTileState extends State<_VoiceDeckTile> {
                                     behavior: HitTestBehavior.opaque,
                                     onSecondaryTapDown: canAdjustVolume
                                         ? (details) =>
-                                            widget.onVoiceMemberSecondaryTapDown!(
-                                              member,
-                                              details,
-                                            )
+                                              widget
+                                                  .onVoiceMemberSecondaryTapDown!(
+                                                member,
+                                                details,
+                                              )
                                         : null,
                                     child: Container(
                                       margin: const EdgeInsets.only(top: 6),
@@ -1389,21 +1573,24 @@ class _VoiceDeckTileState extends State<_VoiceDeckTile> {
                                                 width: 26,
                                                 height: 26,
                                                 decoration: BoxDecoration(
-                                                  color: const Color(0xFF2D3547),
+                                                  color: const Color(
+                                                    0xFF2D3547,
+                                                  ),
                                                   borderRadius:
                                                       BorderRadius.circular(9),
                                                 ),
                                                 clipBehavior: Clip.antiAlias,
                                                 alignment: Alignment.center,
                                                 child: AvatarImage(
-                                                  source: widget.resolveAvatarUrl(
-                                                    member.avatarUrl,
-                                                  ),
+                                                  source: widget
+                                                      .resolveAvatarUrl(
+                                                        member.avatarUrl,
+                                                      ),
                                                   fallbackInitial:
                                                       member.name.isNotEmpty
-                                                          ? member.name[0]
-                                                              .toUpperCase()
-                                                          : '?',
+                                                      ? member.name[0]
+                                                            .toUpperCase()
+                                                      : '?',
                                                   size: 26,
                                                   animate: true,
                                                 ),
@@ -1416,12 +1603,13 @@ class _VoiceDeckTileState extends State<_VoiceDeckTile> {
                                                     angle: -0.42,
                                                     alignment:
                                                         Alignment.bottomRight,
-                                                    child: const Text(
+                                                    child: Text(
                                                       '👑',
-                                                      style: TextStyle(
-                                                        fontSize: 10,
-                                                        height: 1,
-                                                      ),
+                                                      style:
+                                                          yappaEmojiTextStyle(
+                                                            10,
+                                                            height: 1,
+                                                          ),
                                                     ),
                                                   ),
                                                 ),
@@ -1437,12 +1625,14 @@ class _VoiceDeckTileState extends State<_VoiceDeckTile> {
                                             ),
                                           ),
                                           if (canAdjustVolume &&
-                                              (memberVolume - 1.0).abs() >= 0.001)
+                                              (memberVolume - 1.0).abs() >=
+                                                  0.001)
                                             Container(
-                                              padding: const EdgeInsets.symmetric(
-                                                horizontal: 8,
-                                                vertical: 4,
-                                              ),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 8,
+                                                    vertical: 4,
+                                                  ),
                                               decoration: BoxDecoration(
                                                 color: const Color(0xFF18202E),
                                                 borderRadius:
@@ -1454,7 +1644,8 @@ class _VoiceDeckTileState extends State<_VoiceDeckTile> {
                                               child: Text(
                                                 '${(memberVolume * 100).round()}%',
                                                 style: TextStyle(
-                                                  color: NewChatColors.textMuted,
+                                                  color:
+                                                      NewChatColors.textMuted,
                                                   fontSize: 11,
                                                   fontWeight: FontWeight.w700,
                                                 ),
@@ -1502,10 +1693,7 @@ class _ChannelGlyphPreview extends StatelessWidget {
         width: 18,
         height: 18,
         child: Center(
-          child: Text(
-            parsed.emoji,
-            style: const TextStyle(fontSize: 16, height: 1),
-          ),
+          child: Text(parsed.emoji, style: yappaEmojiTextStyle(16, height: 1)),
         ),
       );
     }
@@ -1545,7 +1733,9 @@ class _ChoiceChipButton extends StatelessWidget {
             color: selected ? const Color(0xFF23151B) : const Color(0xFF18202E),
             borderRadius: BorderRadius.circular(999),
             border: Border.all(
-              color: selected ? NewChatColors.accentGlow : NewChatColors.outline,
+              color: selected
+                  ? NewChatColors.accentGlow
+                  : NewChatColors.outline,
             ),
           ),
           child: Text(
@@ -1584,7 +1774,9 @@ class _GlyphGridButton extends StatelessWidget {
             color: selected ? const Color(0xFF23151B) : const Color(0xFF18202E),
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: selected ? NewChatColors.accentGlow : NewChatColors.outline,
+              color: selected
+                  ? NewChatColors.accentGlow
+                  : NewChatColors.outline,
             ),
           ),
           child: child,
@@ -1603,10 +1795,7 @@ class _ChannelNotificationSettings {
     this.everyone = true,
   });
 
-  _ChannelNotificationSettings copyWith({
-    bool? mentions,
-    bool? everyone,
-  }) {
+  _ChannelNotificationSettings copyWith({bool? mentions, bool? everyone}) {
     return _ChannelNotificationSettings(
       mentions: mentions ?? this.mentions,
       everyone: everyone ?? this.everyone,
@@ -1614,18 +1803,9 @@ class _ChannelNotificationSettings {
   }
 }
 
-enum _BlankAreaAction {
-  createChannel,
-  createCategory,
-}
+enum _BlankAreaAction { createChannel, createCategory }
 
-enum _ChannelAction {
-  mute,
-  notifications,
-  edit,
-  duplicate,
-  delete,
-}
+enum _ChannelAction { mute, notifications, edit, duplicate, delete }
 
 enum _GlyphTab { icons, emojis }
 
@@ -1766,13 +1946,112 @@ const Map<String, IconData> _iconLookup = {
 };
 
 const List<String> _emojiOptions = [
-  '😀', '😁', '😂', '🤣', '😅', '😊', '😍', '🥳', '😎', '🤖', '👾', '🔥',
-  '✨', '💫', '⭐', '🌙', '☀️', '⚡', '❄️', '🌈', '🎉', '🎊', '🎈', '🎵',
-  '🎮', '🕹️', '🎬', '🎨', '🧠', '💡', '📢', '📸', '💬', '🛠️', '📌', '📎',
-  '📚', '📅', '🧪', '🧰', '🛰️', '🚀', '🛡️', '🏆', '👑', '❤️', '🖤', '💙',
-  '💚', '💜', '💛', '🧡', '🩷', '🐍', '🐉', '🦊', '🐺', '🐻', '🐸', '🐙',
-  '🦈', '🦇', '🕷️', '🌹', '🍀', '🌵', '🌊', '🏴', '🎯', '🔒', '🔔', '🔕',
-  '💣', '☕', '🍕', '🍜', '🍓', '🍄', '🌶️', '🧃', '🧊', '💀', '👻', '😈',
-  '🤍', '🤝', '👏', '🙌', '🤌', '👌', '🫡', '🫶', '👍', '👎', '🫠', '🥶',
-  '😴', '🤯', '🥲', '🫣', '😤', '🤠', '🛸', '🪐', '🌌', '🎤', '📻', '🎻',
+  '😀',
+  '😁',
+  '😂',
+  '🤣',
+  '😅',
+  '😊',
+  '😍',
+  '🥳',
+  '😎',
+  '🤖',
+  '👾',
+  '🔥',
+  '✨',
+  '💫',
+  '⭐',
+  '🌙',
+  '☀️',
+  '⚡',
+  '❄️',
+  '🌈',
+  '🎉',
+  '🎊',
+  '🎈',
+  '🎵',
+  '🎮',
+  '🕹️',
+  '🎬',
+  '🎨',
+  '🧠',
+  '💡',
+  '📢',
+  '📸',
+  '💬',
+  '🛠️',
+  '📌',
+  '📎',
+  '📚',
+  '📅',
+  '🧪',
+  '🧰',
+  '🛰️',
+  '🚀',
+  '🛡️',
+  '🏆',
+  '👑',
+  '❤️',
+  '🖤',
+  '💙',
+  '💚',
+  '💜',
+  '💛',
+  '🧡',
+  '🩷',
+  '🐍',
+  '🐉',
+  '🦊',
+  '🐺',
+  '🐻',
+  '🐸',
+  '🐙',
+  '🦈',
+  '🦇',
+  '🕷️',
+  '🌹',
+  '🍀',
+  '🌵',
+  '🌊',
+  '🏴',
+  '🎯',
+  '🔒',
+  '🔔',
+  '🔕',
+  '💣',
+  '☕',
+  '🍕',
+  '🍜',
+  '🍓',
+  '🍄',
+  '🌶️',
+  '🧃',
+  '🧊',
+  '💀',
+  '👻',
+  '😈',
+  '🤍',
+  '🤝',
+  '👏',
+  '🙌',
+  '🤌',
+  '👌',
+  '🫡',
+  '🫶',
+  '👍',
+  '👎',
+  '🫠',
+  '🥶',
+  '😴',
+  '🤯',
+  '🥲',
+  '🫣',
+  '😤',
+  '🤠',
+  '🛸',
+  '🪐',
+  '🌌',
+  '🎤',
+  '📻',
+  '🎻',
 ];

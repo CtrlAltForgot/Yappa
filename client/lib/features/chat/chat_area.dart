@@ -9,6 +9,8 @@ import 'package:livekit_client/livekit_client.dart' as livekit;
 
 import '../../app/theme.dart';
 import '../../data/audio_preferences.dart';
+import '../../data/media_e2ee_coordinator.dart';
+import '../../data/mls_channel_runtime.dart';
 import '../../data/voice_transport_service.dart';
 import '../../models/channel_model.dart';
 import '../../models/member_model.dart';
@@ -24,12 +26,22 @@ class ChatArea extends StatefulWidget {
   final List<ChatMessage> messages;
   final ValueChanged<String> onSend;
   final Future<void> Function(String content, List<String> attachmentIds)?
-      onSendWithAttachments;
+  onSendWithAttachments;
   final Future<ChatAttachment> Function(File file)? onUploadAttachment;
+  final Future<void> Function(List<File> files, String content)?
+  onSendEncryptedAttachment;
+  final Future<void> Function(ChatAttachment attachment)?
+  onDownloadEncryptedAttachment;
+  final Future<void> Function(ChatAttachment attachment, String outputPath)?
+  onPreviewEncryptedAttachment;
+  final Future<void> Function(ChatMessage message, String emoji)?
+  onToggleEncryptedReaction;
   final Future<LinkPreview?> Function(String url)? onLoadLinkPreview;
-  final Future<void> Function(ChatMessage message, String content)? onEditMessage;
+  final Future<void> Function(ChatMessage message, String content)?
+  onEditMessage;
   final Future<void> Function(ChatMessage message)? onDeleteMessage;
   final bool canDeleteAnyMessage;
+  final MlsChannelStartup? textE2eeStartup;
 
   final List<Member> members;
   final List<Member> voiceMembers;
@@ -58,9 +70,11 @@ class ChatArea extends StatefulWidget {
   final String? voiceTransportChannelId;
   final String? voiceTransportError;
   final Map<String, VoiceTransportPeerState> voiceTransportPeers;
+  final MediaE2eeStatus mediaE2eeStatus;
   final String? currentUserId;
   final double Function(String userId)? voiceMemberVolumeForUserId;
-  final Future<void> Function(String userId, double volume)? onSetVoiceMemberVolume;
+  final Future<void> Function(String userId, double volume)?
+  onSetVoiceMemberVolume;
   final livekit.VideoTrack? localCameraTrack;
   final livekit.VideoTrack? localScreenShareTrack;
   final Map<String, livekit.VideoTrack> remoteCameraTracks;
@@ -81,10 +95,15 @@ class ChatArea extends StatefulWidget {
     required this.onSend,
     this.onSendWithAttachments,
     this.onUploadAttachment,
+    this.onSendEncryptedAttachment,
+    this.onDownloadEncryptedAttachment,
+    this.onPreviewEncryptedAttachment,
+    this.onToggleEncryptedReaction,
     this.onLoadLinkPreview,
     this.onEditMessage,
     this.onDeleteMessage,
     this.canDeleteAnyMessage = false,
+    this.textE2eeStartup,
     this.members = const [],
     this.voiceMembers = const [],
     this.voiceDeckState,
@@ -109,6 +128,7 @@ class ChatArea extends StatefulWidget {
     this.voiceTransportChannelId,
     this.voiceTransportError,
     this.voiceTransportPeers = const {},
+    this.mediaE2eeStatus = MediaE2eeStatus.idle,
     this.currentUserId,
     this.voiceMemberVolumeForUserId,
     this.onSetVoiceMemberVolume,
@@ -127,6 +147,49 @@ class ChatArea extends StatefulWidget {
 
   @override
   State<ChatArea> createState() => _ChatAreaState();
+}
+
+class _EncryptedTextLifecycleNotice extends StatelessWidget {
+  final MlsChannelStartup? startup;
+
+  const _EncryptedTextLifecycleNotice({required this.startup});
+
+  @override
+  Widget build(BuildContext context) {
+    final message = switch (startup?.readiness) {
+      MlsChannelReadiness.waitingForWelcome =>
+        'Encrypted messaging is waiting for this device to be added.',
+      MlsChannelReadiness.waitingForMembership =>
+        'Encrypted messaging is waiting for all enrolled devices.',
+      MlsChannelReadiness.ready =>
+        'End-to-end encrypted messaging is synchronized for this device.',
+      null => 'Preparing encrypted messaging…',
+    };
+    return Container(
+      margin: const EdgeInsets.fromLTRB(14, 8, 14, 14),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+      decoration: BoxDecoration(
+        color: const Color(0xFF17211E),
+        border: Border.all(color: const Color(0xFF31584C)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.lock_rounded, color: Color(0xFF8DD8BC), size: 19),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(
+                color: Color(0xFFD5EDE4),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _ChatAreaState extends State<ChatArea> {
@@ -151,6 +214,7 @@ class _ChatAreaState extends State<ChatArea> {
 
   bool get _canAttach =>
       widget.channel.type == ChannelType.text &&
+      widget.channel.allowsPlaintextMessaging &&
       widget.onUploadAttachment != null;
 
   bool get _isVoiceDeck => widget.channel.type == ChannelType.voice;
@@ -247,7 +311,7 @@ class _ChatAreaState extends State<ChatArea> {
     }
 
     final position = _messageScrollController.position;
-    return (position.maxScrollExtent - position.pixels) <= 36;
+    return (position.pixels - position.minScrollExtent) <= 36;
   }
 
   void _handleMessageScroll() {
@@ -271,7 +335,7 @@ class _ChatAreaState extends State<ChatArea> {
     }
 
     final position = _messageScrollController.position;
-    final target = position.maxScrollExtent;
+    final target = position.minScrollExtent;
 
     if (jump) {
       _messageScrollController.jumpTo(target);
@@ -297,7 +361,7 @@ class _ChatAreaState extends State<ChatArea> {
     }
 
     final position = _messageScrollController.position;
-    final target = position.maxScrollExtent;
+    final target = position.minScrollExtent;
     final distance = target - position.pixels;
 
     if (distance.abs() > 1) {
@@ -344,7 +408,8 @@ class _ChatAreaState extends State<ChatArea> {
   }
 
   void _beginEditingMessage(ChatMessage message) {
-    if (message.authorId != widget.currentUserId || widget.onEditMessage == null) {
+    if (message.authorId != widget.currentUserId ||
+        widget.onEditMessage == null) {
       return;
     }
 
@@ -378,7 +443,8 @@ class _ChatAreaState extends State<ChatArea> {
   }
 
   Future<void> _handleDeleteMessage(ChatMessage message) async {
-    final confirmed = await showDialog<bool>(
+    final confirmed =
+        await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
             backgroundColor: NewChatColors.panel,
@@ -469,7 +535,8 @@ class _ChatAreaState extends State<ChatArea> {
 
     bool hasLiveScreenShare(Member member) {
       if (member.id == widget.currentUserId) {
-        return widget.screenShareEnabled && widget.localScreenShareTrack != null;
+        return widget.screenShareEnabled &&
+            widget.localScreenShareTrack != null;
       }
       return member.voiceState.screenShareEnabled &&
           widget.remoteScreenShareTracks.containsKey(member.id);
@@ -483,9 +550,9 @@ class _ChatAreaState extends State<ChatArea> {
     }
 
     final sharingMember = widget.voiceMembers.cast<Member?>().firstWhere(
-          (member) => member != null && hasLiveScreenShare(member),
-          orElse: () => null,
-        );
+      (member) => member != null && hasLiveScreenShare(member),
+      orElse: () => null,
+    );
 
     if (sharingMember != null) {
       _focusedVoiceMemberId = sharingMember.id;
@@ -493,9 +560,9 @@ class _ChatAreaState extends State<ChatArea> {
     }
 
     final cameraMember = widget.voiceMembers.cast<Member?>().firstWhere(
-          (member) => member != null && hasLiveCamera(member),
-          orElse: () => null,
-        );
+      (member) => member != null && hasLiveCamera(member),
+      orElse: () => null,
+    );
 
     if (cameraMember != null && _focusedVoiceMemberId == null) {
       _focusedVoiceMemberId = cameraMember.id;
@@ -503,9 +570,9 @@ class _ChatAreaState extends State<ChatArea> {
     }
 
     final speakingMember = widget.voiceMembers.cast<Member?>().firstWhere(
-          (member) => member?.voiceState.speaking == true,
-          orElse: () => null,
-        );
+      (member) => member?.voiceState.speaking == true,
+      orElse: () => null,
+    );
 
     if (speakingMember != null && _focusedVoiceMemberId == null) {
       _focusedVoiceMemberId = speakingMember.id;
@@ -789,18 +856,17 @@ class _ChatAreaState extends State<ChatArea> {
                     voiceTransportChannelId: widget.voiceTransportChannelId,
                     voiceTransportError: widget.voiceTransportError,
                     voiceTransportPeers: widget.voiceTransportPeers,
+                    mediaE2eeStatus: widget.mediaE2eeStatus,
                     currentUserId: widget.currentUserId,
                     voiceMemberVolumeForUserId:
                         widget.voiceMemberVolumeForUserId,
-                    onSetVoiceMemberVolume:
-                        widget.onSetVoiceMemberVolume,
+                    onSetVoiceMemberVolume: widget.onSetVoiceMemberVolume,
                     localCameraTrack: widget.localCameraTrack,
                     localScreenShareTrack: widget.screenShareEnabled
                         ? widget.localScreenShareTrack
                         : null,
                     remoteCameraTracks: widget.remoteCameraTracks,
-                    remoteScreenShareTracks:
-                        widget.remoteScreenShareTracks,
+                    remoteScreenShareTracks: widget.remoteScreenShareTracks,
                     onPttChanged: _isVoiceDeck ? _setSpeakingPressed : null,
                     onFocusMember: (member) {
                       setState(() {
@@ -828,6 +894,15 @@ class _ChatAreaState extends State<ChatArea> {
                           onDeleteMessage: widget.onDeleteMessage == null
                               ? null
                               : _handleDeleteMessage,
+                          onDownloadEncryptedAttachment:
+                              widget.onDownloadEncryptedAttachment,
+                          onPreviewEncryptedAttachment:
+                              widget.onPreviewEncryptedAttachment,
+                          onToggleReaction:
+                              widget.channel.encryptionMode ==
+                                  ChannelEncryptionMode.e2ee
+                              ? widget.onToggleEncryptedReaction
+                              : null,
                         ),
                       ),
                       if (!_isNearMessageBottom)
@@ -842,21 +917,45 @@ class _ChatAreaState extends State<ChatArea> {
                     ],
                   ),
                 ),
-                MessageInput(
-                  key: _messageInputKey,
-                  channel: widget.channel,
-                  onSend: _handleLocalSend,
-                  onSendWithAttachments: widget.onSendWithAttachments == null
-                      ? null
-                      : _handleLocalSendWithAttachments,
-                  onUploadAttachment: widget.onUploadAttachment,
-                  editingMessageId: _editingMessage?.id,
-                  editingContent: _editingMessage?.content,
-                  editingAuthorName: _editingMessage?.author,
-                  onEdit: widget.onEditMessage == null ? null : _handleEditMessage,
-                  onCancelEdit: _editingMessage == null ? null : _cancelEditingMessage,
-                  dragHandlingEnabled: false,
-                ),
+                if (widget.channel.encryptionMode == ChannelEncryptionMode.e2ee)
+                  _EncryptedTextLifecycleNotice(
+                    startup: widget.textE2eeStartup,
+                  ),
+                if (widget.channel.encryptionMode !=
+                        ChannelEncryptionMode.e2ee ||
+                    widget.textE2eeStartup?.readiness ==
+                        MlsChannelReadiness.ready)
+                  MessageInput(
+                    key: _messageInputKey,
+                    channel: widget.channel,
+                    onSend: _handleLocalSend,
+                    onSendWithAttachments:
+                        widget.channel.encryptionMode ==
+                                ChannelEncryptionMode.e2ee ||
+                            widget.onSendWithAttachments == null
+                        ? null
+                        : _handleLocalSendWithAttachments,
+                    onUploadAttachment:
+                        widget.channel.encryptionMode ==
+                            ChannelEncryptionMode.e2ee
+                        ? null
+                        : widget.onUploadAttachment,
+                    onSendEncryptedAttachment:
+                        widget.channel.encryptionMode ==
+                            ChannelEncryptionMode.e2ee
+                        ? widget.onSendEncryptedAttachment
+                        : null,
+                    editingMessageId: _editingMessage?.id,
+                    editingContent: _editingMessage?.content,
+                    editingAuthorName: _editingMessage?.author,
+                    onEdit: widget.onEditMessage == null
+                        ? null
+                        : _handleEditMessage,
+                    onCancelEdit: _editingMessage == null
+                        ? null
+                        : _cancelEditingMessage,
+                    dragHandlingEnabled: false,
+                  ),
               ],
             ],
           ),
@@ -1076,9 +1175,11 @@ class _VoiceDeckRoom extends StatelessWidget {
   final String? voiceTransportChannelId;
   final String? voiceTransportError;
   final Map<String, VoiceTransportPeerState> voiceTransportPeers;
+  final MediaE2eeStatus mediaE2eeStatus;
   final String? currentUserId;
   final double Function(String userId)? voiceMemberVolumeForUserId;
-  final Future<void> Function(String userId, double volume)? onSetVoiceMemberVolume;
+  final Future<void> Function(String userId, double volume)?
+  onSetVoiceMemberVolume;
   final livekit.VideoTrack? localCameraTrack;
   final livekit.VideoTrack? localScreenShareTrack;
   final Map<String, livekit.VideoTrack> remoteCameraTracks;
@@ -1113,6 +1214,7 @@ class _VoiceDeckRoom extends StatelessWidget {
     required this.voiceTransportChannelId,
     required this.voiceTransportError,
     required this.voiceTransportPeers,
+    required this.mediaE2eeStatus,
     required this.currentUserId,
     required this.voiceMemberVolumeForUserId,
     required this.onSetVoiceMemberVolume,
@@ -1162,12 +1264,24 @@ class _VoiceDeckRoom extends StatelessWidget {
         ),
         const PopupMenuDivider(),
         const PopupMenuItem<double>(value: 0.0, child: Text('Mute • 0%')),
-        const PopupMenuItem<double>(value: 0.25, child: Text('Very quiet • 25%')),
-        const PopupMenuItem<double>(value: 0.5, child: Text('Half volume • 50%')),
-        const PopupMenuItem<double>(value: 0.75, child: Text('Lower volume • 75%')),
+        const PopupMenuItem<double>(
+          value: 0.25,
+          child: Text('Very quiet • 25%'),
+        ),
+        const PopupMenuItem<double>(
+          value: 0.5,
+          child: Text('Half volume • 50%'),
+        ),
+        const PopupMenuItem<double>(
+          value: 0.75,
+          child: Text('Lower volume • 75%'),
+        ),
         const PopupMenuItem<double>(value: 1.0, child: Text('Normal • 100%')),
         const PopupMenuItem<double>(value: 1.25, child: Text('Boost • 125%')),
-        const PopupMenuItem<double>(value: 1.5, child: Text('Boost more • 150%')),
+        const PopupMenuItem<double>(
+          value: 1.5,
+          child: Text('Boost more • 150%'),
+        ),
       ],
     );
 
@@ -1220,6 +1334,13 @@ class _VoiceDeckRoom extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(18, outerGap, 18, outerGap),
           child: Column(
             children: [
+              if (isInSelectedVoiceDeck) ...[
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: _MediaEncryptionBadge(status: mediaE2eeStatus),
+                ),
+                const SizedBox(height: 10),
+              ],
               Expanded(
                 child: Container(
                   width: double.infinity,
@@ -1246,16 +1367,18 @@ class _VoiceDeckRoom extends StatelessWidget {
                             localSpeaking: speaking,
                             localMicCaptureActive: micCaptureActive,
                             cameraTrack: cameraTrackFor(focusedMember!),
-                            screenShareTrack:
-                                screenShareTrackFor(focusedMember!),
+                            screenShareTrack: screenShareTrackFor(
+                              focusedMember!,
+                            ),
                             elapsedLabel: elapsedLabel,
-                            onSecondaryTapDown: focusedMember!.id == currentUserId
+                            onSecondaryTapDown:
+                                focusedMember!.id == currentUserId
                                 ? null
                                 : (details) => _showVolumeMenu(
-                                      context,
-                                      focusedMember!,
-                                      details,
-                                    ),
+                                    context,
+                                    focusedMember!,
+                                    details,
+                                  ),
                           ),
                   ),
                 ),
@@ -1277,8 +1400,11 @@ class _VoiceDeckRoom extends StatelessWidget {
                       children: [
                         Row(
                           children: [
-                            Icon(Icons.view_carousel_rounded,
-                                color: NewChatColors.textMuted, size: 18),
+                            Icon(
+                              Icons.view_carousel_rounded,
+                              color: NewChatColors.textMuted,
+                              size: 18,
+                            ),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
@@ -1308,11 +1434,12 @@ class _VoiceDeckRoom extends StatelessWidget {
                                 onSecondaryTapDown: member.id == currentUserId
                                     ? null
                                     : (details) => _showVolumeMenu(
-                                          context,
-                                          member,
-                                          details,
-                                        ),
-                                volumeLabel: member.id == currentUserId ||
+                                        context,
+                                        member,
+                                        details,
+                                      ),
+                                volumeLabel:
+                                    member.id == currentUserId ||
                                         (_volumeFor(member) - 1.0).abs() < 0.001
                                     ? null
                                     : '${(_volumeFor(member) * 100).round()}%',
@@ -1376,14 +1503,66 @@ class _VoiceDeckEmptyState extends StatelessWidget {
               Text(
                 'Camera feeds and screen shares appear here automatically once someone enables them in the deck.',
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: NewChatColors.textMuted,
-                  height: 1.45,
-                ),
+                style: TextStyle(color: NewChatColors.textMuted, height: 1.45),
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _MediaEncryptionBadge extends StatelessWidget {
+  final MediaE2eeStatus status;
+
+  const _MediaEncryptionBadge({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final (label, icon, color) = switch (status) {
+      MediaE2eeStatus.encrypted => (
+        'End-to-end encrypted',
+        Icons.lock_rounded,
+        const Color(0xFF54D17A),
+      ),
+      MediaE2eeStatus.establishing => (
+        'Establishing encryption',
+        Icons.lock_clock_rounded,
+        const Color(0xFFFFC857),
+      ),
+      MediaE2eeStatus.failed => (
+        'Encryption failed',
+        Icons.gpp_bad_rounded,
+        const Color(0xFFFF667E),
+      ),
+      MediaE2eeStatus.idle => (
+        'Encryption inactive',
+        Icons.lock_open_rounded,
+        NewChatColors.textMuted,
+      ),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.11),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.34)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1524,10 +1703,7 @@ class _VoiceStageTile extends StatelessWidget {
           const SizedBox(height: 10),
           Text(
             '${member.name} sharing',
-            style: const TextStyle(
-              fontWeight: FontWeight.w800,
-              fontSize: 15,
-            ),
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
           ),
         ],
       );
@@ -1545,10 +1721,7 @@ class _VoiceStageTile extends StatelessWidget {
           const SizedBox(height: 10),
           Text(
             '${member.name} camera',
-            style: const TextStyle(
-              fontWeight: FontWeight.w800,
-              fontSize: 15,
-            ),
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
           ),
         ],
       );
@@ -1579,105 +1752,97 @@ class _VoiceStageTile extends StatelessWidget {
           width: double.infinity,
           height: double.infinity,
           decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
-        gradient: const LinearGradient(
-          colors: [
-            Color(0xFF10161E),
-            Color(0xFF141A22),
-            Color(0xFF10151D),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        border: Border.all(
-          color: _activeBorderColor,
-          width: _activeBorderColor == Colors.transparent ? 0.9 : 1.6,
-        ),
-        boxShadow: _activeBorderShadow,
-      ),
-      child: Stack(
-        children: [
-          if (hasLiveMedia)
-            Positioned.fill(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(24),
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    Container(color: Colors.black),
-                    livekit.VideoTrackRenderer(
-                      activeTrack,
-                      fit: screenShareTrack != null
-                          ? livekit.VideoViewFit.contain
-                          : livekit.VideoViewFit.cover,
-                      mirrorMode: isLocalUser && screenShareTrack == null
-                          ? livekit.VideoViewMirrorMode.mirror
-                          : livekit.VideoViewMirrorMode.auto,
-                    ),
-                    DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            Colors.black.withValues(alpha: 0.08),
-                            Colors.black.withValues(alpha: 0.0),
-                            Colors.black.withValues(alpha: 0.36),
-                          ],
+            borderRadius: BorderRadius.circular(24),
+            gradient: const LinearGradient(
+              colors: [Color(0xFF10161E), Color(0xFF141A22), Color(0xFF10151D)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            border: Border.all(
+              color: _activeBorderColor,
+              width: _activeBorderColor == Colors.transparent ? 0.9 : 1.6,
+            ),
+            boxShadow: _activeBorderShadow,
+          ),
+          child: Stack(
+            children: [
+              if (hasLiveMedia)
+                Positioned.fill(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(24),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Container(color: Colors.black),
+                        livekit.VideoTrackRenderer(
+                          activeTrack,
+                          fit: screenShareTrack != null
+                              ? livekit.VideoViewFit.contain
+                              : livekit.VideoViewFit.cover,
+                          mirrorMode: isLocalUser && screenShareTrack == null
+                              ? livekit.VideoViewMirrorMode.mirror
+                              : livekit.VideoViewMirrorMode.auto,
                         ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            )
-          else
-            Positioned.fill(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Center(
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    width: _screenShareActive ? 230 : 184,
-                    height: _screenShareActive ? 150 : 184,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(
-                        _screenShareActive ? 24 : 92,
-                      ),
-                      color: _screenShareActive
-                          ? const Color(0xFF17202B)
-                          : const Color(0xFF1E2630),
-                      border: Border.all(
-                        color: Colors.transparent,
-                      ),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: Color(0x26000000),
-                          blurRadius: 24,
-                          offset: Offset(0, 10),
+                        DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Colors.black.withValues(alpha: 0.08),
+                                Colors.black.withValues(alpha: 0.0),
+                                Colors.black.withValues(alpha: 0.36),
+                              ],
+                            ),
+                          ),
                         ),
                       ],
                     ),
+                  ),
+                )
+              else
+                Positioned.fill(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
                     child: Center(
-                      child: _buildPrimaryMedia(),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 180),
+                        width: _screenShareActive ? 230 : 184,
+                        height: _screenShareActive ? 150 : 184,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(
+                            _screenShareActive ? 24 : 92,
+                          ),
+                          color: _screenShareActive
+                              ? const Color(0xFF17202B)
+                              : const Color(0xFF1E2630),
+                          border: Border.all(color: Colors.transparent),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Color(0x26000000),
+                              blurRadius: 24,
+                              offset: Offset(0, 10),
+                            ),
+                          ],
+                        ),
+                        child: Center(child: _buildPrimaryMedia()),
+                      ),
                     ),
                   ),
                 ),
+              Positioned(
+                left: 20,
+                right: 20,
+                bottom: 18,
+                child: Center(
+                  child: _StageIdentityPill(
+                    label: member.name,
+                    micMuted: _micMutedActive,
+                    audioMuted: _audioMutedActive,
+                  ),
+                ),
               ),
-            ),
-          Positioned(
-            left: 20,
-            right: 20,
-            bottom: 18,
-            child: Center(
-              child: _StageIdentityPill(
-                label: member.name,
-                micMuted: _micMutedActive,
-                audioMuted: _audioMutedActive,
-              ),
-            ),
-          ),
-        ],
+            ],
           ),
         ),
       ),
@@ -1717,29 +1882,31 @@ class _MiniVoiceTile extends StatelessWidget {
           onTap: onTap,
           borderRadius: BorderRadius.circular(20),
           child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        width: 148,
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: NewChatColors.surface,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: member.voiceState.micMuted || member.voiceState.audioMuted
-                ? const Color(0xFFFF667E)
-                : member.voiceState.speaking
+            duration: const Duration(milliseconds: 180),
+            width: 148,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: NewChatColors.surface,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color:
+                    member.voiceState.micMuted || member.voiceState.audioMuted
+                    ? const Color(0xFFFF667E)
+                    : member.voiceState.speaking
                     ? const Color(0xFF54D17A)
                     : Colors.transparent,
-          ),
-          boxShadow: member.voiceState.micMuted || member.voiceState.audioMuted
-              ? const [
-                  BoxShadow(
-                    color: Color(0x18FF667E),
-                    blurRadius: 14,
-                    offset: Offset(0, 0),
-                    spreadRadius: 1,
-                  ),
-                ]
-              : member.voiceState.speaking
+              ),
+              boxShadow:
+                  member.voiceState.micMuted || member.voiceState.audioMuted
+                  ? const [
+                      BoxShadow(
+                        color: Color(0x18FF667E),
+                        blurRadius: 14,
+                        offset: Offset(0, 0),
+                        spreadRadius: 1,
+                      ),
+                    ]
+                  : member.voiceState.speaking
                   ? const [
                       BoxShadow(
                         color: Color(0x1854D17A),
@@ -1749,166 +1916,163 @@ class _MiniVoiceTile extends StatelessWidget {
                       ),
                     ]
                   : null,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Stack(
-                  clipBehavior: Clip.none,
+                Row(
                   children: [
-                    Container(
-                      width: 42,
-                      height: 42,
-                      clipBehavior: Clip.antiAlias,
-                      decoration: BoxDecoration(
-                        color: activeTrack != null
-                            ? Colors.black
-                            : member.role == 'owner'
+                    Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Container(
+                          width: 42,
+                          height: 42,
+                          clipBehavior: Clip.antiAlias,
+                          decoration: BoxDecoration(
+                            color: activeTrack != null
+                                ? Colors.black
+                                : member.role == 'owner'
                                 ? const Color(0xFF2C2214)
                                 : NewChatColors.panelAlt,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(
-                          color: member.voiceState.micMuted ||
-                                  member.voiceState.audioMuted
-                              ? const Color(0xFFFF667E)
-                              : member.voiceState.speaking
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color:
+                                  member.voiceState.micMuted ||
+                                      member.voiceState.audioMuted
+                                  ? const Color(0xFFFF667E)
+                                  : member.voiceState.speaking
                                   ? const Color(0xFF54D17A)
                                   : Colors.transparent,
+                            ),
+                          ),
+                          child: activeTrack != null
+                              ? livekit.VideoTrackRenderer(
+                                  activeTrack,
+                                  fit: screenShareTrack != null
+                                      ? livekit.VideoViewFit.cover
+                                      : livekit.VideoViewFit.cover,
+                                  mirrorMode: livekit.VideoViewMirrorMode.auto,
+                                )
+                              : _VoiceAvatarBubble(
+                                  member: member,
+                                  size: 42,
+                                  animate: true,
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                        ),
+                        if (member.isOwner)
+                          Positioned(
+                            left: -4,
+                            top: -9,
+                            child: Transform.rotate(
+                              angle: -0.42,
+                              alignment: Alignment.bottomRight,
+                              child: Text(
+                                '👑',
+                                style: yappaEmojiTextStyle(13, height: 1),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const Spacer(),
+                    if (member.voiceState.speaking)
+                      const _MiniTileStatusIcon(
+                        icon: Icons.graphic_eq_rounded,
+                        color: Color(0xFF54D17A),
+                      )
+                    else if (member.voiceState.screenShareEnabled)
+                      const _MiniTileStatusIcon(
+                        icon: Icons.screen_share_rounded,
+                        color: Color(0xFF54D17A),
+                      )
+                    else if (member.voiceState.cameraEnabled)
+                      const _MiniTileStatusIcon(
+                        icon: Icons.videocam_rounded,
+                        color: Color(0xFF54D17A),
+                      ),
+                  ],
+                ),
+                const Spacer(),
+                Text(
+                  member.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 4),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    if (member.voiceState.speaking)
+                      const _MiniTileStatusIcon(
+                        icon: Icons.graphic_eq_rounded,
+                        color: Color(0xFF54D17A),
+                      ),
+                    if (member.voiceState.micMuted)
+                      const _MiniTileStatusIcon(
+                        icon: Icons.mic_off_rounded,
+                        color: Color(0xFFFF667E),
+                      ),
+                    if (member.voiceState.audioMuted)
+                      const _MiniTileStatusIcon(
+                        icon: Icons.volume_off_rounded,
+                        color: Color(0xFFFF667E),
+                      ),
+                    if (member.voiceState.cameraEnabled)
+                      const _MiniTileStatusIcon(
+                        icon: Icons.videocam_rounded,
+                        color: Color(0xFF54D17A),
+                      ),
+                    if (member.voiceState.screenShareEnabled)
+                      const _MiniTileStatusIcon(
+                        icon: Icons.screen_share_rounded,
+                        color: Color(0xFF54D17A),
+                      ),
+                    if (!member.voiceState.speaking &&
+                        !member.voiceState.micMuted &&
+                        !member.voiceState.audioMuted &&
+                        !member.voiceState.cameraEnabled &&
+                        !member.voiceState.screenShareEnabled)
+                      Text(
+                        'Click to focus',
+                        style: TextStyle(
+                          color: NewChatColors.textMuted,
+                          fontSize: 11,
                         ),
                       ),
-                      child: activeTrack != null
-                          ? livekit.VideoTrackRenderer(
-                              activeTrack,
-                              fit: screenShareTrack != null
-                                  ? livekit.VideoViewFit.cover
-                                  : livekit.VideoViewFit.cover,
-                              mirrorMode: livekit.VideoViewMirrorMode.auto,
-                            )
-                          : _VoiceAvatarBubble(
-                              member: member,
-                              size: 42,
-                              animate: true,
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                    ),
-                    if (member.isOwner)
-                      Positioned(
-                        left: -4,
-                        top: -9,
-                        child: Transform.rotate(
-                          angle: -0.42,
-                          alignment: Alignment.bottomRight,
-                          child: const Text(
-                            '👑',
-                            style: TextStyle(
-                              fontSize: 13,
-                              height: 1,
-                            ),
+                    if (volumeLabel != null)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: NewChatColors.panelAlt,
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: NewChatColors.outline),
+                        ),
+                        child: Text(
+                          volumeLabel!,
+                          style: TextStyle(
+                            color: NewChatColors.textMuted,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
                       ),
                   ],
                 ),
-                const Spacer(),
-                if (member.voiceState.speaking)
-                  const _MiniTileStatusIcon(
-                    icon: Icons.graphic_eq_rounded,
-                    color: Color(0xFF54D17A),
-                  )
-                else if (member.voiceState.screenShareEnabled)
-                  const _MiniTileStatusIcon(
-                    icon: Icons.screen_share_rounded,
-                    color: Color(0xFF54D17A),
-                  )
-                else if (member.voiceState.cameraEnabled)
-                  const _MiniTileStatusIcon(
-                    icon: Icons.videocam_rounded,
-                    color: Color(0xFF54D17A),
-                  ),
               ],
             ),
-            const Spacer(),
-            Text(
-              member.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 4),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                if (member.voiceState.speaking)
-                  const _MiniTileStatusIcon(
-                    icon: Icons.graphic_eq_rounded,
-                    color: Color(0xFF54D17A),
-                  ),
-                if (member.voiceState.micMuted)
-                  const _MiniTileStatusIcon(
-                    icon: Icons.mic_off_rounded,
-                    color: Color(0xFFFF667E),
-                  ),
-                if (member.voiceState.audioMuted)
-                  const _MiniTileStatusIcon(
-                    icon: Icons.volume_off_rounded,
-                    color: Color(0xFFFF667E),
-                  ),
-                if (member.voiceState.cameraEnabled)
-                  const _MiniTileStatusIcon(
-                    icon: Icons.videocam_rounded,
-                    color: Color(0xFF54D17A),
-                  ),
-                if (member.voiceState.screenShareEnabled)
-                  const _MiniTileStatusIcon(
-                    icon: Icons.screen_share_rounded,
-                    color: Color(0xFF54D17A),
-                  ),
-                if (!member.voiceState.speaking &&
-                    !member.voiceState.micMuted &&
-                    !member.voiceState.audioMuted &&
-                    !member.voiceState.cameraEnabled &&
-                    !member.voiceState.screenShareEnabled)
-                  Text(
-                    'Click to focus',
-                    style: TextStyle(
-                      color: NewChatColors.textMuted,
-                      fontSize: 11,
-                    ),
-                  ),
-                if (volumeLabel != null)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: NewChatColors.panelAlt,
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: NewChatColors.outline),
-                    ),
-                    child: Text(
-                      volumeLabel!,
-                      style: TextStyle(
-                        color: NewChatColors.textMuted,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ],
-        ),
           ),
         ),
       ),
     );
   }
 }
-
 
 class _VoiceAvatarBubble extends StatelessWidget {
   final Member member;
@@ -1953,10 +2117,7 @@ class _MiniTileStatusIcon extends StatelessWidget {
   final IconData icon;
   final Color color;
 
-  const _MiniTileStatusIcon({
-    required this.icon,
-    required this.color,
-  });
+  const _MiniTileStatusIcon({required this.icon, required this.color});
 
   @override
   Widget build(BuildContext context) {
@@ -1968,11 +2129,7 @@ class _MiniTileStatusIcon extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: NewChatColors.outline),
       ),
-      child: Icon(
-        icon,
-        size: 13,
-        color: color,
-      ),
+      child: Icon(icon, size: 13, color: color),
     );
   }
 }
@@ -2002,10 +2159,7 @@ class _StageIdentityPill extends StatelessWidget {
         children: [
           Text(
             label,
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w800,
-            ),
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
           ),
           if (micMuted || audioMuted) const SizedBox(width: 10),
           if (micMuted)

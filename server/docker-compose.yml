@@ -1,11 +1,53 @@
 services:
+  yappa-proxy:
+    image: caddy:2.11.4-alpine
+    container_name: yappa-proxy
+    depends_on:
+      - newchat-node
+      - yappa-livekit
+    ports:
+      - "${YAPPA_HTTP_PORT:-80}:80"
+      - "${YAPPA_HTTPS_PORT:-443}:443"
+      - "${YAPPA_LIVEKIT_PROXY_PORT:-7882}:7882"
+    environment:
+      YAPPA_SITE_ADDRESS: "${YAPPA_SITE_ADDRESS:-http://:80}"
+      YAPPA_DEFAULT_SNI: "${YAPPA_DEFAULT_SNI:-localhost}"
+      LIVEKIT_SITE_ADDRESS: "${LIVEKIT_SITE_ADDRESS:-http://:7882}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    restart: unless-stopped
+
   yappa-livekit:
-    image: livekit/livekit-server:latest
+    image: livekit/livekit-server:v1.13.4
     container_name: yappa-livekit
     network_mode: host
     command: --config /etc/livekit/livekit.yaml
     volumes:
       - ./livekit.yaml:/etc/livekit/livekit.yaml:ro
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    init: true
     restart: unless-stopped
 
   newchat-node:
@@ -14,9 +56,43 @@ services:
     depends_on:
       - yappa-livekit
     ports:
-      - "${PORT:-4100}:4100"
+      - "${BACKEND_BIND_ADDRESS:-127.0.0.1}:${PORT:-4100}:4100"
+      - "127.0.0.1:41201:41200/udp"
     env_file:
       - .env
+    environment:
+      LISTEN_HOST: "0.0.0.0"
     volumes:
       - ./data:/app/data
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    init: true
     restart: unless-stopped
+
+  yappa-discovery:
+    build: .
+    container_name: yappa-discovery
+    depends_on:
+      - newchat-node
+    network_mode: host
+    command: node src/lan-discovery-relay.js
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

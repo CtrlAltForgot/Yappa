@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
@@ -7,51 +8,60 @@ import '../models/member_model.dart';
 import '../models/message_model.dart';
 import '../models/server_model.dart';
 import '../models/voice_models.dart';
+import 'media_key_envelope.dart';
+import 'media_room_state.dart';
+import 'mls_delivery_models.dart';
 
-typedef RealtimeHelloCallback = void Function(
-  ChatServer server,
-  List<ChatChannel> channels,
-  List<Member> members,
-  List<VoiceDeckState> voice,
-  VoicePresenceState meVoiceState,
-);
+typedef RealtimeHelloCallback =
+    void Function(
+      ChatServer server,
+      List<ChatChannel> channels,
+      List<Member> members,
+      List<VoiceDeckState> voice,
+      VoicePresenceState meVoiceState,
+    );
 
-typedef RealtimePresenceCallback = void Function(
-  List<Member> members,
-  List<VoiceDeckState> voice,
-);
+typedef RealtimePresenceCallback =
+    void Function(List<Member> members, List<VoiceDeckState> voice);
 
 typedef RealtimeMessageCallback = void Function(ChatMessage message);
-typedef RealtimeMessageDeletedCallback = void Function(
-  String channelId,
-  String messageId,
-);
+typedef RealtimeMessageDeletedCallback =
+    void Function(String channelId, String messageId);
 
-typedef RealtimeServerUpdatedCallback = void Function(
-  ChatServer server,
-  List<ChatChannel> channels,
-  List<VoiceDeckState> voice,
-);
+typedef RealtimeServerUpdatedCallback =
+    void Function(
+      ChatServer server,
+      List<ChatChannel> channels,
+      List<VoiceDeckState> voice,
+    );
 
 typedef RealtimeErrorCallback = void Function(String message);
+typedef RealtimeLifecycleCallback = void Function();
 
-typedef RealtimeVoiceOfferCallback = void Function(
-  String fromUserId,
-  String channelId,
-  Map<String, dynamic> description,
-);
+typedef RealtimeVoiceOfferCallback =
+    void Function(
+      String fromUserId,
+      String channelId,
+      Map<String, dynamic> description,
+    );
 
-typedef RealtimeVoiceAnswerCallback = void Function(
-  String fromUserId,
-  String channelId,
-  Map<String, dynamic> description,
-);
+typedef RealtimeVoiceAnswerCallback =
+    void Function(
+      String fromUserId,
+      String channelId,
+      Map<String, dynamic> description,
+    );
 
-typedef RealtimeVoiceIceCandidateCallback = void Function(
-  String fromUserId,
-  String channelId,
-  Map<String, dynamic> candidate,
-);
+typedef RealtimeVoiceIceCandidateCallback =
+    void Function(
+      String fromUserId,
+      String channelId,
+      Map<String, dynamic> candidate,
+    );
+typedef RealtimeMediaRoomStateCallback = void Function(MediaRoomState state);
+typedef RealtimeMediaEnvelopeCallback =
+    void Function(MediaKeyEnvelope envelope);
+typedef RealtimeMlsDeliveryCallback = void Function(MlsDeliveryMessage message);
 
 class VoiceJoinResult {
   final String channelId;
@@ -73,13 +83,20 @@ class RealtimeClient {
   final RealtimeMessageDeletedCallback onMessageDeleted;
   final RealtimeServerUpdatedCallback onServerUpdated;
   final RealtimeErrorCallback onError;
+  final RealtimeLifecycleCallback? onConnected;
+  final RealtimeLifecycleCallback? onUnavailable;
 
   final RealtimeVoiceOfferCallback? onVoiceOffer;
   final RealtimeVoiceAnswerCallback? onVoiceAnswer;
   final RealtimeVoiceIceCandidateCallback? onVoiceIceCandidate;
+  final RealtimeMediaRoomStateCallback? onMediaRoomState;
+  final RealtimeMediaEnvelopeCallback? onMediaEnvelope;
+  final RealtimeMlsDeliveryCallback? onMlsDelivery;
 
   io.Socket? _socket;
   Timer? _presencePingTimer;
+  bool _disposed = false;
+  bool _reportedUnavailable = false;
 
   RealtimeClient({
     required this.onHello,
@@ -89,9 +106,14 @@ class RealtimeClient {
     required this.onMessageDeleted,
     required this.onServerUpdated,
     required this.onError,
+    this.onConnected,
+    this.onUnavailable,
     this.onVoiceOffer,
     this.onVoiceAnswer,
     this.onVoiceIceCandidate,
+    this.onMediaRoomState,
+    this.onMediaEnvelope,
+    this.onMlsDelivery,
   });
 
   bool get isConnected => _socket?.connected == true;
@@ -104,34 +126,50 @@ class RealtimeClient {
   void connect({
     required ChatServer server,
     required String token,
+    bool useLanRoute = false,
   }) {
     dispose();
+    _disposed = false;
+    _reportedUnavailable = false;
 
     final uri = _socketBaseUrl(server.address);
+    final options = io.OptionBuilder()
+        .setTransports(['websocket'])
+        .disableAutoConnect()
+        .setAuth({'token': token})
+        .enableForceNew()
+        .enableReconnection()
+        .setReconnectionAttempts(999999)
+        .setReconnectionDelay(1000)
+        .setReconnectionDelayMax(5000);
+    if (useLanRoute &&
+        server.lanAddress.trim().isNotEmpty &&
+        server.lanTlsPort != null &&
+        Uri.parse(uri).scheme == 'https') {
+      options.setHttpClientAdapter(
+        _SecureLanWebSocketAdapter(
+          publicOrigin: Uri.parse(uri).origin,
+          lanHost: server.lanAddress,
+          lanPort: server.lanTlsPort!,
+        ),
+      );
+    }
 
-    final socket = io.io(
-      uri,
-      io.OptionBuilder()
-          .setTransports(['websocket'])
-          .disableAutoConnect()
-          .setAuth({'token': token})
-          .enableForceNew()
-          .enableReconnection()
-          .setReconnectionAttempts(999999)
-          .setReconnectionDelay(1000)
-          .setReconnectionDelayMax(5000)
-          .build(),
-    );
+    final socket = io.io(uri, options.build());
 
     socket.onConnect((_) {
+      _reportedUnavailable = false;
       _startPresencePing();
+      onConnected?.call();
     });
 
     socket.onDisconnect((_) {
       _stopPresencePing();
+      _reportUnavailable();
     });
 
     socket.onConnectError((error) {
+      _reportUnavailable();
       onError('Realtime connect error: $error');
     });
 
@@ -150,10 +188,7 @@ class RealtimeClient {
         final meVoiceStateJson = _asMap(meJson['voiceState']);
 
         onHello(
-          ChatServer.fromJson({
-            ...serverJson,
-            'address': server.address,
-          }),
+          ChatServer.fromJson({...serverJson, 'address': server.address}),
           channelsJson.map(ChatChannel.fromJson).toList(growable: false),
           membersJson.map(Member.fromJson).toList(growable: false),
           voiceJson.map(VoiceDeckState.fromJson).toList(growable: false),
@@ -223,10 +258,7 @@ class RealtimeClient {
         final voiceJson = _asListOfMap(map['voice']);
 
         onServerUpdated(
-          ChatServer.fromJson({
-            ...serverJson,
-            'address': server.address,
-          }),
+          ChatServer.fromJson({...serverJson, 'address': server.address}),
           channelsJson.map(ChatChannel.fromJson).toList(growable: false),
           voiceJson.map(VoiceDeckState.fromJson).toList(growable: false),
         );
@@ -277,15 +309,41 @@ class RealtimeClient {
       }
     });
 
+    socket.on('media:e2ee:state', (payload) {
+      try {
+        if (onMediaRoomState == null) return;
+        onMediaRoomState!(MediaRoomState.fromJson(_asMap(payload)));
+      } catch (error) {
+        onError('Failed to parse encrypted room state: $error');
+      }
+    });
+
+    socket.on('media:e2ee:envelope', (payload) {
+      try {
+        if (onMediaEnvelope == null) return;
+        final map = _asMap(payload);
+        onMediaEnvelope!(MediaKeyEnvelope.fromJson(_asMap(map['envelope'])));
+      } catch (error) {
+        onError('Failed to parse encrypted media key envelope: $error');
+      }
+    });
+
+    socket.on('mls:message', (payload) {
+      try {
+        if (onMlsDelivery == null) return;
+        final map = _asMap(payload);
+        onMlsDelivery!(MlsDeliveryMessage.fromJson(_asMap(map['message'])));
+      } catch (error) {
+        onError('Failed to parse encrypted message delivery: $error');
+      }
+    });
+
     _socket = socket;
     socket.connect();
   }
 
   Future<VoiceJoinResult> joinVoiceDeck(String channelId) async {
-    final response = await _emitWithAck(
-      'voice:join',
-      {'channelId': channelId},
-    );
+    final response = await _emitWithAck('voice:join', {'channelId': channelId});
 
     if (response['ok'] != true) {
       throw Exception(_extractAckError(response, 'Could not join voice deck.'));
@@ -302,7 +360,9 @@ class RealtimeClient {
     final response = await _emitWithAck('voice:leave', {});
 
     if (response['ok'] != true) {
-      throw Exception(_extractAckError(response, 'Could not leave voice deck.'));
+      throw Exception(
+        _extractAckError(response, 'Could not leave voice deck.'),
+      );
     }
   }
 
@@ -344,18 +404,17 @@ class RealtimeClient {
     required String sdp,
     required String type,
   }) async {
-    final response = await _emitWithAck(
-      'voice:signal:offer',
-      {
-        'toUserId': toUserId,
-        'channelId': channelId,
-        'sdp': sdp,
-        'type': type,
-      },
-    );
+    final response = await _emitWithAck('voice:signal:offer', {
+      'toUserId': toUserId,
+      'channelId': channelId,
+      'sdp': sdp,
+      'type': type,
+    });
 
     if (response['ok'] != true) {
-      throw Exception(_extractAckError(response, 'Could not send voice offer.'));
+      throw Exception(
+        _extractAckError(response, 'Could not send voice offer.'),
+      );
     }
   }
 
@@ -365,15 +424,12 @@ class RealtimeClient {
     required String sdp,
     required String type,
   }) async {
-    final response = await _emitWithAck(
-      'voice:signal:answer',
-      {
-        'toUserId': toUserId,
-        'channelId': channelId,
-        'sdp': sdp,
-        'type': type,
-      },
-    );
+    final response = await _emitWithAck('voice:signal:answer', {
+      'toUserId': toUserId,
+      'channelId': channelId,
+      'sdp': sdp,
+      'type': type,
+    });
 
     if (response['ok'] != true) {
       throw Exception(
@@ -389,20 +445,31 @@ class RealtimeClient {
     String? sdpMid,
     int? sdpMLineIndex,
   }) async {
-    final response = await _emitWithAck(
-      'voice:signal:ice-candidate',
-      {
-        'toUserId': toUserId,
-        'channelId': channelId,
-        'candidate': candidate,
-        'sdpMid': sdpMid,
-        'sdpMLineIndex': sdpMLineIndex,
-      },
-    );
+    final response = await _emitWithAck('voice:signal:ice-candidate', {
+      'toUserId': toUserId,
+      'channelId': channelId,
+      'candidate': candidate,
+      'sdpMid': sdpMid,
+      'sdpMLineIndex': sdpMLineIndex,
+    });
 
     if (response['ok'] != true) {
       throw Exception(
         _extractAckError(response, 'Could not send ICE candidate.'),
+      );
+    }
+  }
+
+  Future<void> sendMediaKeyEnvelope(MediaKeyEnvelope envelope) async {
+    final response = await _emitWithAck('media:e2ee:envelope', {
+      'envelope': envelope.toJson(),
+    });
+    if (response['ok'] != true) {
+      throw Exception(
+        _extractAckError(
+          response,
+          'Could not deliver encrypted media room key.',
+        ),
       );
     }
   }
@@ -462,14 +529,18 @@ class RealtimeClient {
     _presencePingTimer = null;
   }
 
+  void _reportUnavailable() {
+    if (_disposed || _reportedUnavailable) return;
+    _reportedUnavailable = true;
+    onUnavailable?.call();
+  }
+
   Map<String, dynamic> _asMap(dynamic value) {
     if (value is Map<String, dynamic>) {
       return value;
     }
     if (value is Map) {
-      return value.map(
-        (key, val) => MapEntry(key.toString(), val),
-      );
+      return value.map((key, val) => MapEntry(key.toString(), val));
     }
     throw Exception('Expected map but got ${value.runtimeType}');
   }
@@ -508,10 +579,52 @@ class RealtimeClient {
   }
 
   void dispose() {
+    _disposed = true;
     _stopPresencePing();
     try {
       _socket?.dispose();
     } catch (_) {}
     _socket = null;
   }
+}
+
+class _SecureLanWebSocketAdapter implements io.HttpClientAdapter {
+  final Uri publicUri;
+  final String lanHost;
+  final int lanPort;
+
+  _SecureLanWebSocketAdapter({
+    required String publicOrigin,
+    required this.lanHost,
+    required this.lanPort,
+  }) : publicUri = Uri.parse(publicOrigin);
+
+  @override
+  Future<dynamic> connect(String uri, {Map<String, dynamic>? headers}) {
+    final client = HttpClient();
+    client.findProxy = (_) => 'DIRECT';
+    client.connectionTimeout = const Duration(seconds: 6);
+    client.connectionFactory = (requestUri, proxyHost, proxyPort) async {
+      if (proxyHost != null ||
+          proxyPort != null ||
+          requestUri.scheme != 'https' ||
+          requestUri.host.toLowerCase() != publicUri.host.toLowerCase() ||
+          !isExpectedSecureLanWebSocketPort(requestUri.port, publicUri)) {
+        throw const SocketException('Invalid secure LAN socket route.');
+      }
+      final rawTask = await Socket.startConnect(lanHost, lanPort);
+      final secureSocket = rawTask.socket.then(
+        (socket) => SecureSocket.secure(socket, host: requestUri.host),
+      );
+      return ConnectionTask.fromSocket(secureSocket, rawTask.cancel);
+    };
+    return WebSocket.connect(uri, headers: headers, customClient: client);
+  }
+}
+
+bool isExpectedSecureLanWebSocketPort(int requestPort, Uri publicUri) {
+  final publicPort = publicUri.hasPort ? publicUri.port : 443;
+  // Dart's WebSocket implementation currently converts a wss URI without an
+  // explicit port into an internal HTTPS request whose reported port is zero.
+  return requestPort == 0 || requestPort == publicPort;
 }

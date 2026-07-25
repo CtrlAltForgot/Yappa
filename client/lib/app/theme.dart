@@ -1,20 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-enum YappaAccentPreset {
-  crimson,
-  violet,
-  ocean,
-  emerald,
-  amber,
-  custom,
-}
+enum YappaAccentPreset { crimson, violet, ocean, emerald, amber, custom }
 
-enum YappaFontPreset {
-  system,
-  serif,
-  monospace,
-}
+enum YappaFontPreset { system, serif, monospace }
 
 class NewChatColors {
   static Color background = const Color(0xFF0B0D11);
@@ -32,6 +21,19 @@ class NewChatColors {
   static Color success = const Color(0xFF43C083);
   static Color warning = const Color(0xFFD0A146);
   static Color info = const Color(0xFF58A6FF);
+}
+
+TextStyle yappaEmojiTextStyle(double fontSize, {double? height}) {
+  return TextStyle(
+    fontSize: fontSize,
+    height: height,
+    fontFamily: 'Noto Color Emoji',
+    fontFamilyFallback: const [
+      'Segoe UI Emoji',
+      'Apple Color Emoji',
+      'Noto Emoji',
+    ],
+  );
 }
 
 class YappaAppearance {
@@ -62,7 +64,8 @@ class YappaAppearance {
       orElse: () => YappaFontPreset.system,
     );
 
-    customAccentGlow = _colorFromHex(savedCustomAccent) ?? const Color(0xFFDA5368);
+    customAccentGlow =
+        _colorFromHex(savedCustomAccent) ?? const Color(0xFFDA5368);
 
     _applyAccentPreset(accentPreset);
   }
@@ -193,9 +196,7 @@ ThemeData buildYappaTheme() {
     fontFamily: YappaAppearance.currentFontFamily,
     cardTheme: CardThemeData(
       color: NewChatColors.surface,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(22),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
     ),
     dialogTheme: DialogThemeData(
       backgroundColor: NewChatColors.panel,
@@ -213,10 +214,7 @@ ThemeData buildYappaTheme() {
         fontWeight: FontWeight.w800,
         letterSpacing: -0.4,
       ),
-      titleLarge: TextStyle(
-        fontWeight: FontWeight.w800,
-        letterSpacing: 0.2,
-      ),
+      titleLarge: TextStyle(fontWeight: FontWeight.w800, letterSpacing: 0.2),
       titleMedium: TextStyle(fontWeight: FontWeight.w700),
       bodyLarge: TextStyle(height: 1.45),
       bodyMedium: TextStyle(height: 1.45),
@@ -244,9 +242,7 @@ ThemeData buildYappaTheme() {
       style: FilledButton.styleFrom(
         backgroundColor: NewChatColors.accent,
         foregroundColor: Colors.white,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
       ),
     ),
@@ -254,9 +250,7 @@ ThemeData buildYappaTheme() {
       style: OutlinedButton.styleFrom(
         foregroundColor: Colors.white,
         side: BorderSide(color: NewChatColors.outline),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
       ),
     ),
@@ -267,9 +261,7 @@ ThemeData buildYappaTheme() {
         fontWeight: FontWeight.w700,
       ),
       unselectedIconTheme: IconThemeData(color: NewChatColors.textMuted),
-      unselectedLabelTextStyle: TextStyle(
-        color: NewChatColors.textMuted,
-      ),
+      unselectedLabelTextStyle: TextStyle(color: NewChatColors.textMuted),
       backgroundColor: Colors.transparent,
       indicatorColor: NewChatColors.warning,
     ),

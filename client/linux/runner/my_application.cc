@@ -89,8 +89,19 @@ static void my_application_activate(GApplication* application) {
   GdkRGBA background_color;
   gdk_rgba_parse(&background_color, "#000000");
   fl_view_set_background_color(view, &background_color);
+  gtk_widget_set_hexpand(GTK_WIDGET(view), TRUE);
+  gtk_widget_set_vexpand(GTK_WIDGET(view), TRUE);
   gtk_widget_show(GTK_WIDGET(view));
-  gtk_container_add(GTK_CONTAINER(window), GTK_WIDGET(view));
+
+  // Linux WebKit views are native GTK children layered above Flutter. Keep
+  // the Flutter view in a GtkOverlay so the webview plugin can attach without
+  // replacing or invalidating Flutter's OpenGL rendering surface.
+  GtkWidget* overlay = gtk_overlay_new();
+  gtk_widget_set_hexpand(overlay, TRUE);
+  gtk_widget_set_vexpand(overlay, TRUE);
+  gtk_widget_show(overlay);
+  gtk_container_add(GTK_CONTAINER(overlay), GTK_WIDGET(view));
+  gtk_container_add(GTK_CONTAINER(window), overlay);
 
   g_signal_connect_swapped(view, "first-frame", G_CALLBACK(first_frame_cb),
                            self);

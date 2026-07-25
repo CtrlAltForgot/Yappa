@@ -1,20 +1,175 @@
-📝 Changelog - 3/23/26 📝
-Welcome everyone, to Yappa! as of this release
+📝 Yappa Update — July 24, 2026 📝
 
-- Fixed Voice Decks to have full audio functionality with the current client & server builds.
-- Moved call control section from top right corner to bottom left area.
-- Minor visual updates relating to users in calls.
-- Added an info tab to the settings where changes can be logged (like the ones you're reading :D) & build information can be obtained for debugging & error logging purposes.
-- Fixed graphical issues with resizing channel list
-- Added the ability to double click on a Voice Deck to join it.
-- Added visual updates relating to server owners.
-- Added YUID (Yappa User ID) system, to lay the foundation for cross-server user identification & nicknames and/or username changes.
-- Fixed minor bugs relating to double-clicking to join a call.
-- Fixed minor bugs relating to mic/audio muting.
-- Fixed minor bugs relating to typing messages.
-- Fixed minor bugs relating to chat scrolling when a message is recieved.
-- Added profile settings panel.
-- Added image cropping utility.
-- Added sharing screen functionality, expect bugs!
+This release brings Yappa’s client and self-hosted server back into sync and
+makes major progress toward a dependable first public release.
 
-Thank you for your support. Please report any issues at: https://github.com/CtrlAltForgot/Yappa/issues
+Yappa’s permanent direction is privacy-first, fully open source, free to use
+and self-host, with no premium-only features, advertising, or monetized
+surveillance. Security work is now the project’s highest release priority.
+Yappa will not claim end-to-end encryption until its keys, protocol, tests, and
+independent review justify that claim.
+
+- New text feeds now prepare end-to-end encrypted messaging automatically from
+  the moment they are created. Yappa will not silently fall back to plaintext
+  if preparation fails. Existing feeds keep their honest legacy status and
+  history.
+- Encrypted messages can now send a caption with up to ten files as one
+  protected message. If the connection drops during upload, Yappa retains the
+  exact encrypted operation for a safe retry instead of splitting or
+  duplicating it.
+- Encrypted images now have an explicit local preview button. Yappa does not
+  decrypt images just because you scroll past them and does not send plaintext
+  thumbnails to the server. The temporary preview is erased when you close it.
+- Encrypted file errors now explain whether you should reconnect, wait, check
+  storage permissions, or retry without exposing private file locations or
+  technical encryption details.
+- The current Linux release package was rebuilt and launched after these
+  changes. Its native encryption, voice, protected-storage, and media-preview
+  libraries all resolved successfully. Linux packages now use portable
+  relative library paths and no longer reveal the computer account that built
+  them. The final package was rebuilt and startup-tested again after the latest
+  player and encrypted-file error improvements.
+- Corrected YouTube playback requests and kept Linux’s native video surface
+  inside the chat viewport so it cannot cover the message box while scrolling.
+- macOS packages now include Yappa’s message-encryption library and the
+  sandbox permissions needed to connect, use a microphone, and use a camera.
+- Windows packages now keep debugging information outside the download and
+  reject accidental build-account, retired-address, or private-key traces.
+- Rebuilt screen sharing on KDE Wayland around one native desktop-portal
+  session, eliminating the duplicate screen-selection prompts.
+- Fixed screen-share cancellation and retry behavior. Yappa now waits for real
+  video frames before showing that you are live.
+- Removed the accidental short screen-share cutoff caused by voice-state
+  updates clearing the active sharing flag.
+- Added screen-share quality choices for 720p30, 1080p30, 1080p60, and
+  1440p60. Yappa can reduce delivered quality when network conditions require
+  it instead of intentionally ending the stream.
+- Added Yappa’s Windows display and application-window picker with source
+  previews, explicit selection, and cancellation support.
+- Prepared Windows desktop-audio sharing through WASAPI loopback capture.
+- Added Linux system-audio capture to screen sharing through the default
+  PipeWire/PulseAudio output monitor. This now needs two-client testing.
+- Added pasting screenshots, copied images, and copied image files directly
+  into text-channel messages with Ctrl+V.
+- Improved image previews: click the image to zoom, click the surrounding
+  backdrop to close, or use the download and external-viewer actions.
+- Redesigned chat messages into a cleaner conversational layout with grouped
+  messages, quieter surfaces, compact timestamps, date dividers, hover
+  actions, and image attachments that occupy only their scaled image area.
+- Fixed Audio settings crashes caused by duplicate device identifiers and
+  safely fall back when a previously selected device is no longer available.
+- Fixed channel names, icons, and other shared channel customization so changes
+  are persisted by the server and propagated to connected clients.
+- Corrected emoji rendering in channel pickers and restored the server-owner
+  crown as an actual color emoji.
+- Fixed transparent member-list profile pictures so they no longer reveal a
+  brown owner-avatar background.
+- Added an in-place Retry connection action when a saved server is temporarily
+  unreachable. Yappa now keeps the remembered session during network outages
+  instead of making you back out and sign in again.
+- Realtime connections now keep retrying automatically, clear the unreachable
+  warning when they recover, and safely end active encrypted media when key
+  coordination is lost.
+- Protected message attachments with short-lived download links instead of
+  permanently public file paths. Existing image, media, text-preview, and
+  download behavior remains the same while you are signed in.
+- Removed the brief wrong-scroll-position flash when switching between text
+  feeds.
+- Public server addresses now default to HTTPS and cannot be saved with an
+  insecure HTTP connection. Local and private-network self-hosted nodes
+  continue to work over HTTP.
+- The downloadable server bundle now includes its own automatic HTTPS reverse
+  proxy and certificate storage. A new server can detect its public IP,
+  obtain a trusted certificate for that IP, and print the required forwarding
+  ports automatically. An included helper switches hosts to their own domains.
+- Saved login sessions and the private key behind your YUID now move out of
+  ordinary preference files and into your operating system’s protected
+  credential storage. Existing installations migrate automatically.
+- Saved sign-ins now expire safely, rotate their access token when restored,
+  and appear in a signed-in devices list where you can remotely log them out.
+- Animated profile pictures play continuously in the member list and animate
+  beside a message while you hover over that message.
+- Public servers now connect directly to their ordinary IP address over a
+  publicly trusted certificate. No generated DNS hostname is used.
+- Remembered servers now prove possession of a persistent cryptographic
+  identity before Yappa sends a password or saved session. If an address begins
+  answering as a different server, Yappa keeps your session locally and warns
+  you instead of sending the credential.
+- Connecting to a server through its private LAN address now keeps voice
+  signaling on the working private LiveKit listener instead of incorrectly
+  routing it through the public address.
+- Yappa can discover a remembered public server on the same LAN when a router
+  cannot loop back to its public address. The server must prove its saved
+  identity, and Yappa retains normal HTTPS certificate checking rather than
+  exposing passwords or sessions over plaintext. The same protected route is
+  used for realtime events, file/image uploads, and LiveKit voice/video
+  signaling.
+- Saved nodes that still point to the retired raw LAN backend on port 4100 now
+  migrate through that signed discovery response to the secure public
+  transport plus LAN TLS route. The remembered identity and sign-in remain
+  intact instead of requiring the node to be deleted and joined again.
+- New accounts use stronger password hashing and a 10-character minimum.
+  Existing accounts upgrade safely the next time their password is verified.
+- Servers reveal less information before sign-in, and automated multi-user
+  checks now guard admin tools, messages, sessions, voice, and realtime access.
+- Repeated incorrect passwords now trigger progressively longer temporary
+  delays, while a successful sign-in clears the delay safely.
+- Servers now limit bursts of messages, uploads, previews, account changes,
+  voice setup, and realtime control traffic. Signed-in limits are kept
+  separate per account and workload so one busy feature—or another person
+  sharing your public IP—does not consume every allowance.
+- Yappa now recognizes an encrypted-channel cutover as one-way. Older or
+  unsupported clients refuse to send plaintext messages, files, or preview
+  requests into those channels. Encrypted channels show their device
+  enrollment and membership synchronization state and keep the composer
+  unavailable until the verified group is ready. No existing legacy channel
+  is converted automatically.
+- Server diagnostics now avoid account names, private file paths, credentials,
+  messages, and key material, with automated leak checks guarding future logs.
+- Voice decks now establish a verified, client-generated encryption key before
+  connecting LiveKit or enabling the microphone. The voice stage shows whether
+  encryption is being established, active, or has failed, and there is no
+  plaintext fallback. A failed membership or key verification now erases the
+  current call key and stops microphone, camera, and screen publication.
+  Leaving, changing servers, or losing the server connection also cancels
+  delayed voice setup so an old join cannot turn media back on afterward.
+  Native two-client and independent security validation are still required
+  before Yappa claims completed end-to-end encryption.
+- Self-hosted servers now offer authenticated voice/video relay over UDP 443
+  when a direct media route is unavailable, without changing the IP address
+  people use to join. Networks that block all UDP still need the future
+  TURN-over-TLS fallback.
+- Link cards now keep a compact site card when a website blocks metadata
+  fetching, and use a site icon and short description when available.
+  Temporary preview failures can retry instead of hiding the card until Yappa
+  restarts.
+  Linux inline video players now attach through the required native overlay,
+  preventing the player from replacing Yappa with a black screen.
+  Embedded providers load through a contained HTML frame with the originating
+  public media URL and the referrer policy required by YouTube, rather than a
+  direct player navigation that can be rejected with errors 152 or 153.
+  YouTube, TikTok, and Vimeo videos can be
+  played directly in chat after pressing Play; the embedded site is not loaded
+  before that action and cannot request Yappa's camera or microphone access.
+  Portrait TikTok players retain their vertical shape instead of being
+  squeezed into a widescreen frame.
+- Encrypted text channels now wait for verified device membership before
+  showing their composer, then render and send end-to-end encrypted text.
+  Editing and deleting encrypted messages use the same protected channel
+  history. Files can be sent through the encrypted channel and appear as
+  locked cards that decrypt only when you choose where to save them. Encrypted
+  message reactions can also be added and removed.
+- Restored and documented the Unraid deployment used by the project, including
+  the Yappa backend and LiveKit voice/video service.
+
+Still being finished:
+
+- End-to-end encryption for calls, messages, and attachments with safe
+  multi-device key management.
+- Two-client validation of Linux desktop/system audio while screen sharing.
+- Long-duration screen-share soak testing.
+- Real Windows hardware validation for screen video and desktop audio.
+- Public internet hosting, security review, and release packaging.
+
+Thank you for helping test Yappa. Please report issues at:
+https://github.com/CtrlAltForgot/Yappa/issues

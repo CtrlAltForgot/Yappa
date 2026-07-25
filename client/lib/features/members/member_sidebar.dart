@@ -7,14 +7,12 @@ import '../../shared/avatar_image.dart';
 class MemberSidebar extends StatelessWidget {
   final List<Member> members;
 
-  const MemberSidebar({
-    super.key,
-    required this.members,
-  });
+  const MemberSidebar({super.key, required this.members});
 
   @override
   Widget build(BuildContext context) {
-    final sortedMembers = [...members]..sort((a, b) {
+    final sortedMembers = [...members]
+      ..sort((a, b) {
         final aRank = _sortRank(a);
         final bRank = _sortRank(b);
         if (aRank != bRank) {
@@ -23,10 +21,12 @@ class MemberSidebar extends StatelessWidget {
         return a.name.toLowerCase().compareTo(b.name.toLowerCase());
       });
 
-    final onlineMembers =
-        sortedMembers.where((member) => member.isOnline).toList();
-    final offlineMembers =
-        sortedMembers.where((member) => !member.isOnline).toList();
+    final onlineMembers = sortedMembers
+        .where((member) => member.isOnline)
+        .toList();
+    final offlineMembers = sortedMembers
+        .where((member) => !member.isOnline)
+        .toList();
 
     final items = <_SidebarListItem>[
       _SidebarListItem.header('ONLINE — ${onlineMembers.length}'),
@@ -46,9 +46,7 @@ class MemberSidebar extends StatelessWidget {
       width: 280,
       decoration: BoxDecoration(
         color: NewChatColors.panel,
-        border: Border(
-          left: BorderSide(color: NewChatColors.outline),
-        ),
+        border: Border(left: BorderSide(color: NewChatColors.outline)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -57,16 +55,14 @@ class MemberSidebar extends StatelessWidget {
             height: 58,
             padding: const EdgeInsets.symmetric(horizontal: 18),
             decoration: BoxDecoration(
-              border: Border(
-                bottom: BorderSide(color: NewChatColors.outline),
-              ),
+              border: Border(bottom: BorderSide(color: NewChatColors.outline)),
             ),
             alignment: Alignment.centerLeft,
             child: Text(
               'Members • ${members.length}',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
             ),
           ),
           Expanded(
@@ -100,12 +96,7 @@ class MemberSidebar extends StatelessWidget {
   }
 }
 
-enum _SidebarListItemKind {
-  header,
-  empty,
-  spacer,
-  member,
-}
+enum _SidebarListItemKind { header, empty, spacer, member }
 
 class _SidebarListItem {
   final _SidebarListItemKind kind;
@@ -119,7 +110,7 @@ class _SidebarListItem {
   }
 
   const _SidebarListItem.empty(String label)
-      : this._(_SidebarListItemKind.empty, label: label);
+    : this._(_SidebarListItemKind.empty, label: label);
 
   const _SidebarListItem.spacer() : this._(_SidebarListItemKind.spacer);
 
@@ -131,9 +122,7 @@ class _SidebarListItem {
 class _SectionHeader extends StatelessWidget {
   final String label;
 
-  const _SectionHeader({
-    required this.label,
-  });
+  const _SectionHeader({required this.label});
 
   @override
   Widget build(BuildContext context) {
@@ -155,9 +144,7 @@ class _SectionHeader extends StatelessWidget {
 class _EmptyHint extends StatelessWidget {
   final String text;
 
-  const _EmptyHint({
-    required this.text,
-  });
+  const _EmptyHint({required this.text});
 
   @override
   Widget build(BuildContext context) {
@@ -165,10 +152,7 @@ class _EmptyHint extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(6, 2, 6, 8),
       child: Text(
         text,
-        style: TextStyle(
-          color: NewChatColors.textMuted,
-          fontSize: 12,
-        ),
+        style: TextStyle(color: NewChatColors.textMuted, fontSize: 12),
       ),
     );
   }
@@ -177,9 +161,7 @@ class _EmptyHint extends StatelessWidget {
 class _MemberTile extends StatelessWidget {
   final Member member;
 
-  const _MemberTile({
-    required this.member,
-  });
+  const _MemberTile({required this.member});
 
   String _subtitleForMember(Member member) {
     if (member.isInVoiceDeck) {
@@ -220,9 +202,7 @@ class _MemberTile extends StatelessWidget {
                 width: 38,
                 height: 38,
                 decoration: BoxDecoration(
-                  color: member.isOwner
-                      ? const Color(0xFF2A2113)
-                      : NewChatColors.panelAlt,
+                  color: Colors.transparent,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 clipBehavior: Clip.antiAlias,
@@ -239,12 +219,9 @@ class _MemberTile extends StatelessWidget {
                   child: Transform.rotate(
                     angle: -0.42,
                     alignment: Alignment.bottomRight,
-                    child: const Text(
+                    child: Text(
                       '👑',
-                      style: TextStyle(
-                        fontSize: 13,
-                        height: 1,
-                      ),
+                      style: yappaEmojiTextStyle(13, height: 1),
                     ),
                   ),
                 ),
@@ -315,18 +292,12 @@ class _MemberAvatarImage extends StatelessWidget {
 class _PresenceIndicator extends StatelessWidget {
   final Member member;
 
-  const _PresenceIndicator({
-    required this.member,
-  });
+  const _PresenceIndicator({required this.member});
 
   @override
   Widget build(BuildContext context) {
     if (member.isInVoiceDeck) {
-      return const Icon(
-        Icons.call_rounded,
-        size: 15,
-        color: Color(0xFF54D17A),
-      );
+      return const Icon(Icons.call_rounded, size: 15, color: Color(0xFF54D17A));
     }
 
     return Container(
@@ -337,10 +308,7 @@ class _PresenceIndicator extends StatelessWidget {
             ? const Color(0xFF54D17A)
             : NewChatColors.textMuted,
         shape: BoxShape.circle,
-        border: Border.all(
-          color: NewChatColors.panel,
-          width: 2,
-        ),
+        border: Border.all(color: NewChatColors.panel, width: 2),
       ),
     );
   }

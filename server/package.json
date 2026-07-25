@@ -7,7 +7,9 @@
   "type": "commonjs",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "node --watch src/server.js"
+    "dev": "node --watch src/server.js",
+    "test": "npm run test:security",
+    "test:security": "node test/authorization_integration.js && node test/server_identity_integration.js && node test/lan_discovery_relay_integration.js && node test/safe_preview_lookup.js && node test/password_hardening_integration.js && node test/abuse_protection_integration.js && node test/messaging_e2ee_schema_integration.js && node test/log_safety.js && node test/repository_secret_scan.js && node test/deployment_safety.js && node test/backup_integration.js"
   },
   "engines": {
     "node": ">=18"
@@ -23,5 +25,8 @@
     "multer": "^2.1.1",
     "socket.io": "^4.8.1",
     "tweetnacl": "^1.0.3"
+  },
+  "devDependencies": {
+    "ws": "^8.21.1"
   }
 }
