@@ -1047,6 +1047,14 @@ A current hosted Windows workflow run and real Windows
 connection/vault/media execution are still required before treating that
 artifact as a validated release.
 
+The first current hosted Windows attempt reached compilation but failed under
+Visual Studio 18 / MSVC 14.51 because `webview_all_windows` 1.2.1 still enables
+legacy `/await`, and the updated STL promotes its experimental-coroutine
+deprecation to error `STL1011`. Yappa now scopes Microsoft's documented
+compatibility definition only to the WebView plugin target; no project-wide
+warning suppression was added. Static policy checks pass, but the hosted
+Windows job must be rerun to prove compilation and packaging.
+
 ## Future Hosted File Sharing
 
 Yappa should eventually let a server host durable files independently of chat

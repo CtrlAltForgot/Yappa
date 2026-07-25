@@ -240,6 +240,16 @@ assert.match(
   /--remap-path-prefix=\$ENV\{USERPROFILE\}=\/_yappa_build_home/,
   'Native Windows Rust diagnostics must not identify the release builder.',
 );
+assert.match(
+  windowsCmake,
+  /target_compile_definitions\(\s*webview_all_windows_plugin[\s\S]*?_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS[\s\S]*?\)/,
+  'The MSVC coroutine compatibility definition must target only the WebView plugin.',
+);
+assert.doesNotMatch(
+  windowsCmake,
+  /add_compile_definitions\([\s\S]*?_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS/,
+  'Do not suppress experimental-coroutine diagnostics project-wide.',
+);
 assert.match(desktopWorkflow, /name: Validate Linux bundle isolation/);
 assert.match(desktopWorkflow, /readelf -d "\$file"/);
 assert.match(desktopWorkflow, /ldd "\$library"/);

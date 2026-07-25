@@ -89,6 +89,19 @@ add_dependencies(${BINARY_NAME} yappa_mls_native)
 # them to the application.
 include(flutter/generated_plugins.cmake)
 
+# webview_all_windows 1.2.1 still enables MSVC's legacy /await mode. Visual
+# Studio 18 / MSVC 14.51 turns the matching experimental-coroutine deprecation
+# into a hard STL1011 assertion. Keep this compatibility definition scoped to
+# that third-party target until the plugin moves fully to standard C++20
+# coroutines; do not silence the warning across Yappa or the other plugins.
+if(MSVC AND TARGET webview_all_windows_plugin)
+  target_compile_definitions(
+    webview_all_windows_plugin
+    PRIVATE
+    _SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
+  )
+endif()
+
 
 # === Installation ===
 # Support files are copied into place next to the executable, so that it can

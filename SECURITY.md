@@ -751,6 +751,11 @@ Flutter debug symbols stay outside the distributable directory, and a binary
 scan rejects builder-home, retired `sslip.io`, Codex-key-label, and private-key
 markers before upload. A hosted run and real Windows connection,
 credential-vault, and media validation remain required.
+The first current hosted run exposed MSVC 14.51 error `STL1011` in
+`webview_all_windows` 1.2.1 because that dependency still opts into legacy
+`/await`. The compatibility definition recommended by the STL diagnostic is
+applied only to `webview_all_windows_plugin`; Yappa and every other dependency
+retain normal deprecation enforcement. A hosted rerun remains required.
 
 The design must cover:
 

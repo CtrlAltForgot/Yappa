@@ -37,6 +37,9 @@ independent review justify that claim.
   sandbox permissions needed to connect, use a microphone, and use a camera.
 - Windows packages now keep debugging information outside the download and
   reject accidental build-account, retired-address, or private-key traces.
+- Restored Windows build compatibility with the newest Visual Studio runner
+  while keeping the legacy coroutine allowance isolated to the affected
+  embedded-browser component.
 - Rebuilt screen sharing on KDE Wayland around one native desktop-portal
   session, eliminating the duplicate screen-selection prompts.
 - Fixed screen-share cancellation and retry behavior. Yappa now waits for real
