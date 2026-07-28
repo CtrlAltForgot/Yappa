@@ -1146,16 +1146,23 @@ Current implementation slice:
   and candidate operational verification; failure restores the old
   installation. Rollback protects and retains the newer state before
   reactivating the prior snapshot. Focused success/rollback/failure tests and
-  the complete local backend/security suite pass; fresh-CI evidence is still
-  required.
+  the complete local backend/security suite pass. Exact-head security run
+  `30409422326` passed all jobs for upgrade commit `58ca781`, including
+  backend/bundle, Flutter/native MLS, official vectors, and dependency audits.
+- Data-preserving Linux uninstall is implemented locally. It requires current
+  operational health, a new verified encrypted backup, a separate fresh state
+  destination, and no unresolved lifecycle snapshots. Runtime removal occurs
+  only after `.env` and `data/` are privately preserved; placement failure
+  restores the installation. Focused tests and the complete local
+  backend/security suite pass; fresh-CI evidence is still required.
 
 Next work, in order:
 
 1. Finish full validation, commit, and obtain fresh-checkout CI evidence for
    restore, upgrade/rollback, and the operational verifier; exercise them on
    Unraid if deployment access becomes available.
-2. Implement uninstall, service/autostart,
-   firewall, and crash-recovery behavior; run the identical conformance
+2. Implement service/autostart, firewall, and crash-recovery behavior; run the
+   identical conformance
    contract across every Tier-1 Linux/Windows target.
 3. Finish hosted Linux desktop evidence and signed release engineering:
    production versions, signing, SBOMs, provenance, tagged publication,

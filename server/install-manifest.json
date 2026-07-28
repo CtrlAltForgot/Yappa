@@ -217,6 +217,7 @@
       "restore",
       "upgrade",
       "rollback",
+      "uninstall",
       "verify",
       "verify-backup"
     ],

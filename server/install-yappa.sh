@@ -28,6 +28,9 @@ Usage:
     --backup /absolute/new/pre-upgrade-backup.tar.gz.age
   ./install-yappa.sh rollback \
     --backup /absolute/new/pre-rollback-backup.tar.gz.age
+  ./install-yappa.sh uninstall \
+    --backup /absolute/new/pre-uninstall-backup.tar.gz.age \
+    --preserve-data /absolute/new/preserved-state
 
 This development installer operates only on the locally present server tree or
 an explicitly supplied local bundle and checksum. Remote installation remains
@@ -517,9 +520,36 @@ case "$COMMAND" in
     "$SCRIPT_ROOT/rollback-yappa.sh" "$BACKUP_PATH"
     ;;
   uninstall)
-    require_manifest
-    echo "The '$COMMAND' lifecycle command is specified but not implemented safely yet." >&2
-    exit 1
+    BACKUP_PATH=""
+    PRESERVE_DIRECTORY=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --backup | --preserve-data)
+          if [[ $# -lt 2 ]]; then
+            echo "$1 requires a value." >&2
+            exit 1
+          fi
+          case "$1" in
+            --backup) BACKUP_PATH="$2" ;;
+            --preserve-data) PRESERVE_DIRECTORY="$2" ;;
+          esac
+          shift
+          ;;
+        *)
+          echo "Unknown uninstall option: $1" >&2
+          usage
+          exit 1
+          ;;
+      esac
+      shift
+    done
+    require_initialized
+    if [[ -z "$BACKUP_PATH" || -z "$PRESERVE_DIRECTORY" ]]; then
+      echo "Uninstall requires --backup and --preserve-data." >&2
+      exit 1
+    fi
+    "$SCRIPT_ROOT/uninstall-yappa.sh" \
+      "$BACKUP_PATH" "$PRESERVE_DIRECTORY"
     ;;
   *)
     echo "Unknown command: $COMMAND" >&2

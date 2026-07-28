@@ -85,6 +85,7 @@ RUNTIME_FILES=(
   "src/verify-server-identity.js"
   "start-yappa.sh"
   "upgrade-yappa.sh"
+  "uninstall-yappa.sh"
   "verify-yappa-install.sh"
   "verify-yappa-backup.sh"
 )
@@ -105,6 +106,7 @@ for executable_name in \
   restore-yappa-backup.sh \
   rollback-yappa.sh \
   upgrade-yappa.sh \
+  uninstall-yappa.sh \
   verify-yappa-install.sh \
   verify-yappa-backup.sh; do
   chmod 0755 "$STAGING_ROOT/$executable_name"

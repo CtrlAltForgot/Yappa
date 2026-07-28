@@ -73,6 +73,10 @@ const rollbackInstaller = fs.readFileSync(
   path.join(serverRoot, 'rollback-yappa.sh'),
   'utf8',
 );
+const uninstallInstaller = fs.readFileSync(
+  path.join(serverRoot, 'uninstall-yappa.sh'),
+  'utf8',
+);
 const installManifest = JSON.parse(
   fs.readFileSync(path.join(serverRoot, 'install-manifest.json'), 'utf8'),
 );
@@ -152,6 +156,7 @@ for (const [name, script] of [
   ['restore-yappa-backup.sh', restoreInstaller],
   ['upgrade-yappa.sh', upgradeInstaller],
   ['rollback-yappa.sh', rollbackInstaller],
+  ['uninstall-yappa.sh', uninstallInstaller],
   ['verify-yappa-backup.sh', restoreVerifier],
 ]) {
   assert.match(script, /^umask 077$/m, `${name} must create private files`);
@@ -201,6 +206,16 @@ assert.match(
   /mv -- "\$SCRIPT_ROOT" "\$PRE_ROLLBACK_ROOT"/,
 );
 assert.match(rollbackInstaller, /newer installation was restored/);
+assert.match(uninstallInstaller, /verify-yappa-backup\.sh/);
+assert.match(uninstallInstaller, /install-yappa\.sh" verify/);
+assert.match(uninstallInstaller, /cp -a -- "\$SCRIPT_ROOT\/\.env"/);
+assert.match(uninstallInstaller, /cp -a -- "\$SCRIPT_ROOT\/data"/);
+assert.match(uninstallInstaller, /mv -- "\$SCRIPT_ROOT" "\$TOMBSTONE_ROOT"/);
+assert.match(uninstallInstaller, /server installation was restored/);
+assert.match(
+  uninstallInstaller,
+  /Resolve the retained \.\$retained_suffix installation/,
+);
 assert.match(startup, /Public join address: \$\{YAPPA_ADVERTISED_ADDRESS\}/);
 assert.match(
   startup,

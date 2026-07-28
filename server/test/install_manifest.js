@@ -203,6 +203,7 @@ assert.deepEqual(manifest.implementedLifecycleCommands.linux, [
   'restore',
   'upgrade',
   'rollback',
+  'uninstall',
   'verify',
   'verify-backup',
 ]);

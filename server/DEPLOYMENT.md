@@ -156,6 +156,25 @@ verifies the older installation. The newer directory is retained as
 `.pre-rollback`. Activity created after the upgrade is therefore preserved but
 is not present in the active older snapshot. Never merge the two databases.
 
+## Data-preserving uninstall
+
+Uninstall requires two new absolute destinations and preserves server state by
+default:
+
+```bash
+./install-yappa.sh uninstall \
+  --backup /secure/path/yappa-before-uninstall.tar.gz.age \
+  --preserve-data /secure/path/yappa-preserved-state
+```
+
+The command verifies the running installation, creates and verifies an
+encrypted backup, stops the stack, copies `.env` and `data/` into a private
+preservation directory, then removes the active runtime. It refuses overwrite
+and refuses to proceed while `.rollback`, `.pre-rollback`, or
+`.failed-upgrade` installations remain unresolved. A placement failure restores
+and restarts the original installation. The preservation directory is not
+directly runnable; restore it only through a checksum-pinned bundle.
+
 ## Start a public server
 
 Run:

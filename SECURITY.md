@@ -1075,6 +1075,15 @@ Before public DMs, Yappa must additionally define and verify:
   activity. Tests cover success, state continuity, deliberate rollback, and
   automatic recovery from failed candidate verification. Bundle signatures,
   Windows parity, and real-host upgrade evidence remain required.
+- Linux uninstall now preserves state by default and requires two independent
+  recovery locations: a newly encrypted backup that passes isolated
+  verification and a fresh private directory containing `.env` plus `data/`.
+  It verifies current health, refuses overwrite and unresolved lifecycle
+  snapshots, stops the stack, places the preserved copy, and only then removes
+  runtime files. A state-placement failure restores and restarts the original
+  installation. Tests confirm permissions, attachment/state continuity,
+  refusal paths, and cleanup. Service/firewall registration removal and
+  Windows ACL parity remain open.
 - Ensure production secrets never live in the repository or images.
 - Add dependency auditing, secret scanning, static analysis, and reproducible
   release provenance to CI.

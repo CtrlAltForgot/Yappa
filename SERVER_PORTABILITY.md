@@ -173,6 +173,16 @@ post-upgrade activity. Integration coverage proves successful upgrade,
 explicit rollback, state preservation, and failed-candidate recovery. Windows
 parity and real-host conformance remain open.
 
+The Linux `uninstall` lifecycle is data-preserving by contract. It requires a
+new encrypted backup and a separate fresh preservation destination, verifies
+both current health and the encrypted recovery point, stops the stack, copies
+only `.env` and `data/` with private modes, and removes runtime files only
+after the preserved state is placed. It refuses unresolved rollback or failed
+candidate directories instead of orphaning them. Tests cover successful
+removal, state/permission preservation, existing-target refusal, retained
+rollback refusal, and temporary-path cleanup. OS service and firewall removal
+will be added with their registration implementation.
+
 ## Supported-Host Target
 
 ### Tier 1: validated public-release hosts
