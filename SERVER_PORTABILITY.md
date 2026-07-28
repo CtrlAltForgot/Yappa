@@ -111,12 +111,13 @@ disabled.
 `server/install-yappa.sh` is the first thin Linux front end. It can preflight
 the local x86-64 development server tree and, only with explicit
 `--local-source`, dispatch the current start/stop/status/log/backup,
-install-verification, and backup-verification operations.
+fresh-install restore, install-verification, and backup-verification
+operations.
 `server/Install-Yappa.ps1` currently implements prerequisite
 preflight only and refuses every mutating lifecycle command. This is useful
 foundation, not Windows support: remote download, artifact verification,
-restore, upgrade, rollback, uninstall, services,
-firewalls, cross-platform discovery, and the conformance matrix remain open.
+upgrade, rollback, uninstall, services, firewalls, cross-platform discovery,
+and the conformance matrix remain open.
 
 `.github/scripts/build-server-bundle.sh` now packages an explicit canonical
 runtime allowlist into a normalized `tar.gz` with source/version metadata and a
@@ -147,6 +148,17 @@ retains isolated encrypted restore inspection. The manifest distinguishes the
 implemented host checks from still-open LiveKit signaling, TURN, signed LAN
 invitation, and outside-network evidence so the future client dashboard cannot
 present partial verification as full health.
+
+The Linux `restore` lifecycle now combines a checksum-pinned local bundle with
+an encrypted backup only in a brand-new absolute directory. Decryption streams
+into private staging rather than a plaintext archive; the operation rejects
+links, special files, an unsafe or mismatched `DB_PATH`, multiple databases or
+identities, SQLite corruption, and schemas newer than the selected bundle.
+Runtime and state are assembled before one final rename and remain stopped for
+configuration review. Integration tests cover a complete history/attachment
+round trip, wrong checksum, existing destination, future schema, escaped
+database path, malicious symlink, and staging cleanup. This is not yet a
+cross-platform or production deployment claim.
 
 ## Supported-Host Target
 

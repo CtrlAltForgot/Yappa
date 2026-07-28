@@ -22,6 +22,8 @@ Usage:
   ./install-yappa.sh backup /absolute/path/backup.tar.gz.age
   ./install-yappa.sh verify
   ./install-yappa.sh verify-backup /absolute/path/backup.tar.gz.age
+  ./install-yappa.sh restore --backup BACKUP --local-bundle BUNDLE \
+    --sha256 DIGEST --install-dir /absolute/new/path
 
 This development installer operates only on the locally present server tree or
 an explicitly supplied local bundle and checksum. Remote installation remains
@@ -402,7 +404,53 @@ case "$COMMAND" in
     fi
     "$SCRIPT_ROOT/verify-yappa-backup.sh" "$1"
     ;;
-  restore | upgrade | rollback | uninstall)
+  restore)
+    BACKUP_PATH=""
+    LOCAL_BUNDLE=""
+    EXPECTED_SHA256=""
+    INSTALL_DIRECTORY=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --backup | --local-bundle | --sha256 | --install-dir)
+          if [[ $# -lt 2 ]]; then
+            echo "$1 requires a value." >&2
+            exit 1
+          fi
+          case "$1" in
+            --backup) BACKUP_PATH="$2" ;;
+            --local-bundle) LOCAL_BUNDLE="$2" ;;
+            --sha256) EXPECTED_SHA256="$2" ;;
+            --install-dir) INSTALL_DIRECTORY="$2" ;;
+          esac
+          shift
+          ;;
+        *)
+          echo "Unknown restore option: $1" >&2
+          usage
+          exit 1
+          ;;
+      esac
+      shift
+    done
+    require_manifest
+    if [[ -z "$BACKUP_PATH" || -z "$LOCAL_BUNDLE" ||
+      -z "$EXPECTED_SHA256" || -z "$INSTALL_DIRECTORY" ]]; then
+      echo "Restore requires --backup, --local-bundle, --sha256, and --install-dir." >&2
+      exit 1
+    fi
+    if [[ "$INSTALL_DIRECTORY" != /* || "$INSTALL_DIRECTORY" == "/" ]]; then
+      echo "--install-dir must be a new absolute directory other than /." >&2
+      exit 1
+    fi
+    INSTALL_PARENT="$(dirname -- "$INSTALL_DIRECTORY")"
+    "$SCRIPT_ROOT/restore-yappa-backup.sh" \
+      "$BACKUP_PATH" \
+      "$LOCAL_BUNDLE" \
+      "$EXPECTED_SHA256" \
+      "$INSTALL_DIRECTORY" \
+      "$INSTALL_PARENT"
+    ;;
+  upgrade | rollback | uninstall)
     require_manifest
     echo "The '$COMMAND' lifecycle command is specified but not implemented safely yet." >&2
     exit 1

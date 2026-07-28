@@ -1052,6 +1052,17 @@ Before public DMs, Yappa must additionally define and verify:
   the required server identity/configuration before removing the restored
   copy. The encrypted file is mode `0600`, no partial output remained, and the
   backend automatically resumed healthy with its hardened runtime settings.
+- The Linux `restore` lifecycle now restores into a new installation without
+  writing a plaintext archive or merging with existing state. It first
+  installs a checksum-pinned local runtime into private staging, then requires
+  the backup's configured database to remain inside `data/`, rejects links and
+  special files, verifies SQLite integrity and supported schema, and requires
+  exactly one persistent server identity. Only a fully assembled runtime is
+  renamed into the requested fresh destination, and it remains stopped for
+  configuration review. Negative integration tests cover checksum failure,
+  overwrite attempts, future schemas, escaped `DB_PATH`, malicious symlinks,
+  and cleanup. Artifact authenticity, Windows restore, and production
+  deployment verification remain open.
 - Ensure production secrets never live in the repository or images.
 - Add dependency auditing, secret scanning, static analysis, and reproducible
   release provenance to CI.

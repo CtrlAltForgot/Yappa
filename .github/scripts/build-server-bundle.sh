@@ -73,6 +73,7 @@ RUNTIME_FILES=(
   "install-yappa.sh"
   "package-lock.json"
   "package.json"
+  "restore-yappa-backup.sh"
   "setup-domain.sh"
   "src/auth.js"
   "src/config.js"
@@ -99,6 +100,7 @@ for executable_name in \
   start-yappa.sh \
   setup-domain.sh \
   backup-yappa.sh \
+  restore-yappa-backup.sh \
   verify-yappa-install.sh \
   verify-yappa-backup.sh; do
   chmod 0755 "$STAGING_ROOT/$executable_name"
@@ -168,6 +170,7 @@ ARCHIVE_LISTING="$(tar -tzf "$FINAL_ARCHIVE")"
 for required_entry in \
   "$BUNDLE_NAME/BUILD-METADATA.json" \
   "$BUNDLE_NAME/install-manifest.json" \
+  "$BUNDLE_NAME/restore-yappa-backup.sh" \
   "$BUNDLE_NAME/docker-compose.yml" \
   "$BUNDLE_NAME/src/server.js"; do
   if ! grep -Fxq "$required_entry" <<< "$ARCHIVE_LISTING"; then

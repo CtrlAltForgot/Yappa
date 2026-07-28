@@ -1120,7 +1120,10 @@ Completed and evidenced:
 
 Current implementation slice:
 
-- `verify-yappa-install.sh` now verifies Linux container health, schema and
+- The operational verifier is committed and pushed. Its backend job passed in
+  run `30408590340`; that workflow was later superseded by a documentation-only
+  push, so a fresh exact-head full workflow result is still required.
+- `verify-yappa-install.sh` verifies Linux container health, schema and
   SQLite integrity, persistent identity and private storage modes, an actual
   Ed25519 server proof, API/TLS identity consistency, Socket.IO WebSocket
   upgrade, and guarded LiveKit routing. Its end-to-end LAN fixture and
@@ -1129,13 +1132,20 @@ Current implementation slice:
   forced TURN, or real media. Those remain native/external matrix tests.
 - `verify` means operational install verification; encrypted backup restore
   inspection remains independently available as `verify-backup`.
+- Safe Linux fresh-install restore is now implemented locally and its focused
+  and complete backend/security suites pass. It combines an encrypted backup
+  with a checksum-pinned local bundle in private staging, validates the
+  configured database, integrity, supported schema and persistent identity,
+  rejects overwrite/links/special files/path escape, atomically places the
+  completed runtime, and leaves it stopped. Fresh-checkout CI evidence is not
+  yet recorded.
 
 Next work, in order:
 
-1. Commit and obtain fresh-checkout CI evidence for the operational verifier,
-   then exercise it on the deployed Unraid installation if deployment access
-   is available.
-2. Implement safe restore, upgrade, rollback, uninstall, service/autostart,
+1. Finish full validation, commit, and obtain fresh-checkout CI evidence for
+   safe restore and the operational verifier; exercise both on Unraid if
+   deployment access becomes available.
+2. Implement transactional upgrade/rollback, uninstall, service/autostart,
    firewall, and crash-recovery behavior; run the identical conformance
    contract across every Tier-1 Linux/Windows target.
 3. Finish hosted Linux desktop evidence and signed release engineering:
@@ -1250,13 +1260,18 @@ published artifact without HTTPS download, SHA-256, and detached-signature
 metadata. The current manifest remains explicitly unpublished and disables
 client command generation and local supervision.
 
-The initial Linux wrapper preflights the local development server tree and
-provides the existing safe start/stop/status/log/backup lifecycle behind an
-explicit `--local-source` development flag. The PowerShell wrapper reads the
-same contract and performs prerequisite checks but refuses mutation. It is not
-Windows support evidence. Signed bundles, remote installation,
-restore/upgrade/rollback/uninstall, service/firewall integration,
-cross-platform discovery, and every Tier-1 conformance run remain required.
+The Linux wrapper preflights the local development server tree and provides
+safe start/stop/status/log/backup/verify plus checksum-pinned fresh-install
+restore. Restore assembles the selected runtime and decrypted state privately,
+validates its configured database, integrity, schema and identity, refuses
+merge/overwrite, and leaves the atomic final installation stopped. Focused
+positive and adversarial tests and the complete backend/security suite pass
+locally; fresh CI is still required. The PowerShell wrapper reads the same
+contract and performs prerequisite checks but refuses mutation. It is not
+Windows support evidence.
+Signed bundles, remote installation, upgrade/rollback/uninstall,
+service/firewall integration, cross-platform discovery, and every Tier-1
+conformance run remain required.
 
 A deterministic canonical server bundle is now implemented behind
 `.github/scripts/build-server-bundle.sh`. It stages only runtime files,

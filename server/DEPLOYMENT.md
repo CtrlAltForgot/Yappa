@@ -16,9 +16,9 @@ end:
 
 Use `--lan` after `--local-source` for private-network-only development. The
 preflight checks the current x86-64, memory, disk, Docker Compose, backup, and
-restore prerequisites before startup. After initialization it also dispatches
-`start`, `stop`, `status`, `logs`, `backup`, and `verify` to the existing
-hardened operations.
+restore prerequisites before startup. It also dispatches `start`, `stop`,
+`status`, `logs`, `backup`, `restore`, `verify`, and `verify-backup` to the
+implemented hardened operations.
 
 This is not a remote public installer. `install-manifest.json` is explicitly
 an unpublished development manifest: it has no artifact URL, checksum,
@@ -105,6 +105,25 @@ Encrypted backup restore inspection is a separate command:
 ```bash
 ./install-yappa.sh verify-backup /path/yappa-backup.tar.gz.age
 ```
+
+To restore a backup with a checksum-pinned local bundle, choose a new absolute
+destination whose parent already exists:
+
+```bash
+./install-yappa.sh restore \
+  --backup /secure/path/yappa-backup-YYYY-MM-DD.tar.gz.age \
+  --local-bundle /path/yappa-server-0.1.0-dev.tar.gz \
+  --sha256 FULL_LOWERCASE_SHA256 \
+  --install-dir /absolute/new/yappa-server
+```
+
+Restore decrypts directly into a private assembly directory, validates the
+bundle before combining it with state, rejects links and special files,
+requires `.env`, the configured single database, and one persistent identity,
+and runs SQLite integrity and schema checks. It never writes a plaintext
+archive or merges into an existing destination. The completed installation is
+renamed into place and left stopped so its network configuration can be
+reviewed before `install-yappa.sh start`.
 
 ## Start a public server
 
@@ -243,8 +262,9 @@ expected `.env`, database, and persistent server identity, runs SQLite's
 integrity check, prints only schema and row counts, and removes the restored
 copy on success or failure. It never writes a plaintext archive.
 
-Restore only into an empty, access-controlled server directory after stopping
-the stack:
+Prefer the fresh-install restore lifecycle above. For an older source-tree
+installation without that command, restore only into an empty,
+access-controlled server directory after stopping the stack:
 
 ```bash
 age --decrypt /secure/path/yappa-backup-YYYY-MM-DD.tar.gz.age | tar -xzf - -C /path/to/empty/yappa

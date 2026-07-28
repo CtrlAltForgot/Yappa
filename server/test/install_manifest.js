@@ -200,6 +200,7 @@ assert.deepEqual(manifest.implementedLifecycleCommands.linux, [
   'status',
   'logs',
   'backup',
+  'restore',
   'verify',
   'verify-backup',
 ]);

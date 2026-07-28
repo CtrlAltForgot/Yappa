@@ -61,6 +61,10 @@ const restoreVerifier = fs.readFileSync(
   path.join(serverRoot, 'verify-yappa-backup.sh'),
   'utf8',
 );
+const restoreInstaller = fs.readFileSync(
+  path.join(serverRoot, 'restore-yappa-backup.sh'),
+  'utf8',
+);
 const installManifest = JSON.parse(
   fs.readFileSync(path.join(serverRoot, 'install-manifest.json'), 'utf8'),
 );
@@ -137,6 +141,7 @@ for (const [name, script] of [
   ['start-yappa.sh', startup],
   ['setup-domain.sh', domainSetup],
   ['backup-yappa.sh', backup],
+  ['restore-yappa-backup.sh', restoreInstaller],
   ['verify-yappa-backup.sh', restoreVerifier],
 ]) {
   assert.match(script, /^umask 077$/m, `${name} must create private files`);
@@ -161,6 +166,19 @@ assert.match(restoreVerifier, /"\$SCRIPT_ROOT\/bin\/age"/);
 assert.match(restoreVerifier, /PRAGMA quick_check/);
 assert.match(restoreVerifier, /server-identity\.json/);
 assert.match(restoreVerifier, /rm -rf -- "\$RESTORE_ROOT"/);
+assert.match(restoreInstaller, /"\$AGE_BIN" --decrypt "\$BACKUP" \|/);
+assert.match(restoreInstaller, /PRAGMA quick_check/);
+assert.match(restoreInstaller, /schema_migrations/);
+assert.match(restoreInstaller, /server-identity\.json/);
+assert.match(restoreInstaller, /Backup DB_PATH must identify/);
+assert.match(restoreInstaller, /mktemp -d "\$INSTALL_PARENT\/\.yappa-restore/);
+assert.match(restoreInstaller, /mv -- "\$RUNTIME_ROOT" "\$INSTALL_DIRECTORY"/);
+assert.match(restoreInstaller, /The restored server is stopped/);
+assert.doesNotMatch(
+  restoreInstaller,
+  /age[^|\n]*--output/,
+  'Restore must not write a decrypted archive to disk.',
+);
 assert.match(startup, /Public join address: \$\{YAPPA_ADVERTISED_ADDRESS\}/);
 assert.match(
   startup,
