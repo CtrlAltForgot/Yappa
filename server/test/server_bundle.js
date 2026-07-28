@@ -70,8 +70,10 @@ try {
     'yappa-server-0.1.0-dev/BUILD-METADATA.json',
     'yappa-server-0.1.0-dev/install-manifest.json',
     'yappa-server-0.1.0-dev/install-yappa.sh',
+    'yappa-server-0.1.0-dev/verify-yappa-install.sh',
     'yappa-server-0.1.0-dev/docker-compose.yml',
     'yappa-server-0.1.0-dev/src/server.js',
+    'yappa-server-0.1.0-dev/src/verify-server-identity.js',
   ]) {
     assert.ok(listing.includes(required), `Bundle is missing ${required}.`);
   }

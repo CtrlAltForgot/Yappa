@@ -110,11 +110,12 @@ disabled.
 
 `server/install-yappa.sh` is the first thin Linux front end. It can preflight
 the local x86-64 development server tree and, only with explicit
-`--local-source`, dispatch the current start/stop/status/log/backup/verify
-operations. `server/Install-Yappa.ps1` currently implements prerequisite
+`--local-source`, dispatch the current start/stop/status/log/backup,
+install-verification, and backup-verification operations.
+`server/Install-Yappa.ps1` currently implements prerequisite
 preflight only and refuses every mutating lifecycle command. This is useful
 foundation, not Windows support: remote download, artifact verification,
-copy/install layout, restore, upgrade, rollback, uninstall, services,
+restore, upgrade, rollback, uninstall, services,
 firewalls, cross-platform discovery, and the conformance matrix remain open.
 
 `.github/scripts/build-server-bundle.sh` now packages an explicit canonical
@@ -135,6 +136,17 @@ before startup. Negative tests cover wrong digest, existing destination, and a
 checksum-valid archive containing a symlink. This is the durable-layout
 foundation only; checksums do not authenticate an attacker-controlled bundle,
 so remote fetch stays disabled until detached signing is designed and shipped.
+
+The Linux `verify` lifecycle now performs operational installation checks
+instead of aliasing backup inspection. It verifies private storage/identity
+modes, SQLite integrity and exact schema, persistent write access, all
+canonical containers and backend health, a real Ed25519 server identity proof,
+identity consistency through the configured LAN or TLS route, Socket.IO
+WebSocket upgrade, and guarded LiveKit route reachability. `verify-backup`
+retains isolated encrypted restore inspection. The manifest distinguishes the
+implemented host checks from still-open LiveKit signaling, TURN, signed LAN
+invitation, and outside-network evidence so the future client dashboard cannot
+present partial verification as full health.
 
 ## Supported-Host Target
 

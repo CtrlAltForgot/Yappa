@@ -72,6 +72,14 @@ const windowsInstaller = fs.readFileSync(
   path.join(serverRoot, 'Install-Yappa.ps1'),
   'utf8',
 );
+const installVerifier = fs.readFileSync(
+  path.join(serverRoot, 'verify-yappa-install.sh'),
+  'utf8',
+);
+const identityVerifier = fs.readFileSync(
+  path.join(serverRoot, 'src', 'verify-server-identity.js'),
+  'utf8',
+);
 const compose = fs.readFileSync(
   path.join(serverRoot, 'docker-compose.yml'),
   'utf8',
@@ -514,6 +522,16 @@ assert.match(linuxInstaller, /cut -c1/);
 assert.match(linuxInstaller, /unsupported file type/);
 assert.match(linuxInstaller, /refusing to merge or overwrite/);
 assert.match(linuxInstaller, /mkdir -m 700 "\$install_directory"/);
+assert.match(
+  linuxInstaller,
+  /verify\)[\s\S]*?"\$SCRIPT_ROOT\/verify-yappa-install\.sh"/,
+  'The lifecycle verify command must run installation verification.',
+);
+assert.match(
+  linuxInstaller,
+  /verify-backup\)[\s\S]*?"\$SCRIPT_ROOT\/verify-yappa-backup\.sh"/,
+  'Backup restore verification must remain separately addressable.',
+);
 assert.doesNotMatch(
   linuxInstaller,
   /curl[^\r\n]*(\||;)[^\r\n]*(sh|bash)/,
@@ -534,6 +552,33 @@ assert.doesNotMatch(
   windowsInstaller,
   /(ConvertTo-SecureString|PSCredential|Get-Credential)/,
   'The preflight-only wrapper must not request or retain administrator credentials.',
+);
+assert.match(installVerifier, /^set -euo pipefail$/m);
+assert.match(installVerifier, /^umask 077$/m);
+assert.match(installVerifier, /stat -c '%a' \.env/);
+assert.match(installVerifier, /stat -c '%a' data/);
+assert.match(installVerifier, /SELECT COALESCE\(MAX\(version\), 0\)/);
+assert.match(installVerifier, /PRAGMA quick_check/);
+assert.match(installVerifier, /server-identity\.json/);
+assert.match(installVerifier, /docker compose ps --status running --services/);
+assert.match(installVerifier, /docker inspect -f '\{\{\.State\.Health\.Status\}\}'/);
+assert.match(installVerifier, /node src\/verify-server-identity\.js/);
+assert.match(installVerifier, /--connect-to/);
+assert.match(installVerifier, /Sec-WebSocket-Version: 13/);
+assert.match(installVerifier, /\^HTTP\/\[0-9\.\]\+ 101/);
+assert.match(installVerifier, /Yappa LiveKit route did not reach/);
+assert.match(
+  installVerifier,
+  /External reachability, forced TURN, and real media remain separate release tests/,
+  'Host verification must not overclaim externally observable media behavior.',
+);
+assert.match(identityVerifier, /yappa-server-proof-v1/);
+assert.match(identityVerifier, /crypto\.verify/);
+assert.match(identityVerifier, /AbortSignal\.timeout/);
+assert.doesNotMatch(
+  identityVerifier,
+  /console\.(log|error)/,
+  'Identity verification must use bounded, intentional output.',
 );
 assert.match(serverBundleBuild, /^set -euo pipefail$/m);
 assert.match(serverBundleBuild, /^umask 077$/m);

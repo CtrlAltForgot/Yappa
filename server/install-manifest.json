@@ -185,6 +185,7 @@
     "server-identity-proof",
     "https-api",
     "websocket-upgrade",
+    "livekit-route",
     "livekit-signal",
     "turn-udp",
     "signed-lan-invitation"
@@ -199,6 +200,7 @@
     "backup",
     "restore",
     "verify",
+    "verify-backup",
     "upgrade",
     "rollback",
     "uninstall"
@@ -212,10 +214,20 @@
       "status",
       "logs",
       "backup",
-      "verify"
+      "verify",
+      "verify-backup"
     ],
     "windows": ["preflight"]
   },
+  "implementedHealthChecks": [
+    "container-health",
+    "database-schema",
+    "persistent-storage-write",
+    "server-identity-proof",
+    "https-api",
+    "websocket-upgrade",
+    "livekit-route"
+  ],
   "clientPolicy": {
     "allowInstallCommandGeneration": false,
     "allowLocalSupervision": false,

@@ -20,7 +20,8 @@ Usage:
   ./install-yappa.sh status
   ./install-yappa.sh logs
   ./install-yappa.sh backup /absolute/path/backup.tar.gz.age
-  ./install-yappa.sh verify /absolute/path/backup.tar.gz.age
+  ./install-yappa.sh verify
+  ./install-yappa.sh verify-backup /absolute/path/backup.tar.gz.age
 
 This development installer operates only on the locally present server tree or
 an explicitly supplied local bundle and checksum. Remote installation remains
@@ -386,6 +387,14 @@ case "$COMMAND" in
     "$SCRIPT_ROOT/backup-yappa.sh" "$1"
     ;;
   verify)
+    require_initialized
+    if [[ $# -ne 0 ]]; then
+      usage
+      exit 1
+    fi
+    "$SCRIPT_ROOT/verify-yappa-install.sh"
+    ;;
+  verify-backup)
     require_manifest
     if [[ $# -ne 1 ]]; then
       usage

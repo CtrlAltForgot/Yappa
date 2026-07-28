@@ -80,7 +80,9 @@ RUNTIME_FILES=(
   "src/lan-discovery-relay.js"
   "src/safe-preview-lookup.js"
   "src/server.js"
+  "src/verify-server-identity.js"
   "start-yappa.sh"
+  "verify-yappa-install.sh"
   "verify-yappa-backup.sh"
 )
 
@@ -97,6 +99,7 @@ for executable_name in \
   start-yappa.sh \
   setup-domain.sh \
   backup-yappa.sh \
+  verify-yappa-install.sh \
   verify-yappa-backup.sh; do
   chmod 0755 "$STAGING_ROOT/$executable_name"
 done

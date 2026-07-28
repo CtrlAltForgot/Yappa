@@ -1093,6 +1093,65 @@ The remaining full-public-release work is:
     Update all handoff and user-facing documentation before declaring the
     candidate complete.
 
+### Active Full-Public-Release Handoff — 2026-07-28
+
+This is the concise continuation checkpoint if conversational context is lost.
+The active branch is `codex/rebuild-desktop-workflows`; draft PR 4 is the
+current review surface.
+
+Completed and evidenced:
+
+- The monolithic desktop workflow is replaced by independent manual Linux,
+  Windows, and macOS workflows backed by repository-owned scripts and one
+  shared MLS/vector/Flutter gate.
+- Exact-commit Windows artifact run `30405281982`, macOS artifact run
+  `30405281961`, and security run `30405285412` passed on commit `4140abd`.
+  Windows/macOS produced inspected, smoke-tested development artifacts.
+- Local Linux neutral-source packaging, native dependency/path/marker
+  inspection, and startup smoke pass. Hosted Linux remains pending because its
+  self-hosted runner was unavailable.
+- The portable-server contract, JSON Schema, Tier-1 support truth, Linux and
+  preflight-only Windows front ends, deterministic server bundle, and
+  checksum-pinned fresh-directory local installation are implemented.
+- Exact-head security run `30407691102` passed on commit `fb5cae6`, including
+  the complete backend suite, locked production audit, real deterministic
+  server bundle build, Flutter analysis/tests, native MLS/official vectors,
+  and native dependency audit.
+
+Current implementation slice:
+
+- `verify-yappa-install.sh` now verifies Linux container health, schema and
+  SQLite integrity, persistent identity and private storage modes, an actual
+  Ed25519 server proof, API/TLS identity consistency, Socket.IO WebSocket
+  upgrade, and guarded LiveKit routing. Its end-to-end LAN fixture and
+  tampered-proof/schema negative tests pass locally.
+- This host-local verifier deliberately does not claim external reachability,
+  forced TURN, or real media. Those remain native/external matrix tests.
+- `verify` means operational install verification; encrypted backup restore
+  inspection remains independently available as `verify-backup`.
+
+Next work, in order:
+
+1. Commit and obtain fresh-checkout CI evidence for the operational verifier,
+   then exercise it on the deployed Unraid installation if deployment access
+   is available.
+2. Implement safe restore, upgrade, rollback, uninstall, service/autostart,
+   firewall, and crash-recovery behavior; run the identical conformance
+   contract across every Tier-1 Linux/Windows target.
+3. Finish hosted Linux desktop evidence and signed release engineering:
+   production versions, signing, SBOMs, provenance, tagged publication,
+   supported-version/vulnerability policy, and update/distribution behavior.
+4. Complete durable chat/history, threads, unspoofable cross-server
+   YUID/multi-device DMs, calendar, and the provider-neutral shared music room.
+5. Complete native networking/media E2EE, Windows/KDE screen-sharing soak,
+   cross-feature product readiness, exact-tag matrix, production deployment,
+   and all user/security/handoff documentation.
+
+No public-release claim is justified yet. In particular, Windows server
+mutation, hosted Linux artifacts, public installer signing, external/TURN
+media, real multi-device E2EE, screen-sharing soak, persistent-history
+completion, threads, DMs, calendar, and music remain open.
+
 As of 2026-07-28, the local workflow replacement is implemented. The retired
 `build_desktop.yml` has been replaced by independent manual Linux, Windows, and
 macOS workflows. Each is a thin wrapper around repository-owned scripts and
@@ -1192,12 +1251,11 @@ metadata. The current manifest remains explicitly unpublished and disables
 client command generation and local supervision.
 
 The initial Linux wrapper preflights the local development server tree and
-provides the
-existing safe start/stop/status/log/backup/verify lifecycle behind an explicit
-`--local-source` development flag. The PowerShell wrapper reads the same
-contract and performs prerequisite checks but refuses mutation. It is not
-Windows support evidence. Signed bundles, remote installation, durable install
-layout, restore/upgrade/rollback/uninstall, service/firewall integration,
+provides the existing safe start/stop/status/log/backup lifecycle behind an
+explicit `--local-source` development flag. The PowerShell wrapper reads the
+same contract and performs prerequisite checks but refuses mutation. It is not
+Windows support evidence. Signed bundles, remote installation,
+restore/upgrade/rollback/uninstall, service/firewall integration,
 cross-platform discovery, and every Tier-1 conformance run remain required.
 
 A deterministic canonical server bundle is now implemented behind
@@ -1219,6 +1277,16 @@ private root; and runs normal preflight before startup. Tests prove wrong
 digests, existing destinations, and a checksum-valid symlink archive fail
 without creating the requested install. Remote fetching remains disabled until
 publisher authentication exists.
+
+Operational installation verification is now implemented locally. It requires
+private configuration/data/identity modes, one persistent identity, writable
+storage, current schema and SQLite integrity, all canonical containers running
+with a healthy backend, a valid Ed25519 server challenge proof, matching routed
+API identity over the configured LAN or certificate-verified public origin, a
+real Socket.IO HTTP/1.1 WebSocket upgrade, and a reachable guarded LiveKit
+route. Focused tests exercise the complete LAN verifier, tampered identity
+signature, wrong schema, and extracted bundle inclusion. External
+reachability, forced TURN, and real media remain explicit separate gates.
 
 As of 2026-07-24, newly created text feeds default to the non-downgradable
 `e2ee` version `1` contract. The backend writes that mode at channel creation,

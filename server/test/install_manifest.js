@@ -182,6 +182,7 @@ for (const command of [
   'backup',
   'restore',
   'verify',
+  'verify-backup',
   'upgrade',
   'rollback',
   'uninstall',
@@ -200,6 +201,7 @@ assert.deepEqual(manifest.implementedLifecycleCommands.linux, [
   'logs',
   'backup',
   'verify',
+  'verify-backup',
 ]);
 assert.deepEqual(manifest.implementedLifecycleCommands.windows, ['preflight']);
 for (const commands of Object.values(
@@ -211,6 +213,21 @@ for (const commands of Object.values(
       `Implemented command ${command} is absent from the lifecycle contract.`,
     );
   }
+}
+assert.deepEqual(manifest.implementedHealthChecks, [
+  'container-health',
+  'database-schema',
+  'persistent-storage-write',
+  'server-identity-proof',
+  'https-api',
+  'websocket-upgrade',
+  'livekit-route',
+]);
+for (const healthCheck of manifest.implementedHealthChecks) {
+  assert.ok(
+    manifest.healthChecks.includes(healthCheck),
+    `Implemented health check ${healthCheck} is absent from the contract.`,
+  );
 }
 
 for (const artifact of [

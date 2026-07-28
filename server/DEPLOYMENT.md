@@ -73,6 +73,39 @@ files, refuses every existing destination, and sets the new root to mode
 explicitly unverified runtime state. A failed checksum or unsafe bundle creates
 no install directory.
 
+## Verify a running installation
+
+Run:
+
+```bash
+./install-yappa.sh verify
+```
+
+This is operational verification, not backup verification. It requires:
+
+- mode `0600` configuration and persistent identity plus mode `0700` data;
+- the database inside the data root at the manifest schema with SQLite
+  `quick_check` success;
+- writable persistent storage and exactly one server identity;
+- all four canonical services running and a healthy backend container;
+- a cryptographically valid Ed25519 identity proof from the backend;
+- matching identity through the configured LAN route or certificate-verified
+  public HTTPS route;
+- a successful Socket.IO WebSocket upgrade through Caddy; and
+- a guarded 4xx response from the LiveKit `/rtc` route, proving it reached the
+  media service instead of a dead reverse-proxy target.
+
+The verifier prints no private key, credential, database path, or server
+configuration. It explicitly leaves outside-network reachability, forced TURN,
+and real media calls to the release conformance matrix because those cannot be
+proved from inside the host.
+
+Encrypted backup restore inspection is a separate command:
+
+```bash
+./install-yappa.sh verify-backup /path/yappa-backup.tar.gz.age
+```
+
 ## Start a public server
 
 Run:

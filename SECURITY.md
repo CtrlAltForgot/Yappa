@@ -982,6 +982,18 @@ may use `--no-start`, which clearly reports that runtime health is unverified.
 Remote download remains disabled because a user-supplied checksum is integrity,
 not publisher authenticity.
 
+Operational Linux install verification now fails closed on symlinked or
+mis-permissioned configuration/data, a database outside the data root, wrong
+schema, SQLite corruption, missing/multiple/mis-permissioned identities,
+unwritable storage, missing services, unhealthy backend, invalid Ed25519 proof,
+routed identity substitution, failed TLS/API access, failed Socket.IO upgrade,
+or dead LiveKit routing. The identity helper bounds requests, validates the
+origin shape, generates a fresh nonce, checks canonical server id/key/signature
+encodings, and verifies the domain-separated Ed25519 proof. Tests cover the
+complete LAN verification flow plus tampered proof and schema mismatch.
+Host-local success explicitly excludes external reachability, forced TURN, and
+real media; those still require separate external/native evidence.
+
 ### Cross-Server Identity and Direct-Message Gate
 
 The existing YUID is derived from the first 20 base64url characters of a
