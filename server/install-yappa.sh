@@ -19,7 +19,7 @@ Usage:
   ./install-yappa.sh backup /absolute/path/backup.tar.gz.age
   ./install-yappa.sh verify /absolute/path/backup.tar.gz.age
 
-This development installer operates only on the checked-out source tree.
+This development installer operates only on the locally present server tree.
 Remote installation remains disabled until the release manifest contains a
 signed server bundle, checksums, and release-validated host targets.
 EOF
@@ -30,9 +30,8 @@ require_manifest() {
     echo "Yappa install manifest is missing: $MANIFEST" >&2
     exit 1
   fi
-  if command -v node >/dev/null 2>&1; then
-    node "$SCRIPT_ROOT/test/install_manifest.js" >/dev/null
-  elif ! grep -Eq '"schemaVersion"[[:space:]]*:[[:space:]]*1' "$MANIFEST"; then
+  if ! grep -Eq '"schemaVersion"[[:space:]]*:[[:space:]]*1' "$MANIFEST" ||
+    ! grep -Eq '"product"[[:space:]]*:[[:space:]]*"Yappa Server"' "$MANIFEST"; then
     echo "Unsupported or malformed Yappa install manifest." >&2
     exit 1
   fi
@@ -139,7 +138,7 @@ case "$COMMAND" in
       exit 1
     fi
     preflight
-    echo "Starting the checked-out development server from $SCRIPT_ROOT."
+    echo "Starting the local development server from $SCRIPT_ROOT."
     if [[ "$LAN_MODE" == true ]]; then
       "$SCRIPT_ROOT/start-yappa.sh" --lan
     else

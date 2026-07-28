@@ -109,13 +109,23 @@ is null/false and client install-command generation and local supervision are
 disabled.
 
 `server/install-yappa.sh` is the first thin Linux front end. It can preflight
-the checked-out x86-64 development source and, only with explicit
+the local x86-64 development server tree and, only with explicit
 `--local-source`, dispatch the current start/stop/status/log/backup/verify
 operations. `server/Install-Yappa.ps1` currently implements prerequisite
 preflight only and refuses every mutating lifecycle command. This is useful
 foundation, not Windows support: remote download, artifact verification,
 copy/install layout, restore, upgrade, rollback, uninstall, services,
 firewalls, cross-platform discovery, and the conformance matrix remain open.
+
+`.github/scripts/build-server-bundle.sh` now packages an explicit canonical
+runtime allowlist into a normalized `tar.gz` with source/version metadata and a
+SHA-256 sidecar. Tests require two builds with identical inputs to be
+byte-identical, inspect the archive, reject secret/generated/development
+content, verify the checksum and metadata, extract it, and run the bundled
+non-mutating installer entry point. Security CI repeats the real bundle build.
+This supplies the artifact shape for installers but is not publication:
+signature, SBOM, provenance, tagged-release binding, support enablement, and
+remote download remain open.
 
 ## Supported-Host Target
 

@@ -44,6 +44,10 @@ const macosSodiumInstall = fs.readFileSync(
   path.join(releaseScriptRoot, 'install-libsodium-macos.sh'),
   'utf8',
 );
+const serverBundleBuild = fs.readFileSync(
+  path.join(releaseScriptRoot, 'build-server-bundle.sh'),
+  'utf8',
+);
 const startup = fs.readFileSync(path.join(serverRoot, 'start-yappa.sh'), 'utf8');
 const domainSetup = fs.readFileSync(
   path.join(serverRoot, 'setup-domain.sh'),
@@ -453,6 +457,11 @@ assert.match(
   /flutter-version: \$\{\{ steps\.versions\.outputs\.flutter \}\}/,
   'Security CI must load Flutter from the centralized release manifest.',
 );
+assert.match(
+  securityWorkflow,
+  /\.github\/scripts\/build-server-bundle\.sh/,
+  'Security CI must build and inspect the deterministic server bundle.',
+);
 
 assert.match(backup, /docker compose stop newchat-node/);
 assert.match(backup, /docker compose start newchat-node/);
@@ -516,6 +525,25 @@ assert.doesNotMatch(
   windowsInstaller,
   /(ConvertTo-SecureString|PSCredential|Get-Credential)/,
   'The preflight-only wrapper must not request or retain administrator credentials.',
+);
+assert.match(serverBundleBuild, /^set -euo pipefail$/m);
+assert.match(serverBundleBuild, /^umask 077$/m);
+assert.match(serverBundleBuild, /--sort=name/);
+assert.match(serverBundleBuild, /--mtime="@\$SOURCE_DATE_EPOCH"/);
+assert.match(serverBundleBuild, /--owner=0/);
+assert.match(serverBundleBuild, /--group=0/);
+assert.match(serverBundleBuild, /--numeric-owner/);
+assert.match(serverBundleBuild, /gzip -n/);
+assert.match(serverBundleBuild, /sha256sum "\$ARCHIVE_NAME"/);
+assert.match(serverBundleBuild, /Refusing to overwrite an existing server bundle/);
+const runtimeFileBlock = serverBundleBuild.match(
+  /^RUNTIME_FILES=\(\n([\s\S]*?)^\)$/m,
+);
+assert.ok(runtimeFileBlock, 'Server bundle must use an explicit runtime allowlist.');
+assert.doesNotMatch(
+  runtimeFileBlock[1],
+  /^\s+"(?:test\/|node_modules|livekit\.yaml|\.env)"$/m,
+  'The runtime bundle input list must not include tests, dependencies, or generated secrets.',
 );
 
 process.stdout.write('Deployment safety test passed.\n');

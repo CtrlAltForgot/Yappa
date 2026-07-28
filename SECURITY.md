@@ -960,6 +960,17 @@ strict/error-stop behavior, reads the same manifest, requests no administrator
 credential, and is deliberately preflight-only. Windows mutation remains
 disabled until the native negative tests and conformance evidence above exist.
 
+The canonical development server bundle is now built from an explicit runtime
+allowlist with a private umask, normalized ownership/order/timestamps/gzip
+headers, full source-commit metadata, overwrite refusal, secret/generated-state
+screening, and a SHA-256 sidecar. Automated coverage requires byte-identical
+archives from identical inputs, validates the digest and metadata, rejects
+tests/dependencies/generated secrets/data, and executes the extracted
+non-mutating installer. Security CI builds and inspects it after the backend
+suite. This checksum is not presented as authenticity: detached signing, SBOM,
+trusted provenance, tagged publication, and manifest activation remain release
+gates.
+
 ### Cross-Server Identity and Direct-Message Gate
 
 The existing YUID is derived from the first 20 base64url characters of a

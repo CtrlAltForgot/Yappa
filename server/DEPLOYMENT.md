@@ -6,7 +6,8 @@ certificates in the persistent `caddy_data` Docker volume.
 
 ## Development install entry point
 
-The checked-out source tree now has one Linux lifecycle front end:
+The locally present development server tree now has one Linux lifecycle front
+end:
 
 ```bash
 ./install-yappa.sh preflight
@@ -30,6 +31,29 @@ development checkout and describe it as a supported one-click install.
 prerequisites but intentionally cannot install or operate the server yet.
 Windows lifecycle commands remain disabled until signed artifacts and the
 Windows 11/Windows Server conformance matrices exist.
+
+## Development server bundle
+
+Release CI builds the canonical server tree with:
+
+```bash
+.github/scripts/build-server-bundle.sh
+```
+
+The script stages an explicit runtime allowlist, creates normalized build
+metadata containing the development version, full source commit, and source
+timestamp, and emits a deterministic `tar.gz` plus a SHA-256 file under
+`dist/server/`. Ownership, order, timestamps, and gzip headers are normalized.
+It refuses overwrite and rejects generated `.env`, LiveKit credentials,
+databases, data, backups, dependencies, tests, and common private-key/token
+markers. The backend suite builds the same inputs twice and requires
+byte-identical output, verifies the checksum and metadata, extracts the bundle,
+and executes its non-mutating installer help path.
+
+The checksum is an integrity input, not release authenticity. This development
+bundle is unsigned and the install manifest remains unpublished. A public
+release still requires a detached signature, SBOM, trusted provenance, and
+release-manifest publication from the tagged commit.
 
 ## Start a public server
 

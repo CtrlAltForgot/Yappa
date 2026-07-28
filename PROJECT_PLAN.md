@@ -1191,13 +1191,25 @@ published artifact without HTTPS download, SHA-256, and detached-signature
 metadata. The current manifest remains explicitly unpublished and disables
 client command generation and local supervision.
 
-The initial Linux wrapper preflights the checked-out source and provides the
+The initial Linux wrapper preflights the local development server tree and
+provides the
 existing safe start/stop/status/log/backup/verify lifecycle behind an explicit
 `--local-source` development flag. The PowerShell wrapper reads the same
 contract and performs prerequisite checks but refuses mutation. It is not
 Windows support evidence. Signed bundles, remote installation, durable install
 layout, restore/upgrade/rollback/uninstall, service/firewall integration,
 cross-platform discovery, and every Tier-1 conformance run remain required.
+
+A deterministic canonical server bundle is now implemented behind
+`.github/scripts/build-server-bundle.sh`. It stages only runtime files,
+normalizes archive order, ownership, timestamps, and gzip metadata, embeds the
+centralized development version plus exact source commit/timestamp, rejects
+generated state and secret markers, refuses overwrite, and emits a SHA-256
+sidecar. The backend suite proves repeat builds are byte-identical, validates
+the checksum/content/metadata, and runs the extracted non-mutating installer;
+security CI performs the real build. The artifact remains deliberately
+unpublished and unsigned. Signing, SBOM/provenance, tagged-release publication,
+manifest activation, and remote installer consumption remain open.
 
 As of 2026-07-24, newly created text feeds default to the non-downgradable
 `e2ee` version `1` contract. The backend writes that mode at channel creation,
