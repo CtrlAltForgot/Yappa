@@ -565,6 +565,7 @@ class ApiClient {
     String expectedPublicKey = '',
     String expectedAdvertisedAddress = '',
     Duration timeout = const Duration(milliseconds: 1400),
+    InternetAddress? discoveryAddress,
   }) async {
     const discoveryPort = 41200;
     final socket = await RawDatagramSocket.bind(
@@ -653,7 +654,15 @@ class ApiClient {
         consider(datagram!);
       }
     });
-    socket.send(request, InternetAddress('255.255.255.255'), discoveryPort);
+    try {
+      socket.send(
+        request,
+        discoveryAddress ?? InternetAddress('255.255.255.255'),
+        discoveryPort,
+      );
+    } on SocketException {
+      result.complete(null);
+    }
     Timer(timeout, () {
       if (!result.isCompleted) result.complete(null);
     });

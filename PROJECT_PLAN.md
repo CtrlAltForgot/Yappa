@@ -1102,6 +1102,28 @@ none of the three new workflows is release evidence until it passes on the
 candidate branch and exact candidate commit. Later signed publishing workflows
 remain separate release-engineering work.
 
+The first hosted branch run on 2026-07-28 confirmed that the split Windows and
+macOS wrappers, version exporter, exact Rust toolchain installation, and shared
+client gate start correctly. Windows passed the complete native MLS, pinned
+official vector, Flutter analysis, and Flutter test gate before entering its
+release build. The macOS gate passed native Rust and official vectors, then
+exposed three real portability gaps: libsodium was neither installed for Dart
+tests nor bundled into the app, Dart MLS integration tests still skipped
+macOS, and the LAN discovery test depended on the runner having a broadcast
+route. The local follow-up now checksum-pins and builds the official libsodium
+`1.0.20` source, exposes it to tests, installs and signs it in the app
+Frameworks directory, enables the Dart MLS integration suite on macOS, and
+targets loopback explicitly for protocol-level discovery tests while
+production discovery retains broadcast. Linux analysis and all 58 tests plus
+the deployment/secret policies pass after the fix. A successful hosted macOS
+rerun is still required before recording artifact evidence.
+The same first hosted Windows run passed the complete shared validation gate
+and compiled `yappa.exe`; its bundle scan then correctly rejected a
+runner-account path retained in Dart AOT through the default Pub cache. The
+follow-up assigns clean neutral Pub caches to Linux, Windows, and macOS release
+builds and removes Windows generated metadata before artifact compilation
+rather than weakening the builder-path scan.
+
 As of 2026-07-24, newly created text feeds default to the non-downgradable
 `e2ee` version `1` contract. The backend writes that mode at channel creation,
 rejects every legacy plaintext message, upload, edit, preview, or delete path

@@ -39,6 +39,15 @@ if (-not (Test-Path $sodiumDll)) {
   throw "libsodium.dll was not present in the verified archive"
 }
 $env:Path = "$runtime;$env:Path"
+$env:PUB_CACHE = Join-Path $temporaryRoot "yappa-neutral-pub-cache"
+foreach ($generatedPath in @(
+  (Join-Path $clientRoot ".dart_tool"),
+  (Join-Path $clientRoot "build")
+)) {
+  if (Test-Path $generatedPath) {
+    Remove-Item -Recurse -Force $generatedPath
+  }
+}
 
 Push-Location $clientRoot
 try {

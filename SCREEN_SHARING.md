@@ -72,6 +72,11 @@ LiveKit publication, remote playback, and the Windows path.
 - The root client uses a `dependency_overrides` path for the local WebRTC fork.
 - Linux CMake forces `<cstdint>` into C++ translation units because the
   upstream 1.5.2 libwebrtc headers omit it in a header that uses `uint32_t`.
+- macOS release builds require the checksum-pinned libsodium `1.0.20` source
+  installed by the hosted workflow. Xcode bundles and ad-hoc signs
+  `libsodium.dylib` beside `libyappa_mls.dylib` in the app Frameworks
+  directory; missing sodium fails the build rather than producing an
+  attachment-encryption runtime failure.
 
 Do not edit the global Pub cache. All reproducible native changes belong in
 the local fork.

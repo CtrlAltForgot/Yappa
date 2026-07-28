@@ -28,7 +28,8 @@ class _MemorySecrets implements SecretStorage {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  final supportsNative = Platform.isLinux || Platform.isWindows;
+  final supportsNative =
+      Platform.isLinux || Platform.isWindows || Platform.isMacOS;
 
   test('leader and claimed package must match verified membership intent', () {
     VerifiedMlsDeviceBinding binding(String deviceId, int marker, bool owner) =>

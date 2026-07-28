@@ -5,6 +5,8 @@
   "libsodium": {
     "version": "1.0.20",
     "url": "https://download.libsodium.org/libsodium/releases/libsodium-1.0.20-msvc.zip",
-    "sha256": "2ff97f9e3f5b341bdc808e698057bea1ae454f99e29ff6f9b62e14d0eb1b1baa"
+    "sha256": "2ff97f9e3f5b341bdc808e698057bea1ae454f99e29ff6f9b62e14d0eb1b1baa",
+    "sourceUrl": "https://download.libsodium.org/libsodium/releases/libsodium-1.0.20.tar.gz",
+    "sourceSha256": "ebb65ef6ca439333c2bb41a0c1990587288da07f6c7fd07cb3a18cc18d30ce19"
   }
 }

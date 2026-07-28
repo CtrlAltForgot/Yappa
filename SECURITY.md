@@ -1045,9 +1045,17 @@ the Dart loader had no macOS candidate and the release sandbox permitted
 neither outbound networking nor camera/microphone capture. The current source
 build now compiles the locked Rust bridge inside Xcode, remaps its builder
 home, signs and installs it under the app's `Frameworks` directory, and loads
-that exact dylib on macOS. Release and debug entitlements explicitly retain
-the app sandbox while granting only outbound network, microphone, and camera
-access needed by Yappa; user-facing privacy descriptions are present.
+that exact dylib on macOS. The first hosted split-workflow run on 2026-07-28
+proved the native Rust and official vector portions, then failed safely because
+the runner lacked libsodium for Dart secretstream tests. The follow-up pins
+the official libsodium `1.0.20` source archive by SHA-256, builds it for the
+runner, enables the previously skipped Dart MLS integration suite on macOS,
+and installs and signs `libsodium.dylib` beside the MLS dylib under the app's
+`Frameworks` directory. The Dart loaders first resolve those app-local
+libraries and retain development candidates for tests. Release and debug
+entitlements explicitly retain the app sandbox while granting only outbound
+network, microphone, and camera access needed by Yappa; user-facing privacy
+descriptions are present.
 macOS CI now runs the native MLS tests and pinned official vectors, verifies
 the app and nested signature, required entitlements, native library presence,
 builder-path/secret-marker isolation, and an eight-second packaged startup
@@ -1055,7 +1063,17 @@ smoke. Release compilation occurs from a neutral `/tmp` source root, keeps
 split debug information outside the app, and rejects absolute build paths in
 Mach-O runtime search metadata. Static deployment policy, XML, shell,
 workflow-YAML, and Flutter analysis checks pass locally. A hosted macOS run
+that completes the new Dart integration, bundle, signature, and smoke gates
 remains required evidence.
+
+The first split Windows run on 2026-07-28 passed native MLS, official vectors,
+Flutter analysis/tests, and the full MSVC release compile. The artifact scan
+then rejected `app.so` because the default Pub cache retained the GitHub runner
+account in AOT metadata. Release scripts now use clean neutral Pub caches on
+all three platforms, and Windows removes generated package/build metadata
+before compiling the artifact. The builder-home scan remains strict; a hosted
+rerun must prove the neutral-cache artifact passes instead of suppressing the
+finding.
 
 After the player, cross-platform packaging, and encrypted-attachment failure
 changes, the exact current Linux client was rebuilt once more from a neutral

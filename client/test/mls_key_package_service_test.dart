@@ -85,7 +85,8 @@ void main() {
   });
 
   TestWidgetsFlutterBinding.ensureInitialized();
-  final supportsMlsBridge = Platform.isLinux || Platform.isWindows;
+  final supportsMlsBridge =
+      Platform.isLinux || Platform.isWindows || Platform.isMacOS;
 
   test(
     'claimed KeyPackage requires a valid YUID credential binding',

@@ -18,6 +18,7 @@ rm -rf \
   "$release_source/client/.dart_tool" \
   "$release_source/client/build" \
   "$release_source/client/dist"
+export PUB_CACHE="$release_source/pub-cache"
 
 cd "$release_source/client"
 flutter pub get --enforce-lockfile

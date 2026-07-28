@@ -20,6 +20,8 @@ node -e '
     ["libsodium_version", manifest.libsodium?.version],
     ["libsodium_url", manifest.libsodium?.url],
     ["libsodium_sha256", manifest.libsodium?.sha256],
+    ["libsodium_source_url", manifest.libsodium?.sourceUrl],
+    ["libsodium_source_sha256", manifest.libsodium?.sourceSha256],
   ];
   for (const [name, value] of required) {
     if (typeof value !== "string" || value.length === 0 || value.includes("\n")) {

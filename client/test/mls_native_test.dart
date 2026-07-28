@@ -8,7 +8,8 @@ import 'package:yappa/data/mls_native.dart';
 Uint8List bytes(String value) => Uint8List.fromList(utf8.encode(value));
 
 void main() {
-  final supportsMlsBridge = Platform.isLinux || Platform.isWindows;
+  final supportsMlsBridge =
+      Platform.isLinux || Platform.isWindows || Platform.isMacOS;
 
   test(
     'native MLS bridge joins, persists, and excludes removed devices',

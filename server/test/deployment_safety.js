@@ -40,6 +40,10 @@ const macosReleaseBuild = fs.readFileSync(
   path.join(releaseScriptRoot, 'build-macos.sh'),
   'utf8',
 );
+const macosSodiumInstall = fs.readFileSync(
+  path.join(releaseScriptRoot, 'install-libsodium-macos.sh'),
+  'utf8',
+);
 const startup = fs.readFileSync(path.join(serverRoot, 'start-yappa.sh'), 'utf8');
 const domainSetup = fs.readFileSync(
   path.join(serverRoot, 'setup-domain.sh'),
@@ -266,6 +270,15 @@ assert.match(
   releaseVersionManifest.libsodium.url,
   /libsodium-1\.0\.20-msvc\.zip$/,
 );
+assert.match(
+  releaseVersionManifest.libsodium.sourceUrl,
+  /libsodium-1\.0\.20\.tar\.gz$/,
+);
+assert.equal(
+  releaseVersionManifest.libsodium.sourceSha256,
+  'ebb65ef6ca439333c2bb41a0c1990587288da07f6c7fd07cb3a18cc18d30ce19',
+  'The macOS libsodium source must be verified against its pinned digest.',
+);
 assert.match(windowsReleaseBuild, /"yappa_mls\.dll"/);
 assert.match(windowsReleaseBuild, /"libsodium\.dll"/);
 assert.match(windowsReleaseBuild, /Start-Process/);
@@ -280,6 +293,11 @@ assert.match(
   /Forbidden builder path, secret, or retired transport marker in [\s\S]*Windows bundle/,
 );
 assert.match(windowsReleaseBuild, /\[Text\.Encoding\]::Latin1\.GetString/);
+assert.match(
+  windowsReleaseBuild,
+  /\$env:PUB_CACHE = Join-Path \$temporaryRoot "yappa-neutral-pub-cache"/,
+  'Windows release dependencies must not identify the runner account.',
+);
 assert.match(
   windowsCmake,
   /--remap-path-prefix=\$ENV\{USERPROFILE\}=\/_yappa_build_home/,
@@ -303,6 +321,10 @@ assert.match(
   /mktemp -d "\$\{TMPDIR:-\/tmp\}\/yappa-linux-release\.XXXXXX"/,
 );
 assert.match(linuxReleaseBuild, /Builder home path found in Linux bundle/);
+assert.match(
+  linuxReleaseBuild,
+  /export PUB_CACHE="\$release_source\/pub-cache"/,
+);
 assert.match(linuxCmake, /BUILD_WITH_INSTALL_RPATH TRUE/);
 assert.match(linuxCmake, /BUILD_RPATH "\\\$ORIGIN"/);
 assert.match(linuxCmake, /INSTALL_RPATH "\\\$ORIGIN"/);
@@ -318,6 +340,12 @@ assert.match(macosMlsBuild, /cargo build/);
 assert.match(macosMlsBuild, /--locked/);
 assert.match(macosMlsBuild, /libyappa_mls\.dylib/);
 assert.match(macosMlsBuild, /codesign --force --sign -/);
+assert.match(macosMlsBuild, /YAPPA_SODIUM_DYLIB/);
+assert.match(macosMlsBuild, /libsodium\.dylib/);
+assert.match(macosMlsBuild, /install_name_tool -id @rpath\/libsodium\.dylib/);
+assert.match(macosSodiumInstall, /shasum -a 256/);
+assert.match(macosSodiumInstall, /--disable-static/);
+assert.match(macosSodiumInstall, /YAPPA_SODIUM_DYLIB=/);
 for (const entitlement of [
   'com.apple.security.app-sandbox',
   'com.apple.security.network.client',
@@ -343,6 +371,14 @@ assert.match(
   /Absolute build path found in macOS runtime search metadata/,
 );
 assert.match(macosReleaseBuild, /sleep 8/);
+assert.match(
+  macosReleaseBuild,
+  /export PUB_CACHE="\$release_source\/pub-cache"/,
+);
+assert.match(
+  desktopWorkflows[2],
+  /\.github\/scripts\/install-libsodium-macos\.sh/,
+);
 assert.match(
   clientValidation,
   /client\/native\/yappa_mls\/scripts\/test_openmls_vectors\.sh/,

@@ -26,7 +26,8 @@ class MemorySecretStorage implements SecretStorage {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  final supportsMlsBridge = Platform.isLinux || Platform.isWindows;
+  final supportsMlsBridge =
+      Platform.isLinux || Platform.isWindows || Platform.isMacOS;
 
   test('encrypted MLS state survives a local restart', () async {
     SharedPreferences.setMockInitialValues({});
@@ -92,29 +93,33 @@ void main() {
     );
   }, skip: !supportsMlsBridge);
 
-  test('failed local MLS mutation restores the prior native state', () async {
-    SharedPreferences.setMockInitialValues({});
-    final root = await Directory.systemTemp.createTemp('yappa-mls-state-');
-    final secrets = MemorySecretStorage();
-    addTearDown(() => root.delete(recursive: true));
-    final local = await MlsLocalDevice.open(
-      serverId: 'server-id',
-      secretStorage: secrets,
-      supportDirectory: () async => root,
-    );
-    addTearDown(local.close);
-    final rejectedGroup = Uint8List.fromList('rejected-group'.codeUnits);
+  test(
+    'failed local MLS mutation restores the prior native state',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final root = await Directory.systemTemp.createTemp('yappa-mls-state-');
+      final secrets = MemorySecretStorage();
+      addTearDown(() => root.delete(recursive: true));
+      final local = await MlsLocalDevice.open(
+        serverId: 'server-id',
+        secretStorage: secrets,
+        supportDirectory: () async => root,
+      );
+      addTearDown(local.close);
+      final rejectedGroup = Uint8List.fromList('rejected-group'.codeUnits);
 
-    await expectLater(
-      local.mutate((native) {
-        native.createGroup(rejectedGroup);
-        throw const FormatException('reject post-operation validation');
-      }),
-      throwsA(isA<FormatException>()),
-    );
-    expect(
-      () => local.read((native) => native.epoch(rejectedGroup)),
-      throwsA(isA<MlsNativeException>()),
-    );
-  }, skip: !supportsMlsBridge);
+      await expectLater(
+        local.mutate((native) {
+          native.createGroup(rejectedGroup);
+          throw const FormatException('reject post-operation validation');
+        }),
+        throwsA(isA<FormatException>()),
+      );
+      expect(
+        () => local.read((native) => native.epoch(rejectedGroup)),
+        throwsA(isA<MlsNativeException>()),
+      );
+    },
+    skip: !supportsMlsBridge,
+  );
 }

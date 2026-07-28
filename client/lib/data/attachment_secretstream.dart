@@ -210,7 +210,12 @@ class _Sodium {
     final names = Platform.isWindows
         ? const ['libsodium.dll']
         : Platform.isMacOS
-        ? const ['libsodium.26.dylib', 'libsodium.dylib']
+        ? [
+            '${File(Platform.resolvedExecutable).parent.path}/'
+                '../Frameworks/libsodium.dylib',
+            'libsodium.26.dylib',
+            'libsodium.dylib',
+          ]
         : const ['libsodium.so.26', 'libsodium.so.23', 'libsodium.so'];
     Object? lastError;
     for (final name in names) {

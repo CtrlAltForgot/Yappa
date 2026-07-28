@@ -37,8 +37,16 @@ jobs:
 
       - name: Show tool versions
         run: |
+          uname -m
           flutter --version
           cargo --version
+
+      - name: Install pinned libsodium
+        run: >
+          .github/scripts/install-libsodium-macos.sh
+          "${{ steps.versions.outputs.libsodium_version }}"
+          "${{ steps.versions.outputs.libsodium_source_url }}"
+          "${{ steps.versions.outputs.libsodium_source_sha256 }}"
 
       - name: Run shared client validation
         run: .github/scripts/validate-client.sh
