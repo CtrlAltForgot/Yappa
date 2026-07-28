@@ -27,6 +27,8 @@ RUSTFLAGS="--remap-path-prefix=$HOME=/_yappa_build_home" \
 install -m 755 \
   "$MLS_TARGET_DIR/$MLS_OUTPUT_DIR/libyappa_mls.dylib" \
   "$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH/libyappa_mls.dylib"
+install_name_tool -id @rpath/libyappa_mls.dylib \
+  "$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH/libyappa_mls.dylib"
 
 SODIUM_SOURCE="${YAPPA_SODIUM_DYLIB:-}"
 if [ -z "$SODIUM_SOURCE" ]; then

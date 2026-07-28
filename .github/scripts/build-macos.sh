@@ -50,7 +50,7 @@ for entitlement in \
   com.apple.security.network.client \
   com.apple.security.device.audio-input \
   com.apple.security.device.camera; do
-  test "$(plutil -extract "$entitlement" raw "$entitlements")" = "true"
+  test "$(/usr/libexec/PlistBuddy -c "Print :$entitlement" "$entitlements")" = "true"
 done
 
 if grep -R -a -E -l \
