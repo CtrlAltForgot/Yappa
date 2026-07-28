@@ -1056,23 +1056,36 @@ The remaining full-public-release work is:
 6. Complete and soak-test KDE Wayland and Windows screen sharing, including
    1080p60, separate microphone/system audio, repeated start/stop, and
    hours-long broadcasts.
-7. Complete the cross-server Yappa identity and direct-message architecture
+7. Complete the cross-platform server deployment and parity contract in
+   `SERVER_PORTABILITY.md`: one canonical server, guided Linux and Windows
+   installers, common-distribution validation, cross-platform LAN discovery,
+   identical conformance tests, upgrades, backups, and support matrix.
+8. Complete the durable-chat contract in `PERSISTENT_CHAT.md`: indefinite
+   default history and attachment retention, indexed cursor pagination,
+   bounded client caching, explicit storage-full behavior, secure E2EE history
+   continuity for new/reinstalled devices, and destructive backup/restore
+   validation at representative scale.
+9. Design and implement integrated message threads as described below,
+   including E2EE inheritance, permissions, realtime synchronization,
+   notifications, unread state, search, lifecycle behavior, migrations,
+   cross-device validation, and production deployment.
+10. Complete the cross-server Yappa identity and direct-message architecture
    described below. Prove that YUID ownership cannot be spoofed, define
    discovery and privacy behavior, implement multi-device E2EE DMs, and cover
    recovery, key change, blocking, reporting, and compromised-server cases.
-8. Design and implement the integrated server calendar described below,
+11. Design and implement the integrated server calendar described below,
    including backend persistence, authorization, realtime synchronization,
    migrations, cross-device client behavior, and production deployment.
-9. Design and implement the integrated shared server music experience
+12. Design and implement the integrated shared server music experience
    described below, including a legally and technically valid provider model,
    synchronized state, moderation, linked-account protection, and production
    deployment.
-10. Complete release engineering: supported-version and vulnerability policy,
+13. Complete release engineering: supported-version and vulnerability policy,
    production version numbers, release notes, code signing, checksums,
    provenance, reproducibility evidence, update/distribution guidance, and a
    final secret/dependency/bundle audit. Run the complete candidate matrix from
    the exact tagged commit and retain the evidence.
-11. Perform a full product-readiness pass across onboarding, joining,
+14. Perform a full product-readiness pass across onboarding, joining,
     administration, accessibility, empty/error/offline states, data migration,
     backup/restore, and the connections among chat, voice, calendar, and music.
     Update all handoff and user-facing documentation before declaring the
@@ -1140,6 +1153,18 @@ class in `app.so`. The scan remains enforced and now reports only the matched
 marker class, without disclosing surrounding binary content, so the retained
 path can be identified and removed on the next hosted run.
 
+Exact-commit security run `30404138566` and macOS artifact run `30404136922`
+also passed on commit `a46be12`. Windows run `30404136852` again passed shared
+validation and compiled `yappa.exe`, then the enhanced diagnostic proved its
+only match was lowercase `/users/`: a legitimate Yappa API route. The Windows
+regex had applied case-insensitivity globally, causing its macOS `/Users/`
+builder-path alternative to reject `/users/`. The local correction scopes
+case-insensitivity to drive-letter `C:\Users\...` paths and retired hostname
+markers while retaining case-sensitive `/Users/`, `/home/`, and private-key
+checks. A policy regression test prevents the false-positive pattern from
+returning. One final hosted Windows artifact run is required to validate the
+correction.
+
 As of 2026-07-24, newly created text feeds default to the non-downgradable
 `e2ee` version `1` contract. The backend writes that mode at channel creation,
 rejects every legacy plaintext message, upload, edit, preview, or delete path
@@ -1185,6 +1210,43 @@ Windows job must be rerun to prove compilation and packaging.
 The following capabilities are part of the intended first full public
 release, not commitments for the next friend-test artifact. Their detailed
 product and technical designs must be completed before implementation.
+
+### Integrated Message Threads
+
+Text feeds should support focused, message-rooted side conversations without
+forcing people to create or configure another channel. A thread should feel
+like a natural expansion of its root message: visible context, one-click
+opening and reply, predictable back navigation, and useful activity previews
+in the parent feed. The first design is for threads inside ordinary text
+feeds; forum-style post channels are a separate future product decision.
+
+The design must resolve and implement:
+
+- Thread creation from eligible messages, replies, editing and deletion,
+  participant views, links, compact parent-feed previews, and clear behavior
+  when the root message or its author is deleted.
+- Exact inheritance of the parent feed's membership, role permissions,
+  retention, moderation, and E2EE mode. A thread must never become a hidden
+  route around channel access or expose encrypted root/reply content as
+  plaintext metadata.
+- For E2EE feeds, authenticated encrypted thread context and reply envelopes
+  that bind each reply to the server, channel, root message, sender device, and
+  current MLS epoch without creating a downgrade or cross-thread replay path.
+- Realtime creation/reply/edit/delete propagation, deterministic ordering,
+  pagination, offline send/retry and deduplication, reconnect catch-up,
+  cross-device drafts where supported, and conflict handling.
+- Per-thread follow/mute state, mention behavior, notification policy, unread
+  counts, read markers, jump-to-message behavior, and parent-feed activity
+  indicators that remain understandable at large-server scale.
+- Search and moderation that respect encryption and access boundaries,
+  rate/size limits, spam controls, auditability for moderator actions, and
+  retention/backup/restore behavior.
+- Accessible keyboard and screen-reader navigation, narrow-window behavior,
+  empty/error/offline states, and a responsive presentation that does not
+  permanently split the chat surface into competing modules.
+- Backend schema, migrations, authorization, serialization, APIs, realtime
+  events, negative tests, client state, and production deployment, followed by
+  real multi-client and cross-device validation.
 
 ### Cross-Server Identity and Direct Messages
 

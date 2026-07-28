@@ -295,6 +295,16 @@ assert.match(
 assert.match(windowsReleaseBuild, /\[Text\.Encoding\]::Latin1\.GetString/);
 assert.match(
   windowsReleaseBuild,
+  /\(\?i:\[A-Z\]:\\\\Users\\\\\)\|\/Users\/\|\/home\//,
+  'Windows user paths may be case-insensitive without treating /users/ API routes as macOS builder paths.',
+);
+assert.doesNotMatch(
+  windowsReleaseBuild,
+  /\(\?i\)\(\[A-Z\]:\\\\Users\\\\\|\/Users\//,
+  'Do not make Unix builder-path checks globally case-insensitive.',
+);
+assert.match(
+  windowsReleaseBuild,
   /\$env:PUB_CACHE = Join-Path \$temporaryRoot "yappa-neutral-pub-cache"/,
   'Windows release dependencies must not identify the runner account.',
 );

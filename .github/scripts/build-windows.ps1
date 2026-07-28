@@ -77,8 +77,8 @@ foreach ($file in @(
 }
 
 $forbidden = [regex]::new(
-  '(?i)([A-Z]:\\Users\\|/Users/|/home/|sslip\.io|codex-yappa|' +
-  'BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY)'
+  '(?i:[A-Z]:\\Users\\)|/Users/|/home/|(?i:sslip\.io|codex-yappa)|' +
+  'BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY'
 )
 foreach ($artifact in Get-ChildItem -Path $bundle -Recurse -File) {
   $content = [Text.Encoding]::Latin1.GetString(

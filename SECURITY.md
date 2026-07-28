@@ -851,6 +851,81 @@ migration designs, automated negative tests, real multi-client validation,
 production deployment verification, accurate user disclosures, and
 documentation before they can satisfy the full-public-release gate.
 
+### Message-Thread Security Gate
+
+Threads are part of their parent text feed's security domain, not independent
+channels. Before release:
+
+- Every thread operation must reauthorize current parent-feed membership and
+  permissions. Stored thread membership or knowledge of a thread/root ID is
+  never sufficient access.
+- Threads inherit the parent feed's E2EE version without a downgrade option.
+  Encrypted replies must authenticate the server, channel, root message,
+  thread, sender device, message identity, and MLS epoch so ciphertext cannot
+  be replayed or transplanted across those contexts.
+- Realtime events, notifications, unread counters, previews, search indexes,
+  link targets, moderation records, logs, and push payloads must not disclose
+  encrypted reply text or private thread participation to unauthorized users.
+- Root deletion, reply deletion, membership removal, bans, channel deletion,
+  retention, backups, and restore must have explicit fail-closed semantics;
+  orphaned records must not bypass authorization or become globally
+  addressable.
+- Negative tests must cover unrelated accounts, removed and banned members,
+  stale sockets, guessed IDs, cross-server/channel/thread substitution,
+  replay, duplicate offline sends, root deletion, epoch rotation, and
+  legacy/plaintext downgrade attempts.
+
+### Durable-Chat Security Gate
+
+The public product contract is indefinite message and attachment retention
+until explicit authorized deletion. Efficiency work may compact derived caches
+and indexes, but must not silently remove the sole durable ciphertext,
+attachment, authenticated mutation, or cryptographic recovery material.
+
+`PERSISTENT_CHAT.md` defines the storage and verification contract. Security
+completion additionally requires:
+
+- Current membership authorization on every history page, cursor, attachment,
+  mutation, read-marker, search, and device-history-transfer request.
+- Opaque server storage for E2EE content and device-to-device encrypted history
+  recovery; the server must not hold a universal key that can impersonate a
+  device or decrypt retained chat.
+- Cursor integrity, idempotent operations, replay/rollback/substitution
+  rejection, bounded requests, storage quotas/headroom checks, and explicit
+  fail-closed storage-full behavior.
+- Backup confidentiality and integrity, separate-target restore verification,
+  authenticated attachment hashes, and proof that an authorized client can
+  decrypt restored history.
+- Honest client states for incomplete sync, pre-membership history, explicit
+  deletion, missing attachments, key loss, and failed recovery. Truncation
+  must not be presented as a complete conversation.
+
+### Cross-Platform Server Deployment Gate
+
+`SERVER_PORTABILITY.md` defines the supported-host and parity contract. Windows
+and Linux packages must run the same backend, migrations, protocols, and
+security/conformance suite. Platform wrappers may not omit TLS, TURN, LAN
+identity verification, backup encryption, rate limits, or other controls.
+
+Before either platform is supported:
+
+- Installers and upgrades must pin/checksum inputs, protect secret files with
+  OS-appropriate permissions or ACLs, avoid command-line secret exposure, and
+  fail closed on missing prerequisites or occupied/public internal ports.
+- Container, native-service, firewall, reverse-proxy, filesystem, symlink/path,
+  process-user, and service-restart boundaries require platform-specific
+  negative tests. Windows path and ACL behavior must not be inferred from
+  Linux mode-bit tests.
+- A cross-platform LAN discovery implementation must preserve the signed
+  server-identity proof. Docker Desktop host networking is not accepted as a
+  parity assumption.
+- Clean install, upgrade, rollback, backup, destructive isolated restore,
+  schema verification, HTTPS/WSS, LiveKit, forced TURN, and restart persistence
+  must pass on every Tier-1 host.
+- Signed artifacts, checksums, SBOM/provenance, exact support versions, and
+  unsupported/best-effort combinations must be published from the tagged
+  release.
+
 ### Cross-Server Identity and Direct-Message Gate
 
 The existing YUID is derived from the first 20 base64url characters of a
