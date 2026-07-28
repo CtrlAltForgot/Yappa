@@ -127,6 +127,15 @@ This supplies the artifact shape for installers but is not publication:
 signature, SBOM, provenance, tagged-release binding, support enablement, and
 remote download remain open.
 
+The Linux wrapper can also install a locally supplied development bundle plus
+an explicit SHA-256 into a brand-new absolute directory. It validates the
+archive root/metadata, rejects traversal, links and special files, refuses
+merge/overwrite, applies a private root mode, and normally runs full preflight
+before startup. Negative tests cover wrong digest, existing destination, and a
+checksum-valid archive containing a symlink. This is the durable-layout
+foundation only; checksums do not authenticate an attacker-controlled bundle,
+so remote fetch stays disabled until detached signing is designed and shipped.
+
 ## Supported-Host Target
 
 ### Tier 1: validated public-release hosts

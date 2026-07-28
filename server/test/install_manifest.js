@@ -40,6 +40,16 @@ assert.equal(
 );
 assert.equal(manifest.release.configurationSchemaVersion, 1);
 assert.equal(manifest.release.databaseSchemaVersion, 3);
+assert.equal(manifest.artifacts.serverBundle.format, 'tar.gz');
+assert.equal(
+  manifest.artifacts.serverBundle.rootPattern,
+  'yappa-server-{version}',
+);
+assert.equal(
+  manifest.artifacts.serverBundle.metadataFile,
+  'BUILD-METADATA.json',
+);
+assert.equal(manifest.artifacts.serverBundle.checksumAlgorithm, 'sha256');
 
 const expectedTargets = new Set([
   'ubuntu-lts-x64',

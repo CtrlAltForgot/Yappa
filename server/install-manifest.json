@@ -13,6 +13,10 @@
   "artifacts": {
     "serverBundle": {
       "status": "unpublished",
+      "format": "tar.gz",
+      "rootPattern": "yappa-server-{version}",
+      "metadataFile": "BUILD-METADATA.json",
+      "checksumAlgorithm": "sha256",
       "url": null,
       "sha256": null,
       "signatureUrl": null

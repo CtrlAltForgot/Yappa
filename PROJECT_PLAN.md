@@ -1211,6 +1211,15 @@ security CI performs the real build. The artifact remains deliberately
 unpublished and unsigned. Signing, SBOM/provenance, tagged-release publication,
 manifest activation, and remote installer consumption remain open.
 
+The Linux front end now consumes that development artifact locally: a caller
+must supply the bundle, exact SHA-256, and a new absolute install directory.
+The installer verifies digest, single versioned root and embedded metadata;
+rejects traversal, links, special files, merge and overwrite; installs under a
+private root; and runs normal preflight before startup. Tests prove wrong
+digests, existing destinations, and a checksum-valid symlink archive fail
+without creating the requested install. Remote fetching remains disabled until
+publisher authentication exists.
+
 As of 2026-07-24, newly created text feeds default to the non-downgradable
 `e2ee` version `1` contract. The backend writes that mode at channel creation,
 rejects every legacy plaintext message, upload, edit, preview, or delete path

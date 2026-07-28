@@ -111,6 +111,122 @@ try {
     bundledInstallerHelp,
     /This development installer operates only on the locally present server tree/,
   );
+  const installRoot = path.join(temporaryRoot, 'installed-server');
+  const localInstall = run(
+    path.join(bundleRoot, 'install-yappa.sh'),
+    [
+      'install',
+      '--local-bundle',
+      firstArchive,
+      '--sha256',
+      digest(firstArchive),
+      '--install-dir',
+      installRoot,
+      '--no-start',
+    ],
+    {cwd: bundleRoot},
+  );
+  assert.match(localInstall, /checksum/i);
+  assert.match(localInstall, /installed at/);
+  assert.match(localInstall, /Startup was skipped/);
+  assert.equal(
+    fs.statSync(installRoot).mode & 0o777,
+    0o700,
+    'Installed server directory must be private.',
+  );
+  assert.deepEqual(
+    JSON.parse(
+      fs.readFileSync(path.join(installRoot, 'BUILD-METADATA.json'), 'utf8'),
+    ),
+    metadata,
+  );
+  assert.equal(fs.existsSync(path.join(installRoot, '.env')), false);
+  assert.equal(fs.existsSync(path.join(installRoot, 'data')), false);
+
+  const wrongDigestInstall = spawnSync(
+    path.join(bundleRoot, 'install-yappa.sh'),
+    [
+      'install',
+      '--local-bundle',
+      firstArchive,
+      '--sha256',
+      '0'.repeat(64),
+      '--install-dir',
+      path.join(temporaryRoot, 'wrong-digest-install'),
+      '--no-start',
+    ],
+    {cwd: bundleRoot, encoding: 'utf8'},
+  );
+  assert.notEqual(wrongDigestInstall.status, 0);
+  assert.match(wrongDigestInstall.stderr, /checksum did not match/);
+  assert.equal(
+    fs.existsSync(path.join(temporaryRoot, 'wrong-digest-install')),
+    false,
+  );
+
+  const mergeRefusal = spawnSync(
+    path.join(bundleRoot, 'install-yappa.sh'),
+    [
+      'install',
+      '--local-bundle',
+      firstArchive,
+      '--sha256',
+      digest(firstArchive),
+      '--install-dir',
+      installRoot,
+      '--no-start',
+    ],
+    {cwd: bundleRoot, encoding: 'utf8'},
+  );
+  assert.notEqual(mergeRefusal.status, 0);
+  assert.match(mergeRefusal.stderr, /refusing to merge or overwrite/);
+
+  const unsafeSource = path.join(temporaryRoot, 'unsafe-source');
+  const unsafeBundleRoot = path.join(
+    unsafeSource,
+    'yappa-server-0.1.0-dev',
+  );
+  fs.mkdirSync(unsafeBundleRoot, {recursive: true});
+  fs.copyFileSync(
+    path.join(bundleRoot, 'BUILD-METADATA.json'),
+    path.join(unsafeBundleRoot, 'BUILD-METADATA.json'),
+  );
+  fs.copyFileSync(
+    path.join(bundleRoot, 'install-manifest.json'),
+    path.join(unsafeBundleRoot, 'install-manifest.json'),
+  );
+  fs.copyFileSync(
+    path.join(bundleRoot, 'install-yappa.sh'),
+    path.join(unsafeBundleRoot, 'install-yappa.sh'),
+  );
+  fs.chmodSync(path.join(unsafeBundleRoot, 'install-yappa.sh'), 0o755);
+  fs.symlinkSync('/etc/passwd', path.join(unsafeBundleRoot, 'unsafe-link'));
+  const unsafeArchive = path.join(temporaryRoot, 'unsafe-bundle.tar.gz');
+  run('tar', [
+    '-czf',
+    unsafeArchive,
+    '-C',
+    unsafeSource,
+    'yappa-server-0.1.0-dev',
+  ]);
+  const unsafeInstallRoot = path.join(temporaryRoot, 'unsafe-install');
+  const unsafeInstall = spawnSync(
+    path.join(bundleRoot, 'install-yappa.sh'),
+    [
+      'install',
+      '--local-bundle',
+      unsafeArchive,
+      '--sha256',
+      digest(unsafeArchive),
+      '--install-dir',
+      unsafeInstallRoot,
+      '--no-start',
+    ],
+    {cwd: bundleRoot, encoding: 'utf8'},
+  );
+  assert.notEqual(unsafeInstall.status, 0);
+  assert.match(unsafeInstall.stderr, /unsupported file type/);
+  assert.equal(fs.existsSync(unsafeInstallRoot), false);
 
   const refusal = spawnSync(
     buildScript,

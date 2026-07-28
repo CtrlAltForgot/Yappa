@@ -505,6 +505,15 @@ assert.match(
 assert.match(linuxInstaller, /docker compose version/);
 assert.match(linuxInstaller, /minimum 4096 MiB/);
 assert.match(linuxInstaller, /minimum 10240 MiB/);
+assert.match(linuxInstaller, /--local-bundle/);
+assert.match(linuxInstaller, /\^\[a-f0-9\]\{64\}\$/);
+assert.match(linuxInstaller, /sha256sum "\$archive"/);
+assert.match(linuxInstaller, /must contain exactly one versioned root/);
+assert.match(linuxInstaller, /tar -tvzf "\$archive"/);
+assert.match(linuxInstaller, /cut -c1/);
+assert.match(linuxInstaller, /unsupported file type/);
+assert.match(linuxInstaller, /refusing to merge or overwrite/);
+assert.match(linuxInstaller, /mkdir -m 700 "\$install_directory"/);
 assert.doesNotMatch(
   linuxInstaller,
   /curl[^\r\n]*(\||;)[^\r\n]*(sh|bash)/,

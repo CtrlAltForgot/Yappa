@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 umask 077
+export LC_ALL=C
 
 SCRIPT_ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 MANIFEST="$SCRIPT_ROOT/install-manifest.json"
@@ -12,6 +13,8 @@ usage() {
 Usage:
   ./install-yappa.sh preflight
   ./install-yappa.sh install --local-source [--lan]
+  ./install-yappa.sh install --local-bundle ARCHIVE --sha256 DIGEST \
+    --install-dir /absolute/new/path [--lan] [--no-start]
   ./install-yappa.sh start [--lan]
   ./install-yappa.sh stop
   ./install-yappa.sh status
@@ -19,9 +22,10 @@ Usage:
   ./install-yappa.sh backup /absolute/path/backup.tar.gz.age
   ./install-yappa.sh verify /absolute/path/backup.tar.gz.age
 
-This development installer operates only on the locally present server tree.
-Remote installation remains disabled until the release manifest contains a
-signed server bundle, checksums, and release-validated host targets.
+This development installer operates only on the locally present server tree or
+an explicitly supplied local bundle and checksum. Remote installation remains
+disabled until the release manifest contains a signed server bundle, checksums,
+and release-validated host targets.
 EOF
 }
 
@@ -104,6 +108,149 @@ require_initialized() {
   fi
 }
 
+install_local_bundle() {
+  local archive="$1"
+  local expected_sha256="$2"
+  local install_directory="$3"
+  local no_start="$4"
+  local lan_mode="$5"
+
+  if [[ ! "$expected_sha256" =~ ^[a-f0-9]{64}$ ]]; then
+    echo "--sha256 must be one full lowercase SHA-256 digest." >&2
+    exit 1
+  fi
+  if [[ "$archive" != /* ]]; then
+    archive="$PWD/$archive"
+  fi
+  if [[ ! -f "$archive" ]]; then
+    echo "Local Yappa server bundle was not found: $archive" >&2
+    exit 1
+  fi
+  if [[ "$install_directory" != /* || "$install_directory" == "/" ]]; then
+    echo "--install-dir must be a new absolute directory other than /." >&2
+    exit 1
+  fi
+  if [[ -e "$install_directory" ]]; then
+    echo "Install directory already exists; refusing to merge or overwrite it." >&2
+    exit 1
+  fi
+  local install_parent
+  install_parent="$(dirname -- "$install_directory")"
+  if [[ ! -d "$install_parent" || ! -w "$install_parent" ]]; then
+    echo "Install directory parent is missing or not writable: $install_parent" >&2
+    exit 1
+  fi
+  for command_name in sha256sum tar mktemp find cp sed awk grep cut dirname mkdir chmod; do
+    if ! command -v "$command_name" >/dev/null 2>&1; then
+      echo "Local bundle installation requires $command_name." >&2
+      exit 1
+    fi
+  done
+
+  local actual_sha256
+  actual_sha256="$(sha256sum "$archive" | awk '{print $1}')"
+  if [[ "$actual_sha256" != "$expected_sha256" ]]; then
+    echo "Local Yappa server bundle checksum did not match." >&2
+    exit 1
+  fi
+
+  local archive_listing
+  archive_listing="$(tar -tzf "$archive")"
+  if [[ -z "$archive_listing" ]] ||
+    grep -Eq '(^|/)\.\.(/|$)|^/' <<< "$archive_listing"; then
+    echo "Local Yappa server bundle contains an unsafe path." >&2
+    exit 1
+  fi
+  local bundle_root_name
+  bundle_root_name="${archive_listing%%/*}"
+  if [[ ! "$bundle_root_name" =~ ^yappa-server-[0-9A-Za-z][0-9A-Za-z.+-]*$ ]]; then
+    echo "Local Yappa server bundle must contain exactly one versioned root." >&2
+    exit 1
+  fi
+  while IFS= read -r archive_entry; do
+    if [[ "$archive_entry" != "$bundle_root_name" &&
+      "$archive_entry" != "$bundle_root_name/"* ]]; then
+      echo "Local Yappa server bundle must contain exactly one versioned root." >&2
+      exit 1
+    fi
+  done <<< "$archive_listing"
+  if tar -tvzf "$archive" | cut -c1 | grep -Ev '^[-d]$' | grep -q .; then
+    echo "Local Yappa server bundle contains an unsupported file type." >&2
+    exit 1
+  fi
+  if [[ "$no_start" != true ]]; then
+    preflight
+  fi
+
+  local extraction_root
+  extraction_root="$(mktemp -d "${TMPDIR:-/tmp}/yappa-local-install.XXXXXXXX")"
+  chmod 700 "$extraction_root"
+  cleanup_local_bundle() {
+    local status=$?
+    trap - EXIT INT TERM
+    rm -rf -- "$extraction_root"
+    exit "$status"
+  }
+  trap cleanup_local_bundle EXIT INT TERM
+
+  tar \
+    --extract \
+    --gzip \
+    --file="$archive" \
+    --directory="$extraction_root" \
+    --no-same-owner \
+    --no-same-permissions
+  local extracted_bundle="$extraction_root/$bundle_root_name"
+  if [[ ! -d "$extracted_bundle" ]] ||
+    [[ ! -f "$extracted_bundle/BUILD-METADATA.json" ]] ||
+    [[ ! -f "$extracted_bundle/install-manifest.json" ]] ||
+    [[ ! -x "$extracted_bundle/install-yappa.sh" ]]; then
+    echo "Local Yappa server bundle is incomplete." >&2
+    exit 1
+  fi
+  if find "$extracted_bundle" \
+    \( -type l -o \( ! -type f -a ! -type d \) \) \
+    -print -quit |
+    grep -q .; then
+    echo "Local Yappa server bundle contains an unsupported file type." >&2
+    exit 1
+  fi
+  local metadata_version
+  metadata_version="$(
+    sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)",*[[:space:]]*$/\1/p' \
+      "$extracted_bundle/BUILD-METADATA.json"
+  )"
+  if [[ "$bundle_root_name" != "yappa-server-$metadata_version" ]]; then
+    echo "Local Yappa server bundle metadata does not match its root." >&2
+    exit 1
+  fi
+
+  mkdir -m 700 "$install_directory"
+  if ! cp -a "$extracted_bundle/." "$install_directory/"; then
+    echo "Bundle copy failed; inspect and remove the new partial directory:" >&2
+    echo "$install_directory" >&2
+    exit 1
+  fi
+  chmod 700 "$install_directory"
+
+  trap - EXIT INT TERM
+  rm -rf -- "$extraction_root"
+  echo "Local Yappa development bundle checksum verified."
+  echo "Verified local Yappa development bundle installed at $install_directory."
+  if [[ "$no_start" == true ]]; then
+    echo "Startup was skipped; the installation has not passed runtime health checks."
+    return
+  fi
+  (
+    cd "$install_directory"
+    if [[ "$lan_mode" == true ]]; then
+      ./install-yappa.sh start --lan
+    else
+      ./install-yappa.sh start
+    fi
+  )
+}
+
 PREFLIGHT_FAILED=false
 case "$COMMAND" in
   help | --help | -h)
@@ -118,11 +265,40 @@ case "$COMMAND" in
     ;;
   install)
     LOCAL_SOURCE=false
+    LOCAL_BUNDLE=""
+    EXPECTED_SHA256=""
+    INSTALL_DIRECTORY=""
     LAN_MODE=false
+    NO_START=false
     while [[ $# -gt 0 ]]; do
       case "$1" in
         --local-source) LOCAL_SOURCE=true ;;
+        --local-bundle)
+          if [[ $# -lt 2 ]]; then
+            echo "--local-bundle requires a path." >&2
+            exit 1
+          fi
+          LOCAL_BUNDLE="$2"
+          shift
+          ;;
+        --sha256)
+          if [[ $# -lt 2 ]]; then
+            echo "--sha256 requires a digest." >&2
+            exit 1
+          fi
+          EXPECTED_SHA256="$2"
+          shift
+          ;;
+        --install-dir)
+          if [[ $# -lt 2 ]]; then
+            echo "--install-dir requires a path." >&2
+            exit 1
+          fi
+          INSTALL_DIRECTORY="$2"
+          shift
+          ;;
         --lan) LAN_MODE=true ;;
+        --no-start) NO_START=true ;;
         *)
           echo "Unknown install option: $1" >&2
           usage
@@ -132,6 +308,27 @@ case "$COMMAND" in
       shift
     done
     require_manifest
+    if [[ "$LOCAL_SOURCE" == true && -n "$LOCAL_BUNDLE" ]]; then
+      echo "--local-source and --local-bundle are mutually exclusive." >&2
+      exit 1
+    fi
+    if [[ -n "$LOCAL_BUNDLE" ]]; then
+      if [[ -z "$EXPECTED_SHA256" || -z "$INSTALL_DIRECTORY" ]]; then
+        echo "--local-bundle requires --sha256 and --install-dir." >&2
+        exit 1
+      fi
+      install_local_bundle \
+        "$LOCAL_BUNDLE" \
+        "$EXPECTED_SHA256" \
+        "$INSTALL_DIRECTORY" \
+        "$NO_START" \
+        "$LAN_MODE"
+      exit 0
+    fi
+    if [[ -n "$EXPECTED_SHA256" || -n "$INSTALL_DIRECTORY" || "$NO_START" == true ]]; then
+      echo "Bundle-only options require --local-bundle." >&2
+      exit 1
+    fi
     if [[ "$LOCAL_SOURCE" != true ]]; then
       echo "Remote installation is unavailable for this development release." >&2
       echo "No signed server bundle or release-validated host target is published." >&2

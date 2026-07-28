@@ -971,6 +971,17 @@ suite. This checksum is not presented as authenticity: detached signing, SBOM,
 trusted provenance, tagged publication, and manifest activation remain release
 gates.
 
+Local development bundle installation now requires a caller-supplied full
+lowercase SHA-256, one versioned archive root matching embedded metadata, a
+brand-new absolute destination, and a private installed root. Extraction occurs
+in a private temporary directory and rejects traversal, symbolic links and
+special files before copying. Wrong-digest, existing-destination, and
+checksum-valid malicious-symlink fixtures fail without creating the requested
+install root. Normal installation runs preflight before startup; isolated CI
+may use `--no-start`, which clearly reports that runtime health is unverified.
+Remote download remains disabled because a user-supplied checksum is integrity,
+not publisher authenticity.
+
 ### Cross-Server Identity and Direct-Message Gate
 
 The existing YUID is derived from the first 20 base64url characters of a

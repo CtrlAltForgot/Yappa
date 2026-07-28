@@ -55,6 +55,24 @@ bundle is unsigned and the install manifest remains unpublished. A public
 release still requires a detached signature, SBOM, trusted provenance, and
 release-manifest publication from the tagged commit.
 
+For local development testing, an already-built bundle can be installed into
+a new private directory without merging into an existing server:
+
+```bash
+./install-yappa.sh install \
+  --local-bundle /path/yappa-server-0.1.0-dev.tar.gz \
+  --sha256 FULL_LOWERCASE_SHA256 \
+  --install-dir /absolute/new/yappa-server
+```
+
+The installer verifies the digest before extraction, requires one matching
+versioned archive root and build metadata, rejects traversal, links and special
+files, refuses every existing destination, and sets the new root to mode
+`0700`. It then runs the normal preflight and starts the installed server.
+`--no-start` exists for isolated packaging/conformance tests and leaves an
+explicitly unverified runtime state. A failed checksum or unsafe bundle creates
+no install directory.
+
 ## Start a public server
 
 Run:

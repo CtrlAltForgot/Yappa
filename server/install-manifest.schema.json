@@ -48,7 +48,7 @@
       "additionalProperties": false,
       "required": ["serverBundle", "linuxInstaller", "windowsInstaller"],
       "properties": {
-        "serverBundle": {"$ref": "#/$defs/artifact"},
+        "serverBundle": {"$ref": "#/$defs/serverBundleArtifact"},
         "linuxInstaller": {"$ref": "#/$defs/installerArtifact"},
         "windowsInstaller": {"$ref": "#/$defs/installerArtifact"}
       }
@@ -112,6 +112,30 @@
     }
   },
   "$defs": {
+    "serverBundleArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "format",
+        "rootPattern",
+        "metadataFile",
+        "checksumAlgorithm",
+        "url",
+        "sha256",
+        "signatureUrl"
+      ],
+      "properties": {
+        "status": {"enum": ["unpublished", "published"]},
+        "format": {"const": "tar.gz"},
+        "rootPattern": {"const": "yappa-server-{version}"},
+        "metadataFile": {"const": "BUILD-METADATA.json"},
+        "checksumAlgorithm": {"const": "sha256"},
+        "url": {"type": ["string", "null"]},
+        "sha256": {"type": ["string", "null"]},
+        "signatureUrl": {"type": ["string", "null"]}
+      }
+    },
     "artifact": {
       "type": "object",
       "additionalProperties": false,
