@@ -1,0 +1,61 @@
+name: Build Yappa Linux
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: yappa-linux-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build Linux development artifact
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Load pinned versions
+        id: versions
+        shell: bash
+        run: .github/scripts/export-release-versions.sh
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          flutter-version: ${{ steps.versions.outputs.flutter }}
+
+      - name: Show tool versions
+        run: |
+          flutter --version
+          cargo --version
+
+      - name: Run shared client validation
+        run: .github/scripts/validate-client.sh
+
+      - name: Build, inspect, and package Linux
+        run: .github/scripts/build-linux.sh "${{ steps.versions.outputs.safe_yappa }}"
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: Yappa-linux-x64-${{ github.sha }}
+          path: client/dist/Yappa-${{ steps.versions.outputs.safe_yappa }}-linux-x64.tar.gz
+          if-no-files-found: error
+
+      - name: Upload Linux diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: Yappa-linux-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .artifacts/diagnostics/linux
+          if-no-files-found: ignore
+          retention-days: 14

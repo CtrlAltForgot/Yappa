@@ -249,9 +249,13 @@ microphone audio remains independent, and repeated start/stop is clean.
   `ApplicationLoopbackCapturer`. Display sharing captures system output while
   window sharing attempts to restrict audio to the selected window's process.
   Application loopback requires Windows 10 version 2004/build 19041 or newer.
-- The repository's `build_desktop.yml` includes a Windows release build and
-  artifact job. A successful compile is necessary but does not replace
-  hardware playback testing.
+- The repository's separate `build_windows.yml` workflow invokes the shared
+  client validation gate and a locally runnable PowerShell build/package
+  script. It verifies the MLS and libsodium DLLs, scans the bundle, and
+  smoke-launches the packaged executable before artifact upload. This
+  replacement is implemented locally as of 2026-07-28 but still requires a
+  successful hosted Windows run. A successful compile and smoke launch do not
+  replace hardware capture and playback testing.
 
 - Test monitor and window selection.
 - Verify source thumbnails and names for multiple monitors and applications.

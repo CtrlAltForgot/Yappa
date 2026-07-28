@@ -4,8 +4,40 @@ const path = require('path');
 
 const serverRoot = path.resolve(__dirname, '..');
 const repositoryRoot = path.resolve(serverRoot, '..');
-const desktopWorkflow = fs.readFileSync(
-  path.join(repositoryRoot, '.github', 'workflows', 'build_desktop.yml'),
+const workflowRoot = path.join(repositoryRoot, '.github', 'workflows');
+const releaseScriptRoot = path.join(repositoryRoot, '.github', 'scripts');
+const desktopWorkflowPaths = [
+  'build_linux.yml',
+  'build_windows.yml',
+  'build_macos.yml',
+].map((name) => path.join(workflowRoot, name));
+const desktopWorkflows = desktopWorkflowPaths.map((workflowPath) =>
+  fs.readFileSync(workflowPath, 'utf8'),
+);
+const desktopWorkflow = desktopWorkflows.join('\n');
+const releaseVersions = fs.readFileSync(
+  path.join(repositoryRoot, '.github', 'release-versions.json'),
+  'utf8',
+);
+const releaseVersionManifest = JSON.parse(releaseVersions);
+const rustToolchain = fs.readFileSync(
+  path.join(repositoryRoot, 'rust-toolchain.toml'),
+  'utf8',
+);
+const clientValidation = fs.readFileSync(
+  path.join(releaseScriptRoot, 'validate-client.sh'),
+  'utf8',
+);
+const linuxReleaseBuild = fs.readFileSync(
+  path.join(releaseScriptRoot, 'build-linux.sh'),
+  'utf8',
+);
+const windowsReleaseBuild = fs.readFileSync(
+  path.join(releaseScriptRoot, 'build-windows.ps1'),
+  'utf8',
+);
+const macosReleaseBuild = fs.readFileSync(
+  path.join(releaseScriptRoot, 'build-macos.sh'),
   'utf8',
 );
 const startup = fs.readFileSync(path.join(serverRoot, 'start-yappa.sh'), 'utf8');
@@ -215,26 +247,39 @@ assert.equal(
   false,
   'Generated LiveKit credentials must not be stored in the repository.',
 );
-assert.match(desktopWorkflow, /libsodium-1\.0\.20-msvc\.zip/);
-assert.match(
-  desktopWorkflow,
-  /2ff97f9e3f5b341bdc808e698057bea1ae454f99e29ff6f9b62e14d0eb1b1baa/,
+assert.equal(releaseVersionManifest.yappa, '0.1.0-dev');
+assert.equal(releaseVersionManifest.flutter, '3.44.7');
+assert.equal(releaseVersionManifest.rust, '1.96.1');
+assert.match(rustToolchain, /^channel = "1\.96\.1"$/m);
+assert.equal(
+  (rustToolchain.match(/^channel = /gm) || []).length,
+  1,
+  'The release-critical Rust toolchain must have one exact channel pin.',
+);
+assert.equal(releaseVersionManifest.libsodium.version, '1.0.20');
+assert.equal(
+  releaseVersionManifest.libsodium.sha256,
+  '2ff97f9e3f5b341bdc808e698057bea1ae454f99e29ff6f9b62e14d0eb1b1baa',
   'The Windows libsodium runtime must be verified against its pinned digest.',
 );
-assert.match(desktopWorkflow, /YAPPA_SODIUM_DLL=/);
-assert.match(desktopWorkflow, /"yappa_mls\.dll"/);
-assert.match(desktopWorkflow, /"libsodium\.dll"/);
-assert.match(desktopWorkflow, /name: Smoke-test Windows startup/);
-assert.match(desktopWorkflow, /Start-Process -FilePath \$executable -PassThru/);
 assert.match(
-  desktopWorkflow,
+  releaseVersionManifest.libsodium.url,
+  /libsodium-1\.0\.20-msvc\.zip$/,
+);
+assert.match(windowsReleaseBuild, /"yappa_mls\.dll"/);
+assert.match(windowsReleaseBuild, /"libsodium\.dll"/);
+assert.match(windowsReleaseBuild, /Start-Process/);
+assert.match(windowsReleaseBuild, /-FilePath \$executable/);
+assert.match(windowsReleaseBuild, /-PassThru/);
+assert.match(
+  windowsReleaseBuild,
   /--split-debug-info=build\/windows-symbols/,
 );
 assert.match(
-  desktopWorkflow,
-  /Forbidden builder path, secret, or retired transport marker in Windows bundle/,
+  windowsReleaseBuild,
+  /Forbidden builder path, secret, or retired transport marker in [\s\S]*Windows bundle/,
 );
-assert.match(desktopWorkflow, /\[Text\.Encoding\]::Latin1\.GetString/);
+assert.match(windowsReleaseBuild, /\[Text\.Encoding\]::Latin1\.GetString/);
 assert.match(
   windowsCmake,
   /--remap-path-prefix=\$ENV\{USERPROFILE\}=\/_yappa_build_home/,
@@ -250,15 +295,14 @@ assert.doesNotMatch(
   /add_compile_definitions\([\s\S]*?_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS/,
   'Do not suppress experimental-coroutine diagnostics project-wide.',
 );
-assert.match(desktopWorkflow, /name: Validate Linux bundle isolation/);
-assert.match(desktopWorkflow, /readelf -d "\$file"/);
-assert.match(desktopWorkflow, /ldd "\$library"/);
-assert.match(desktopWorkflow, /--split-debug-info=build\/linux-symbols/);
+assert.match(linuxReleaseBuild, /readelf -d "\$file"/);
+assert.match(linuxReleaseBuild, /ldd "\$library"/);
+assert.match(linuxReleaseBuild, /--split-debug-info=build\/linux-symbols/);
 assert.match(
-  desktopWorkflow,
-  /\/tmp\/yappa-release-source-\$\{GITHUB_RUN_ID\}-\$\{GITHUB_RUN_ATTEMPT\}/,
+  linuxReleaseBuild,
+  /mktemp -d "\$\{TMPDIR:-\/tmp\}\/yappa-linux-release\.XXXXXX"/,
 );
-assert.match(desktopWorkflow, /Builder home path found in Linux bundle/);
+assert.match(linuxReleaseBuild, /Builder home path found in Linux bundle/);
 assert.match(linuxCmake, /BUILD_WITH_INSTALL_RPATH TRUE/);
 assert.match(linuxCmake, /BUILD_RPATH "\\\$ORIGIN"/);
 assert.match(linuxCmake, /INSTALL_RPATH "\\\$ORIGIN"/);
@@ -286,28 +330,46 @@ for (const entitlement of [
     `macOS release must declare ${entitlement}.`,
   );
 }
-assert.match(desktopWorkflow, /name: Verify macOS runtime bundle/);
-assert.match(desktopWorkflow, /libyappa_mls\.dylib/);
-assert.match(desktopWorkflow, /codesign --verify --deep --strict/);
+assert.match(macosReleaseBuild, /libyappa_mls\.dylib/);
+assert.match(macosReleaseBuild, /codesign --verify --deep --strict/);
 assert.match(
-  desktopWorkflow,
-  /\/tmp\/yappa-macos-release-source-\$\{GITHUB_RUN_ID\}-\$\{GITHUB_RUN_ATTEMPT\}/,
+  macosReleaseBuild,
+  /mktemp -d "\$\{TMPDIR:-\/tmp\}\/yappa-macos-release\.XXXXXX"/,
 );
-assert.match(desktopWorkflow, /--split-debug-info=build\/macos-symbols/);
-assert.match(desktopWorkflow, /otool -l "\$binary"/);
+assert.match(macosReleaseBuild, /--split-debug-info=build\/macos-symbols/);
+assert.match(macosReleaseBuild, /otool -l "\$binary"/);
 assert.match(
-  desktopWorkflow,
+  macosReleaseBuild,
   /Absolute build path found in macOS runtime search metadata/,
 );
-assert.match(desktopWorkflow, /name: Smoke-test macOS startup/);
-assert.equal(
-  (
-    desktopWorkflow.match(
-      /client\/native\/yappa_mls\/scripts\/test_openmls_vectors\.sh/g,
-    ) || []
-  ).length,
-  3,
-  'Every desktop artifact must run the pinned OpenMLS vectors.',
+assert.match(macosReleaseBuild, /sleep 8/);
+assert.match(
+  clientValidation,
+  /client\/native\/yappa_mls\/scripts\/test_openmls_vectors\.sh/,
+);
+for (const workflow of desktopWorkflows) {
+  assert.match(
+    workflow,
+    /\.github\/scripts\/validate-client\.sh/,
+    'Every desktop artifact workflow must run the shared client gate.',
+  );
+  assert.match(workflow, /persist-credentials: false/);
+  assert.match(workflow, /permissions:\s*\n\s+contents: read/);
+  assert.match(workflow, /if: \$\{\{ always\(\) \}\}/);
+}
+const securityWorkflow = fs.readFileSync(
+  path.join(workflowRoot, 'security.yml'),
+  'utf8',
+);
+assert.match(
+  securityWorkflow,
+  /\.github\/scripts\/validate-client\.sh/,
+  'Security CI must use the same native/vector/Flutter gate as artifacts.',
+);
+assert.match(
+  securityWorkflow,
+  /flutter-version: \$\{\{ steps\.versions\.outputs\.flutter \}\}/,
+  'Security CI must load Flutter from the centralized release manifest.',
 );
 
 assert.match(backup, /docker compose stop newchat-node/);

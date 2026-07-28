@@ -54,35 +54,22 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Load pinned versions
+        id: versions
+        shell: bash
+        run: .github/scripts/export-release-versions.sh
+
       - name: Set up Flutter
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           channel: stable
-          flutter-version: 3.44.7
+          flutter-version: ${{ steps.versions.outputs.flutter }}
 
-      - name: Install locked dependencies
-        working-directory: client
-        run: flutter pub get --enforce-lockfile
-
-      - name: Build and test native MLS bridge
-        working-directory: client/native/yappa_mls
-        run: |
-          cargo build --locked
-          cargo test --locked
-
-      - name: Run pinned OpenMLS vectors on Yappa graph
-        run: client/native/yappa_mls/scripts/test_openmls_vectors.sh
+      - name: Run shared client validation
+        run: .github/scripts/validate-client.sh
 
       - name: Audit native MLS dependencies
         working-directory: client/native/yappa_mls
         run: |
           cargo install cargo-audit --version 0.22.2 --locked
           cargo audit
-
-      - name: Analyze client
-        working-directory: client
-        run: flutter analyze
-
-      - name: Run client tests
-        working-directory: client
-        run: flutter test

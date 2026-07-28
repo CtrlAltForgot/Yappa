@@ -30,6 +30,31 @@ Security and privacy are release requirements, not optional polish. Do not
 market or label Yappa as secure, private, or end-to-end encrypted until the
 applicable acceptance criteria in `SECURITY.md` are implemented and verified.
 
+## Product Experience Principle
+
+Yappa should feel like one coherent social space rather than a collection of
+modules, bots, commands, and configuration panels. Features should be
+"melted together": navigation, permissions, identity, presence, notifications,
+search, and visual language should connect naturally enough that people do not
+need to learn a separate product for each capability.
+
+This principle is part of product acceptance, not only visual polish:
+
+- Prefer direct, discoverable interfaces over text commands or mandatory bots.
+- Reuse server identity, roles, people, channels, presence, and notifications
+  instead of creating parallel concepts for each feature.
+- Let context flow between surfaces—for example, an event may open its related
+  conversation or voice deck, and a music session may show the people already
+  present—without surprising cross-posts or permission changes.
+- Keep advanced administration available without making ordinary participation
+  feel like configuration work.
+- Apply one interaction and visual system across desktop platforms while
+  respecting native accessibility, media, credential, and notification
+  behavior.
+- A feature is not complete merely because its backend and isolated screen
+  work; its entry points, transitions, empty/error states, permissions, and
+  relationship to the rest of Yappa must also feel intentional.
+
 ## Connection Experience
 
 Yappa is competing with Discord and TeamSpeak, so joining and operating a
@@ -990,30 +1015,92 @@ deployed where backend changes apply, and covered by the evidence recorded
 above. Do not reopen those milestones merely because later release validation
 is incomplete.
 
-The remaining release work is:
+Release stages are intentionally distinct:
 
-1. Complete native two-client media-E2EE verification, including reconnect,
+- A **friend-test build** is an explicitly unsigned or development-labeled
+  artifact shared with a limited group for validation. It must not claim
+  verified E2EE or general release readiness.
+- The **first full public release** is the supported public product milestone.
+  It requires the release gates below, the integrated calendar and shared
+  music experiences defined later in this plan, finished onboarding and
+  administration paths, accurate security claims, and publishable supported
+  artifacts.
+
+The remaining full-public-release work is:
+
+1. Replace the unreliable monolithic desktop artifact workflow rather than
+   continuing to patch it in place. Preserve the least-privilege security
+   workflow unless evidence shows it also needs replacement. Give Linux,
+   Windows, and macOS separate build workflows, and move substantial build and
+   validation logic into versioned repository scripts that can be run locally.
+   Centralize pinned Flutter/Rust/action/native dependency versions and
+   checksums, retain diagnostics from failed jobs, and separate ordinary CI,
+   unsigned validation artifacts, signed release packaging, and publishing.
+   Exercise the replacements on a branch before merging them to `main`.
+2. Run the replacement security and artifact workflows on the exact candidate
+   commit. Require successful hosted Linux, Windows, and macOS builds, native
+   MLS tests and official vectors, artifact isolation scans, dependency
+   resolution, and packaged-executable smoke tests. Validate Windows secure
+   storage/libsodium/MLS loading and macOS entitlements and native-library
+   packaging on real systems.
+3. Complete native two-client media-E2EE verification, including reconnect,
    rotation, cryptor failure, RTP/SFU inspection, and proof that LiveKit cannot
    decode media.
-2. Validate the simple IP-join architecture off LAN and through a router
+4. Validate the simple IP-join architecture off LAN and through a router
    without NAT loopback, force a TURN/UDP relay call, then cover public-IP
-   changes and the Windows client.
-3. Run current Linux, Windows, and macOS artifact builds and runtime checks,
-   including Windows secure storage/libsodium packaging and official MLS
-   vectors. The current Linux release build, dependency inspection, and
-   packaged-executable smoke pass locally. macOS source packaging now builds
-   and signs the pinned MLS dylib into the app, declares sandboxed outbound
-   network/camera/microphone access, runs the native MLS suite and official
-   vectors, builds from a neutral temporary source root with debug symbols
-   kept outside the app, verifies bundle entitlements/signatures/runtime-path
-   and builder-home isolation, and smoke-launches the packaged app. That
-   workflow has not yet run on a hosted Mac; hosted Linux, Windows, and macOS
-   evidence remains required.
-4. Prove persisted E2EE multi-device cutover/reinstall/removal on real clients,
+   changes, verified invitations, realtime/media LAN fallback, and the Windows
+   client. Decide whether TURN/TLS is required for the first supported network
+   matrix and document unsupported restrictive networks if it is deferred.
+5. Prove persisted E2EE multi-device cutover/reinstall/removal on real clients,
    and obtain independent protocol review.
-5. Complete and soak-test KDE Wayland and Windows screen sharing, including
+6. Complete and soak-test KDE Wayland and Windows screen sharing, including
    1080p60, separate microphone/system audio, repeated start/stop, and
    hours-long broadcasts.
+7. Design and implement the integrated server calendar described below,
+   including backend persistence, authorization, realtime synchronization,
+   migrations, cross-device client behavior, and production deployment.
+8. Design and implement the integrated shared server music experience
+   described below, including a legally and technically valid provider model,
+   synchronized state, moderation, linked-account protection, and production
+   deployment.
+9. Complete release engineering: supported-version and vulnerability policy,
+   production version numbers, release notes, code signing, checksums,
+   provenance, reproducibility evidence, update/distribution guidance, and a
+   final secret/dependency/bundle audit. Run the complete candidate matrix from
+   the exact tagged commit and retain the evidence.
+10. Perform a full product-readiness pass across onboarding, joining,
+    administration, accessibility, empty/error/offline states, data migration,
+    backup/restore, and the connections among chat, voice, calendar, and music.
+    Update all handoff and user-facing documentation before declaring the
+    candidate complete.
+
+As of 2026-07-28, the local workflow replacement is implemented. The retired
+`build_desktop.yml` has been replaced by independent manual Linux, Windows, and
+macOS workflows. Each is a thin wrapper around repository-owned scripts and
+the same shared native MLS/vector/Flutter validation entry point. Release,
+Flutter, and Windows libsodium versions and the sodium checksum are centralized
+in `.github/release-versions.json`; action SHAs remain pinned at each `uses`
+boundary where GitHub Actions requires a literal reference. Platform scripts
+retain neutral-source builds, split symbols, native-library presence,
+builder-path/secret/retired-transport scans, runtime-path inspection, and
+packaged startup smoke tests. Failed build diagnostics are retained for 14
+days. The deployment-safety test now reads all replacement workflows and
+scripts collectively so splitting files cannot silently remove a gate.
+The security workflow invokes that same shared client gate instead of
+duplicating native/vector/Flutter commands. The release-critical Rust
+toolchain is pinned to `1.96.1` in `rust-toolchain.toml`, mirrored in the
+release version manifest, and protected against drift by the deployment policy
+test.
+
+Local verification passed YAML parsing, shell syntax, `git diff --check`, the
+complete backend security suite, all 17 native MLS tests, all 25 pinned
+official vector-reader tests, Flutter analysis, and all 58 Flutter tests. The
+extracted Linux script also completed a neutral-source release build, bundle
+inspection, and development artifact package. PowerShell syntax/runtime and
+the Windows/macOS build scripts still require their hosted native runners, and
+none of the three new workflows is release evidence until it passes on the
+candidate branch and exact candidate commit. Later signed publishing workflows
+remain separate release-engineering work.
 
 As of 2026-07-24, newly created text feeds default to the non-downgradable
 `e2ee` version `1` contract. The backend writes that mode at channel creation,
@@ -1054,6 +1141,100 @@ deprecation to error `STL1011`. Yappa now scopes Microsoft's documented
 compatibility definition only to the WebView plugin target; no project-wide
 warning suppression was added. Static policy checks pass, but the hosted
 Windows job must be rerun to prove compilation and packaging.
+
+## First Public Release Product Pillars
+
+The following two capabilities are part of the intended first full public
+release, not commitments for the next friend-test artifact. Their detailed
+product and technical designs must be completed before implementation.
+
+### Integrated Server Calendar
+
+Each server should have a first-class calendar that works equally well for a
+small friend group and for organized, large-scale community events. It should
+not feel like an embedded third-party calendar or an isolated administration
+module.
+
+The design must resolve and implement:
+
+- Calendar browsing with useful agenda, day, week, and month presentations
+  appropriate to desktop window sizes.
+- Event creation, editing, cancellation, duplication, and deletion with clear
+  ownership and server-role permissions.
+- Titles, descriptions, locations or links, start/end times, all-day events,
+  time zones, recurrence, capacity, and reminders without ambiguous daylight
+  saving behavior.
+- RSVP states, attendee visibility, waitlists or capacity behavior where
+  appropriate, and realtime updates across devices.
+- Connections to existing server concepts such as channels, voice decks,
+  people, roles, notifications, and presence without silently expanding access
+  to private content.
+- Search, filtering, accessible notifications, conflict/change handling,
+  offline/retry behavior, auditability for important organizer actions, and
+  sensible behavior for deleted users or channels.
+- Backend storage, APIs, serialization, realtime propagation, migrations,
+  authorization/abuse tests, backup/restore coverage, and deployment
+  verification.
+- A documented privacy model for event content and attendance. Whether any
+  calendar fields require E2EE must be decided explicitly rather than implied
+  by Yappa's encrypted messaging.
+- Later import/export or interoperability, such as standards-based calendar
+  files, only after the native Yappa experience and security boundaries are
+  defined.
+
+### Integrated Shared Music
+
+Each server should be able to host a persistent social listening space inspired
+by the best parts of the early plug.dj experience: people can discover, queue,
+listen, vote, and watch together through a dedicated interface without typing
+commands in chat or making a bot join a voice deck.
+
+The experience should include a visible current track, ordered shared queue,
+who queued each item, participant/presence context, playback progress, vote
+skip and moderation controls, provider/source attribution, and either an
+available music video or an intentional visualizer/artwork experience. Queue
+and playback transitions should feel connected to the server rather than like
+an external player pasted into Yappa.
+
+The detailed design must be provider-neutral until current APIs, licenses, and
+playback terms are verified. YouTube, SoundCloud, and Spotify differ
+substantially: a linked Spotify account may only permit playback through that
+member's authorized player and subscription, and one provider's URL or search
+result does not imply Yappa may restream its audio to everyone. Before choosing
+an architecture, verify each provider's current official SDK/API terms,
+embedding rules, account requirements, quotas, attribution, commercial-use
+limits, and synchronization restrictions.
+
+The design must resolve and implement:
+
+- Whether playback is synchronized individual provider playback, an approved
+  embed, server-relayed content, or another licensed model for each source.
+  Yappa must not download, rebroadcast, proxy, or strip protection from media
+  without explicit authorization.
+- OAuth/account linking with minimum scopes, secure token storage, revocation,
+  expiry/refresh handling, account unlinking, log redaction, and a useful
+  experience for people who do not link a provider.
+- Canonical queue items across providers, duplicate handling, unavailable or
+  region-restricted tracks, explicit-content information where available,
+  videos, artwork/metadata, and a local visualizer fallback.
+- Authoritative synchronized playback state, clock drift correction,
+  reconnect/late-join behavior, host failure, provider errors, and a clear
+  distinction between shared queue state and playback occurring on each
+  person's device.
+- Vote-skip policy, thresholds, rate limits, queue permissions, owner/moderator
+  controls, history, abuse resistance, and fair behavior as participants join
+  or leave.
+- Connections to server presence, profiles, notifications, and chat that are
+  useful but never require command syntax or a voice bot.
+- Privacy controls for listening activity and linked-provider identity, plus
+  clear disclosure of data sent to external providers.
+- Backend persistence, APIs, serialization, realtime propagation, migrations,
+  authorization tests, provider-adapter tests, failure simulation,
+  cross-device runtime validation, backup/restore boundaries, and production
+  deployment.
+
+An original Yappa interaction and visual design should be developed rather
+than cloning plug.dj or another product's protected assets or exact interface.
 
 ## Future Hosted File Sharing
 

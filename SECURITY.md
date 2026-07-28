@@ -794,6 +794,55 @@ temporary backend or network failure can recover without restarting Yappa.
 Acceptance requires published protocol documentation, test vectors, migration
 tests, tamper detection, and independent review.
 
+## Future Calendar and Shared-Music Security Gates
+
+The integrated server calendar and shared music space are intended for the
+first full public release, but their detailed designs are not yet approved.
+They extend Yappa's security and privacy surface and must not be treated as
+presentation-only client features.
+
+Calendar implementation must define:
+
+- Authorization for creating, editing, cancelling, deleting, inviting,
+  moderating, and viewing events and attendee lists.
+- The privacy boundary for event descriptions, locations, links, attendance,
+  reminders, and related channel or voice-deck references.
+- Whether any event content is end-to-end encrypted; no calendar surface may
+  inherit an E2EE claim merely because it is linked from encrypted chat.
+- Safe recurrence/time-zone processing, input and URL handling, notification
+  delivery, rate limits, audit requirements, retention, deletion, export, and
+  backup/restore behavior.
+- Cross-device serialization, realtime authorization, migrations, downgrade
+  behavior, and negative tests for unrelated, removed, banned, and
+  insufficiently privileged accounts.
+
+Shared music implementation must define:
+
+- A provider-by-provider legal and technical playback model based on current
+  official APIs, SDKs, licenses, embedding requirements, and terms. Yappa must
+  not assume that metadata access, a linked subscription, or an embeddable
+  video authorizes server-side downloading or rebroadcasting.
+- OAuth authorization with minimum scopes, platform credential-vault storage,
+  server-side storage only when unavoidable, encrypted transport, token
+  rotation and revocation, unlinking, CSRF/state protection, redirect
+  validation, and strict exclusion of provider tokens from logs, telemetry,
+  databases not designed for them, and release artifacts.
+- What listening activity, provider identity, playback state, search queries,
+  queue history, votes, and external requests are visible to the server,
+  Yappa members, and each provider.
+- Authorization and abuse controls for queue changes, vote skip, moderation,
+  provider lookup, embeds, metadata/artwork fetching, and realtime playback
+  control. External media URLs and provider responses require SSRF, redirect,
+  content-size/type, and untrusted-markup defenses.
+- Fail-closed handling for expired or substituted credentials and provider
+  responses, plus cross-account, cross-server, replay, reconnect, and
+  synchronization tests.
+
+Both features require explicit threat-model review, secure storage and
+migration designs, automated negative tests, real multi-client validation,
+production deployment verification, accurate user disclosures, and
+documentation before they can satisfy the full-public-release gate.
+
 ## Priority 5: At-Rest, Supply-Chain, and Operational Security
 
 - Define encrypted backup and filesystem guidance for self-hosters.
@@ -835,10 +884,23 @@ tests, tamper detection, and independent review.
   installation, production dependency audit, the backend security suite,
   Flutter analysis, and Flutter tests for pushes and pull requests. Every
   action is pinned to a full commit SHA and checkout persistence is disabled.
-  The desktop artifact workflow is manual-only while Yappa is pre-release,
-  uses explicit `0.1.0-dev`/`0.1.0+1` development versions, pins Flutter and
-  every action, and runs analysis/tests before packaging. Workflow execution on GitHub and
-  release provenance/signing still require validation.
+  As of 2026-07-28, the unreliable monolithic desktop artifact workflow has
+  been replaced locally by separate manual Linux, Windows, and macOS workflows.
+  Thin workflow wrappers call repository-owned validation and platform
+  packaging scripts. All three run the shared native MLS, pinned official
+  vector, Flutter analysis, and Flutter test gate before packaging. Release,
+  Flutter, and verified Windows libsodium inputs are centralized in
+  `.github/release-versions.json`; action references remain full literal SHAs.
+  Platform scripts retain split symbols, neutral build roots where applicable,
+  native-library checks, artifact content/runtime-path scans, and startup smoke
+  tests. Failure diagnostics are uploaded with bounded retention. Development
+  artifacts remain explicitly `0.1.0-dev`/`0.1.0+1`; hosted execution of the
+  replacements, production signing, provenance, and publishing policy remain
+  release gates. The release-critical Rust toolchain is pinned to `1.96.1` in
+  `rust-toolchain.toml`, mirrored in the release manifest, and checked by the
+  deployment policy test. Security CI uses the same shared native
+  MLS/vector/Flutter entry point as every artifact workflow, preventing the
+  security and packaging gates from drifting apart.
 - GitHub run history was inspected on 2026-07-24. Workflow run
   `23470775087` successfully built Linux, Windows, and macOS artifacts for
   revision `d3e2ebeead049a96d6cac5cf7b41e799cd045246` on 2026-03-24. That
@@ -855,6 +917,16 @@ tests, tamper detection, and independent review.
   passed; and the native MLS bridge passed all 17 tests plus a debug build.
   RustSec reported zero vulnerabilities and the documented allowed
   non-runtime `proc-macro-error2` maintenance warning.
+- The split workflow implementation was validated locally on 2026-07-28.
+  Workflow YAML and shell syntax parsed, the deployment policy test proved
+  every platform wrapper invokes the common client gate, and the complete
+  backend security suite passed. The extracted client gate passed all 17
+  native MLS tests, all 25 checksum-pinned official vector-reader tests,
+  Flutter analysis, and all 58 Flutter tests. The extracted Linux packaging
+  script then completed a neutral-source release build and its native
+  dependency, path, secret-marker, and packaging inspections. Windows
+  PowerShell execution and Windows/macOS artifact production remain unverified
+  until the new workflows run on their native hosted runners.
 - The official fixtures omitted from the OpenMLS crates.io package were run
   from the exact signed `openmls-v0.8.1` release archive on Linux. Its
   SHA-256 was
