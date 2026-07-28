@@ -65,6 +65,14 @@ const restoreInstaller = fs.readFileSync(
   path.join(serverRoot, 'restore-yappa-backup.sh'),
   'utf8',
 );
+const upgradeInstaller = fs.readFileSync(
+  path.join(serverRoot, 'upgrade-yappa.sh'),
+  'utf8',
+);
+const rollbackInstaller = fs.readFileSync(
+  path.join(serverRoot, 'rollback-yappa.sh'),
+  'utf8',
+);
 const installManifest = JSON.parse(
   fs.readFileSync(path.join(serverRoot, 'install-manifest.json'), 'utf8'),
 );
@@ -142,6 +150,8 @@ for (const [name, script] of [
   ['setup-domain.sh', domainSetup],
   ['backup-yappa.sh', backup],
   ['restore-yappa-backup.sh', restoreInstaller],
+  ['upgrade-yappa.sh', upgradeInstaller],
+  ['rollback-yappa.sh', rollbackInstaller],
   ['verify-yappa-backup.sh', restoreVerifier],
 ]) {
   assert.match(script, /^umask 077$/m, `${name} must create private files`);
@@ -179,6 +189,18 @@ assert.doesNotMatch(
   /age[^|\n]*--output/,
   'Restore must not write a decrypted archive to disk.',
 );
+assert.match(upgradeInstaller, /verify-yappa-backup\.sh/);
+assert.match(upgradeInstaller, /install-yappa\.sh" verify/);
+assert.match(upgradeInstaller, /PRAGMA quick_check/);
+assert.match(upgradeInstaller, /CURRENT_SCHEMA > TARGET_SCHEMA/);
+assert.match(upgradeInstaller, /mv -- "\$SCRIPT_ROOT" "\$ROLLBACK_ROOT"/);
+assert.match(upgradeInstaller, /previous installation was restored/);
+assert.match(rollbackInstaller, /verify-yappa-backup\.sh/);
+assert.match(
+  rollbackInstaller,
+  /mv -- "\$SCRIPT_ROOT" "\$PRE_ROLLBACK_ROOT"/,
+);
+assert.match(rollbackInstaller, /newer installation was restored/);
 assert.match(startup, /Public join address: \$\{YAPPA_ADVERTISED_ADDRESS\}/);
 assert.match(
   startup,

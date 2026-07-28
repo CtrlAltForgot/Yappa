@@ -1063,6 +1063,18 @@ Before public DMs, Yappa must additionally define and verify:
   overwrite attempts, future schemas, escaped `DB_PATH`, malicious symlinks,
   and cleanup. Artifact authenticity, Windows restore, and production
   deployment verification remain open.
+- Linux upgrade and rollback now fail closed around whole-installation
+  snapshots rather than running an older binary against a migrated database.
+  Upgrade requires a healthy current server, a newly encrypted and
+  independently verified recovery point, a checksum-pinned candidate, stopped
+  state copying, safe `DB_PATH`, supported schema, SQLite integrity, and
+  successful candidate startup plus operational verification. Failure restores
+  and verifies the previous installation and retains the candidate. Explicit
+  rollback first encrypts and verifies the newer state and retains it after
+  activating the old snapshot, preventing silent deletion of post-upgrade
+  activity. Tests cover success, state continuity, deliberate rollback, and
+  automatic recovery from failed candidate verification. Bundle signatures,
+  Windows parity, and real-host upgrade evidence remain required.
 - Ensure production secrets never live in the repository or images.
 - Add dependency auditing, secret scanning, static analysis, and reproducible
   release provenance to CI.

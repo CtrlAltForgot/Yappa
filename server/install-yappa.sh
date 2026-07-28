@@ -24,6 +24,10 @@ Usage:
   ./install-yappa.sh verify-backup /absolute/path/backup.tar.gz.age
   ./install-yappa.sh restore --backup BACKUP --local-bundle BUNDLE \
     --sha256 DIGEST --install-dir /absolute/new/path
+  ./install-yappa.sh upgrade --local-bundle BUNDLE --sha256 DIGEST \
+    --backup /absolute/new/pre-upgrade-backup.tar.gz.age
+  ./install-yappa.sh rollback \
+    --backup /absolute/new/pre-rollback-backup.tar.gz.age
 
 This development installer operates only on the locally present server tree or
 an explicitly supplied local bundle and checksum. Remote installation remains
@@ -450,7 +454,69 @@ case "$COMMAND" in
       "$INSTALL_DIRECTORY" \
       "$INSTALL_PARENT"
     ;;
-  upgrade | rollback | uninstall)
+  upgrade)
+    LOCAL_BUNDLE=""
+    EXPECTED_SHA256=""
+    BACKUP_PATH=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --local-bundle | --sha256 | --backup)
+          if [[ $# -lt 2 ]]; then
+            echo "$1 requires a value." >&2
+            exit 1
+          fi
+          case "$1" in
+            --local-bundle) LOCAL_BUNDLE="$2" ;;
+            --sha256) EXPECTED_SHA256="$2" ;;
+            --backup) BACKUP_PATH="$2" ;;
+          esac
+          shift
+          ;;
+        *)
+          echo "Unknown upgrade option: $1" >&2
+          usage
+          exit 1
+          ;;
+      esac
+      shift
+    done
+    require_initialized
+    if [[ -z "$LOCAL_BUNDLE" || -z "$EXPECTED_SHA256" ||
+      -z "$BACKUP_PATH" ]]; then
+      echo "Upgrade requires --local-bundle, --sha256, and --backup." >&2
+      exit 1
+    fi
+    "$SCRIPT_ROOT/upgrade-yappa.sh" \
+      "$LOCAL_BUNDLE" "$EXPECTED_SHA256" "$BACKUP_PATH"
+    ;;
+  rollback)
+    BACKUP_PATH=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --backup)
+          if [[ $# -lt 2 ]]; then
+            echo "--backup requires a value." >&2
+            exit 1
+          fi
+          BACKUP_PATH="$2"
+          shift
+          ;;
+        *)
+          echo "Unknown rollback option: $1" >&2
+          usage
+          exit 1
+          ;;
+      esac
+      shift
+    done
+    require_initialized
+    if [[ -z "$BACKUP_PATH" ]]; then
+      echo "Rollback requires --backup." >&2
+      exit 1
+    fi
+    "$SCRIPT_ROOT/rollback-yappa.sh" "$BACKUP_PATH"
+    ;;
+  uninstall)
     require_manifest
     echo "The '$COMMAND' lifecycle command is specified but not implemented safely yet." >&2
     exit 1

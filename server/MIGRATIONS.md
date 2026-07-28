@@ -28,6 +28,22 @@ Keep the matching Yappa source/image revision with the backup. Do not copy a
 live SQLite file independently of its WAL; use the supplied backup command,
 which pauses the application backend and includes the complete `data/` tree.
 
+The Linux lifecycle performs this sequence with:
+
+```bash
+./install-yappa.sh upgrade \
+  --local-bundle /path/yappa-server-VERSION.tar.gz \
+  --sha256 FULL_LOWERCASE_SHA256 \
+  --backup /secure/path/yappa-before-upgrade-YYYY-MM-DD.tar.gz.age
+```
+
+It first verifies the running installation, creates and independently verifies
+the encrypted backup, stops the stack, installs the checksum-pinned candidate
+beside the active directory, copies the stopped state, checks its path, schema,
+and SQLite integrity, then swaps directory names. The candidate must start and
+pass operational verification. Otherwise, Yappa restores and verifies the
+previous installation and retains the failed candidate for investigation.
+
 ## Rollback
 
 Never point an older binary at a database that a newer version migrated. A
@@ -46,6 +62,21 @@ software rollback is a complete data restore:
 Do not merge selected tables from different schema versions. An encrypted
 channel also cannot be rolled back in place to plaintext; restoring an older
 whole-server backup intentionally loses all activity after that backup.
+
+After a lifecycle upgrade, the pre-upgrade installation is retained as the
+adjacent `.rollback` directory. An explicit rollback first backs up and
+verifies the newer state, then swaps back and requires the older installation
+to start and pass operational verification:
+
+```bash
+./install-yappa.sh rollback \
+  --backup /secure/path/yappa-before-rollback-YYYY-MM-DD.tar.gz.age
+```
+
+The newer installation is retained as `.pre-rollback`, so post-upgrade
+activity is not silently deleted. Rollback intentionally makes the older
+snapshot active; reconcile or restore newer activity only through a separately
+reviewed recovery procedure, never by merging databases.
 
 ## Requirements for future migrations
 

@@ -1121,8 +1121,9 @@ Completed and evidenced:
 Current implementation slice:
 
 - The operational verifier is committed and pushed. Its backend job passed in
-  run `30408590340`; that workflow was later superseded by a documentation-only
-  push, so a fresh exact-head full workflow result is still required.
+  run `30408590340`; exact-head run `30409072042` passed completely for restore
+  commit `d65545f`, including backend security/bundle, Flutter/native MLS,
+  official vectors, and dependency audits.
 - `verify-yappa-install.sh` verifies Linux container health, schema and
   SQLite integrity, persistent identity and private storage modes, an actual
   Ed25519 server proof, API/TLS identity consistency, Socket.IO WebSocket
@@ -1137,15 +1138,23 @@ Current implementation slice:
   with a checksum-pinned local bundle in private staging, validates the
   configured database, integrity, supported schema and persistent identity,
   rejects overwrite/links/special files/path escape, atomically places the
-  completed runtime, and leaves it stopped. Fresh-checkout CI evidence is not
-  yet recorded.
+  completed runtime, and leaves it stopped. Exact-head security run
+  `30409072042` passed all jobs for restore commit `d65545f`.
+- Transactional Linux upgrade and rollback are implemented locally. Upgrade
+  requires current health, a verified encrypted recovery point, a
+  checksum-pinned candidate, stopped state copying, schema/integrity checks,
+  and candidate operational verification; failure restores the old
+  installation. Rollback protects and retains the newer state before
+  reactivating the prior snapshot. Focused success/rollback/failure tests and
+  the complete local backend/security suite pass; fresh-CI evidence is still
+  required.
 
 Next work, in order:
 
 1. Finish full validation, commit, and obtain fresh-checkout CI evidence for
-   safe restore and the operational verifier; exercise both on Unraid if
-   deployment access becomes available.
-2. Implement transactional upgrade/rollback, uninstall, service/autostart,
+   restore, upgrade/rollback, and the operational verifier; exercise them on
+   Unraid if deployment access becomes available.
+2. Implement uninstall, service/autostart,
    firewall, and crash-recovery behavior; run the identical conformance
    contract across every Tier-1 Linux/Windows target.
 3. Finish hosted Linux desktop evidence and signed release engineering:

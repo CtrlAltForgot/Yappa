@@ -125,6 +125,37 @@ archive or merges into an existing destination. The completed installation is
 renamed into place and left stopped so its network configuration can be
 reviewed before `install-yappa.sh start`.
 
+## Upgrade and rollback
+
+Upgrade only from a healthy initialized installation and choose a new
+encrypted-backup path:
+
+```bash
+./install-yappa.sh upgrade \
+  --local-bundle /path/yappa-server-VERSION.tar.gz \
+  --sha256 FULL_LOWERCASE_SHA256 \
+  --backup /secure/path/yappa-before-upgrade.tar.gz.age
+```
+
+Yappa verifies the current server and encrypted recovery point, copies stopped
+state into a checksum-pinned candidate, checks the database path, schema, and
+integrity, then switches directory names. The candidate must start and pass
+the operational verifier. A failed candidate is retained as
+`.failed-upgrade`, while the previous installation is restored and verified.
+A successful upgrade retains the previous installation as `.rollback`.
+
+To deliberately return to that snapshot:
+
+```bash
+./install-yappa.sh rollback \
+  --backup /secure/path/yappa-before-rollback.tar.gz.age
+```
+
+Rollback first encrypts and verifies the newer state, then activates and
+verifies the older installation. The newer directory is retained as
+`.pre-rollback`. Activity created after the upgrade is therefore preserved but
+is not present in the active older snapshot. Never merge the two databases.
+
 ## Start a public server
 
 Run:

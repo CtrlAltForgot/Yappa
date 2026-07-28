@@ -215,6 +215,8 @@
       "logs",
       "backup",
       "restore",
+      "upgrade",
+      "rollback",
       "verify",
       "verify-backup"
     ],

@@ -160,6 +160,19 @@ round trip, wrong checksum, existing destination, future schema, escaped
 database path, malicious symlink, and staging cleanup. This is not yet a
 cross-platform or production deployment claim.
 
+The Linux `upgrade` lifecycle now requires a healthy current server, a new
+encrypted recovery point that passes isolated verification, and a
+checksum-pinned local candidate. It copies only stopped state into private
+staging, rejects unsafe database paths and unsupported schemas, runs SQLite
+integrity checks, switches directory names, and requires candidate startup and
+operational verification. Failure restores and verifies the prior directory
+while retaining the candidate for inspection. `rollback` likewise encrypts
+and verifies the newer state before activating the retained old snapshot; it
+keeps the newer installation as `.pre-rollback` rather than silently deleting
+post-upgrade activity. Integration coverage proves successful upgrade,
+explicit rollback, state preservation, and failed-candidate recovery. Windows
+parity and real-host conformance remain open.
+
 ## Supported-Host Target
 
 ### Tier 1: validated public-release hosts
