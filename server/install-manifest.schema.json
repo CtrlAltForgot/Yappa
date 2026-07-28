@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yappa.invalid/schemas/server-install-manifest-v1.json",
+  "title": "Yappa Server Install Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "product",
+    "release",
+    "artifacts",
+    "supportTargets",
+    "prerequisites",
+    "configuration",
+    "network",
+    "requiredCapabilities",
+    "healthChecks",
+    "lifecycleCommands",
+    "implementedLifecycleCommands",
+    "clientPolicy"
+  ],
+  "properties": {
+    "$schema": {"type": "string"},
+    "schemaVersion": {"const": 1},
+    "product": {"const": "Yappa Server"},
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "channel",
+        "published",
+        "configurationSchemaVersion",
+        "databaseSchemaVersion",
+        "minimumUpgradeVersion"
+      ],
+      "properties": {
+        "version": {"type": "string", "minLength": 1},
+        "channel": {"enum": ["development", "preview", "stable"]},
+        "published": {"type": "boolean"},
+        "configurationSchemaVersion": {"type": "integer", "minimum": 1},
+        "databaseSchemaVersion": {"type": "integer", "minimum": 1},
+        "minimumUpgradeVersion": {"type": ["string", "null"]}
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["serverBundle", "linuxInstaller", "windowsInstaller"],
+      "properties": {
+        "serverBundle": {"$ref": "#/$defs/artifact"},
+        "linuxInstaller": {"$ref": "#/$defs/installerArtifact"},
+        "windowsInstaller": {"$ref": "#/$defs/installerArtifact"}
+      }
+    },
+    "supportTargets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/supportTarget"}
+    },
+    "prerequisites": {"type": "object"},
+    "configuration": {"type": "object"},
+    "network": {"type": "object"},
+    "requiredCapabilities": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "healthChecks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "lifecycleCommands": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "implementedLifecycleCommands": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["linux", "windows"],
+      "properties": {
+        "linux": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "windows": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        }
+      }
+    },
+    "clientPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allowInstallCommandGeneration",
+        "allowLocalSupervision",
+        "reason"
+      ],
+      "properties": {
+        "allowInstallCommandGeneration": {"type": "boolean"},
+        "allowLocalSupervision": {"type": "boolean"},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    }
+  },
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "url", "sha256", "signatureUrl"],
+      "properties": {
+        "status": {"enum": ["unpublished", "published"]},
+        "url": {"type": ["string", "null"]},
+        "sha256": {"type": ["string", "null"]},
+        "signatureUrl": {"type": ["string", "null"]}
+      }
+    },
+    "installerArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "repositoryPath",
+        "url",
+        "sha256",
+        "signatureUrl"
+      ],
+      "properties": {
+        "status": {"enum": ["unpublished", "published"]},
+        "repositoryPath": {"type": "string", "minLength": 1},
+        "url": {"type": ["string", "null"]},
+        "sha256": {"type": ["string", "null"]},
+        "signatureUrl": {"type": ["string", "null"]}
+      }
+    },
+    "supportTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "os",
+        "distribution",
+        "versions",
+        "architecture",
+        "tier",
+        "validation",
+        "publiclySupported",
+        "installCommandAvailable"
+      ],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9-]+$"},
+        "os": {"enum": ["linux", "windows"]},
+        "distribution": {"type": "string", "minLength": 1},
+        "versions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "architecture": {"const": "x86_64"},
+        "tier": {"const": 1},
+        "validation": {
+          "enum": ["pending", "verified-development", "verified-release"]
+        },
+        "publiclySupported": {"type": "boolean"},
+        "installCommandAvailable": {"type": "boolean"}
+      }
+    }
+  }
+}

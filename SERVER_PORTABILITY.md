@@ -98,6 +98,25 @@ deployment:
 - the complete conformance suite has not run against separate Linux
   distributions or Windows.
 
+The first shared installation contract is now implemented in
+`server/install-manifest.json` with a versioned JSON Schema and a security
+validator in the backend suite. It centralizes the development release,
+configuration/database schema versions, exact Tier-1 targets and validation
+state, prerequisites, public/LAN/private ports, required capabilities, health
+boundaries, artifact publication fields, and lifecycle command contract.
+Because no signed server bundle exists, every artifact and public-support flag
+is null/false and client install-command generation and local supervision are
+disabled.
+
+`server/install-yappa.sh` is the first thin Linux front end. It can preflight
+the checked-out x86-64 development source and, only with explicit
+`--local-source`, dispatch the current start/stop/status/log/backup/verify
+operations. `server/Install-Yappa.ps1` currently implements prerequisite
+preflight only and refuses every mutating lifecycle command. This is useful
+foundation, not Windows support: remote download, artifact verification,
+copy/install layout, restore, upgrade, rollback, uninstall, services,
+firewalls, cross-platform discovery, and the conformance matrix remain open.
+
 ## Supported-Host Target
 
 ### Tier 1: validated public-release hosts
@@ -135,7 +154,9 @@ be documented as best-effort only until their matrix passes.
 ## Installation and Configuration
 
 - Provide `install-yappa.sh` and `Install-Yappa.ps1` as thin front ends to the
-  same declarative install manifest and validation rules.
+  same declarative install manifest and validation rules. The manifest and
+  initial front ends exist; only the source-tree Linux lifecycle subset is
+  currently implemented.
 - Publish that manifest for the client’s “Create server” wizard, including
   exact supported hosts, prerequisites, artifact URLs/digests, configuration
   schema, capabilities, health checks, and upgrade compatibility.

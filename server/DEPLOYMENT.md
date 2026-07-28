@@ -4,6 +4,33 @@ The server bundle includes the application backend, LiveKit, and Caddy. Caddy
 is the only reverse proxy required and stores its automatically managed
 certificates in the persistent `caddy_data` Docker volume.
 
+## Development install entry point
+
+The checked-out source tree now has one Linux lifecycle front end:
+
+```bash
+./install-yappa.sh preflight
+./install-yappa.sh install --local-source
+```
+
+Use `--lan` after `--local-source` for private-network-only development. The
+preflight checks the current x86-64, memory, disk, Docker Compose, backup, and
+restore prerequisites before startup. After initialization it also dispatches
+`start`, `stop`, `status`, `logs`, `backup`, and `verify` to the existing
+hardened operations.
+
+This is not a remote public installer. `install-manifest.json` is explicitly
+an unpublished development manifest: it has no artifact URL, checksum,
+signature, release-validated host, client command-generation permission, or
+client-supervision permission. The wrapper requires an explicit
+`--local-source` flag and otherwise fails closed. Do not copy a command from a
+development checkout and describe it as a supported one-click install.
+
+`Install-Yappa.ps1 preflight` checks the currently planned Windows/WSL
+prerequisites but intentionally cannot install or operate the server yet.
+Windows lifecycle commands remain disabled until signed artifacts and the
+Windows 11/Windows Server conformance matrices exist.
+
 ## Start a public server
 
 Run:

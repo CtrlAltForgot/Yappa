@@ -43,6 +43,23 @@ jobs:
         shell: bash
         run: .github/scripts/validate-client.sh
 
+      - name: Validate Windows server install contract
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path "server/Install-Yappa.ps1"),
+            [ref]$tokens,
+            [ref]$errors
+          )
+          if ($errors.Count -ne 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            throw "Install-Yappa.ps1 failed PowerShell syntax validation."
+          }
+          node server/test/install_manifest.js
+          & ./server/Install-Yappa.ps1 help
+
       - name: Build, inspect, smoke-test, and package Windows
         shell: pwsh
         run: >

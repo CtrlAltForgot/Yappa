@@ -41,6 +41,11 @@ jobs:
       - name: Run shared client validation
         run: .github/scripts/validate-client.sh
 
+      - name: Validate Linux server install contract
+        run: |
+          bash -n server/install-yappa.sh
+          node server/test/install_manifest.js
+
       - name: Build, inspect, and package Linux
         run: .github/scripts/build-linux.sh "${{ steps.versions.outputs.safe_yappa }}"
 

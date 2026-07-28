@@ -57,6 +57,17 @@ const restoreVerifier = fs.readFileSync(
   path.join(serverRoot, 'verify-yappa-backup.sh'),
   'utf8',
 );
+const installManifest = JSON.parse(
+  fs.readFileSync(path.join(serverRoot, 'install-manifest.json'), 'utf8'),
+);
+const linuxInstaller = fs.readFileSync(
+  path.join(serverRoot, 'install-yappa.sh'),
+  'utf8',
+);
+const windowsInstaller = fs.readFileSync(
+  path.join(serverRoot, 'Install-Yappa.ps1'),
+  'utf8',
+);
 const compose = fs.readFileSync(
   path.join(serverRoot, 'docker-compose.yml'),
   'utf8',
@@ -408,6 +419,31 @@ const securityWorkflow = fs.readFileSync(
   'utf8',
 );
 assert.match(
+  desktopWorkflows[0],
+  /bash -n server\/install-yappa\.sh/,
+  'Linux artifact CI must syntax-check the server installer.',
+);
+assert.match(
+  desktopWorkflows[0],
+  /node server\/test\/install_manifest\.js/,
+  'Linux artifact CI must validate the shared server manifest.',
+);
+assert.match(
+  desktopWorkflows[1],
+  /System\.Management\.Automation\.Language\.Parser/,
+  'Windows artifact CI must parse the PowerShell server installer.',
+);
+assert.match(
+  desktopWorkflows[1],
+  /node server\/test\/install_manifest\.js/,
+  'Windows artifact CI must validate the shared server manifest.',
+);
+assert.match(
+  desktopWorkflows[1],
+  /Install-Yappa\.ps1 help/,
+  'Windows artifact CI must execute the non-mutating installer entry point.',
+);
+assert.match(
   securityWorkflow,
   /\.github\/scripts\/validate-client\.sh/,
   'Security CI must use the same native/vector/Flutter gate as artifacts.',
@@ -428,5 +464,58 @@ assert.match(backup, /"\$ROOT_DIR\/bin\/age"/);
 assert.match(backup, /Refusing to overwrite existing backup/);
 assert.match(backup, /\.env\s+\\\n\s+data\s+\\\n\s+\| "\$AGE_BIN"/);
 assert.match(backup, /--file=-/);
+
+assert.equal(installManifest.release.published, false);
+assert.equal(
+  installManifest.clientPolicy.allowInstallCommandGeneration,
+  false,
+  'The client must not generate commands from an unpublished manifest.',
+);
+assert.equal(
+  installManifest.clientPolicy.allowLocalSupervision,
+  false,
+  'The client must not supervise an unpublished server release.',
+);
+for (const artifact of Object.values(installManifest.artifacts)) {
+  assert.equal(artifact.status, 'unpublished');
+  assert.equal(artifact.url, null);
+  assert.equal(artifact.sha256, null);
+  assert.equal(artifact.signatureUrl, null);
+}
+for (const target of installManifest.supportTargets) {
+  assert.equal(target.publiclySupported, false);
+  assert.equal(target.installCommandAvailable, false);
+}
+assert.match(linuxInstaller, /^set -euo pipefail$/m);
+assert.match(linuxInstaller, /^umask 077$/m);
+assert.match(linuxInstaller, /install --local-source/);
+assert.match(
+  linuxInstaller,
+  /Remote installation is unavailable for this development release/,
+);
+assert.match(linuxInstaller, /docker compose version/);
+assert.match(linuxInstaller, /minimum 4096 MiB/);
+assert.match(linuxInstaller, /minimum 10240 MiB/);
+assert.doesNotMatch(
+  linuxInstaller,
+  /curl[^\r\n]*(\||;)[^\r\n]*(sh|bash)/,
+  'The development installer must not pipe remote content into a shell.',
+);
+assert.match(windowsInstaller, /Set-StrictMode -Version Latest/);
+assert.match(windowsInstaller, /\$ErrorActionPreference = "Stop"/);
+assert.match(windowsInstaller, /ConvertFrom-Json/);
+assert.match(
+  windowsInstaller,
+  /Yappa never asks for or stores a remote Administrator password/,
+);
+assert.match(
+  windowsInstaller,
+  /Installation remains disabled until release validation passes/,
+);
+assert.doesNotMatch(
+  windowsInstaller,
+  /(ConvertTo-SecureString|PSCredential|Get-Credential)/,
+  'The preflight-only wrapper must not request or retain administrator credentials.',
+);
 
 process.stdout.write('Deployment safety test passed.\n');

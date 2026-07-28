@@ -1181,6 +1181,24 @@ unavailable; the equivalent repository-owned Linux script has passed locally
 from a neutral source tree, including native dependency, path, marker,
 packaging, and startup-smoke checks.
 
+The portable-server phase began on 2026-07-28 with a versioned shared install
+manifest and JSON Schema under `server/`. The manifest binds the centralized
+development version to exact Tier-1 targets, artifact publication state,
+configuration/database schemas, prerequisites, network exposure, required
+capabilities, health checks, and lifecycle commands. Its validator rejects
+support/command generation before a target is release-verified and rejects a
+published artifact without HTTPS download, SHA-256, and detached-signature
+metadata. The current manifest remains explicitly unpublished and disables
+client command generation and local supervision.
+
+The initial Linux wrapper preflights the checked-out source and provides the
+existing safe start/stop/status/log/backup/verify lifecycle behind an explicit
+`--local-source` development flag. The PowerShell wrapper reads the same
+contract and performs prerequisite checks but refuses mutation. It is not
+Windows support evidence. Signed bundles, remote installation, durable install
+layout, restore/upgrade/rollback/uninstall, service/firewall integration,
+cross-platform discovery, and every Tier-1 conformance run remain required.
+
 As of 2026-07-24, newly created text feeds default to the non-downgradable
 `e2ee` version `1` contract. The backend writes that mode at channel creation,
 rejects every legacy plaintext message, upload, edit, preview, or delete path

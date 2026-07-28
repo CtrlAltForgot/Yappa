@@ -943,6 +943,23 @@ Before either platform is supported:
   unsupported/best-effort combinations must be published from the tagged
   release.
 
+As of 2026-07-28, the first machine-readable server installation contract is
+implemented in `server/install-manifest.json` and its versioned JSON Schema.
+The backend security suite enforces centralized version parity, exact unique
+Tier-1 target identifiers, release-validation-before-support, HTTPS/checksum/
+signature requirements for published artifacts, private raw ports, required
+capabilities, lifecycle parity, and fail-closed client policy. The current
+development release truthfully publishes no artifacts or install commands and
+permits neither public support claims nor client supervision.
+
+The Linux front end uses strict shell failure behavior and a private umask,
+validates the manifest, checks architecture/resources and required tools, and
+requires the explicit `--local-source` development path before initialization.
+It never pipes downloaded content into a shell. The PowerShell front end uses
+strict/error-stop behavior, reads the same manifest, requests no administrator
+credential, and is deliberately preflight-only. Windows mutation remains
+disabled until the native negative tests and conformance evidence above exist.
+
 ### Cross-Server Identity and Direct-Message Gate
 
 The existing YUID is derived from the first 20 base64url characters of a

@@ -1,0 +1,220 @@
+{
+  "$schema": "./install-manifest.schema.json",
+  "schemaVersion": 1,
+  "product": "Yappa Server",
+  "release": {
+    "version": "0.1.0-dev",
+    "channel": "development",
+    "published": false,
+    "configurationSchemaVersion": 1,
+    "databaseSchemaVersion": 3,
+    "minimumUpgradeVersion": null
+  },
+  "artifacts": {
+    "serverBundle": {
+      "status": "unpublished",
+      "url": null,
+      "sha256": null,
+      "signatureUrl": null
+    },
+    "linuxInstaller": {
+      "status": "unpublished",
+      "repositoryPath": "server/install-yappa.sh",
+      "url": null,
+      "sha256": null,
+      "signatureUrl": null
+    },
+    "windowsInstaller": {
+      "status": "unpublished",
+      "repositoryPath": "server/Install-Yappa.ps1",
+      "url": null,
+      "sha256": null,
+      "signatureUrl": null
+    }
+  },
+  "supportTargets": [
+    {
+      "id": "ubuntu-lts-x64",
+      "os": "linux",
+      "distribution": "ubuntu",
+      "versions": ["lts"],
+      "architecture": "x86_64",
+      "tier": 1,
+      "validation": "pending",
+      "publiclySupported": false,
+      "installCommandAvailable": false
+    },
+    {
+      "id": "debian-stable-x64",
+      "os": "linux",
+      "distribution": "debian",
+      "versions": ["stable"],
+      "architecture": "x86_64",
+      "tier": 1,
+      "validation": "pending",
+      "publiclySupported": false,
+      "installCommandAvailable": false
+    },
+    {
+      "id": "fedora-current-x64",
+      "os": "linux",
+      "distribution": "fedora",
+      "versions": ["current"],
+      "architecture": "x86_64",
+      "tier": 1,
+      "validation": "pending",
+      "publiclySupported": false,
+      "installCommandAvailable": false
+    },
+    {
+      "id": "rhel-compatible-current-x64",
+      "os": "linux",
+      "distribution": "rhel-compatible",
+      "versions": ["current"],
+      "architecture": "x86_64",
+      "tier": 1,
+      "validation": "pending",
+      "publiclySupported": false,
+      "installCommandAvailable": false
+    },
+    {
+      "id": "unraid-current-x64",
+      "os": "linux",
+      "distribution": "unraid",
+      "versions": ["current"],
+      "architecture": "x86_64",
+      "tier": 1,
+      "validation": "verified-development",
+      "publiclySupported": false,
+      "installCommandAvailable": false
+    },
+    {
+      "id": "windows-11-wsl2-x64",
+      "os": "windows",
+      "distribution": "windows-client-wsl2",
+      "versions": ["11"],
+      "architecture": "x86_64",
+      "tier": 1,
+      "validation": "pending",
+      "publiclySupported": false,
+      "installCommandAvailable": false
+    },
+    {
+      "id": "windows-server-current-x64",
+      "os": "windows",
+      "distribution": "windows-server",
+      "versions": ["current"],
+      "architecture": "x86_64",
+      "tier": 1,
+      "validation": "pending",
+      "publiclySupported": false,
+      "installCommandAvailable": false
+    }
+  ],
+  "prerequisites": {
+    "common": {
+      "minimumMemoryMiB": 4096,
+      "minimumFreeDiskMiB": 10240,
+      "clockSynchronizationRequired": true,
+      "x86_64Required": true
+    },
+    "linux": {
+      "commands": ["docker", "curl", "tar", "age", "sqlite3"],
+      "dockerComposeVersion": "2",
+      "containerMode": "linux"
+    },
+    "windows": {
+      "commands": ["docker", "wsl.exe", "powershell.exe"],
+      "wslVersion": "2",
+      "containerMode": "linux",
+      "nativeServerAvailable": false
+    }
+  },
+  "configuration": {
+    "file": ".env",
+    "example": "server/.env.example",
+    "generatedFile": "livekit.yaml",
+    "secretKeys": [
+      "ATTACHMENT_SIGNING_SECRET",
+      "LIVEKIT_API_KEY",
+      "LIVEKIT_API_SECRET"
+    ],
+    "addressModes": ["automatic-ip", "custom-domain", "lan"],
+    "dataPath": "data",
+    "backupIncludes": [".env", "data"]
+  },
+  "network": {
+    "publicPorts": [
+      {"protocol": "tcp", "port": 80, "purpose": "certificate-and-redirect"},
+      {"protocol": "tcp", "port": 443, "purpose": "https-wss-and-media-signal"},
+      {"protocol": "udp", "port": 443, "purpose": "authenticated-turn-udp"},
+      {"protocol": "tcp", "port": 7881, "purpose": "webrtc-ice-tcp"},
+      {"protocol": "udp", "range": [50000, 50100], "purpose": "webrtc-media"}
+    ],
+    "lanOnlyPorts": [
+      {"protocol": "udp", "port": 41200, "purpose": "signed-lan-discovery"}
+    ],
+    "neverExposePorts": [
+      {"protocol": "tcp", "port": 4100, "purpose": "raw-backend"},
+      {"protocol": "tcp", "port": 7880, "purpose": "raw-livekit-signal"},
+      {"protocol": "tcp", "port": 7882, "purpose": "lan-signal-compatibility"},
+      {"protocol": "udp", "port": 41201, "purpose": "loopback-discovery-relay"}
+    ]
+  },
+  "requiredCapabilities": [
+    "authentication",
+    "yuid-proof",
+    "persistent-messages",
+    "opaque-mls-delivery",
+    "encrypted-attachments",
+    "https-wss",
+    "livekit-media",
+    "turn-udp",
+    "signed-lan-discovery",
+    "encrypted-backup",
+    "isolated-restore-verification"
+  ],
+  "healthChecks": [
+    "container-health",
+    "database-schema",
+    "persistent-storage-write",
+    "server-identity-proof",
+    "https-api",
+    "websocket-upgrade",
+    "livekit-signal",
+    "turn-udp",
+    "signed-lan-invitation"
+  ],
+  "lifecycleCommands": [
+    "preflight",
+    "install",
+    "start",
+    "stop",
+    "status",
+    "logs",
+    "backup",
+    "restore",
+    "verify",
+    "upgrade",
+    "rollback",
+    "uninstall"
+  ],
+  "implementedLifecycleCommands": {
+    "linux": [
+      "preflight",
+      "install",
+      "start",
+      "stop",
+      "status",
+      "logs",
+      "backup",
+      "verify"
+    ],
+    "windows": ["preflight"]
+  },
+  "clientPolicy": {
+    "allowInstallCommandGeneration": false,
+    "allowLocalSupervision": false,
+    "reason": "Development manifest has no signed published server bundle or release-validated host target."
+  }
+}
