@@ -1287,6 +1287,10 @@ real Socket.IO HTTP/1.1 WebSocket upgrade, and a reachable guarded LiveKit
 route. Focused tests exercise the complete LAN verifier, tampered identity
 signature, wrong schema, and extracted bundle inclusion. External
 reachability, forced TURN, and real media remain explicit separate gates.
+The documented read-only SSH attempt to `root@192.168.1.254` on 2026-07-28
+was denied because no approved key was available. No password was requested.
+This verifier is therefore committed but not deployed to Unraid; the repository
+is ahead of production for these operator-only files.
 
 As of 2026-07-24, newly created text feeds default to the non-downgradable
 `e2ee` version `1` contract. The backend writes that mode at channel creation,

@@ -993,6 +993,9 @@ encodings, and verifies the domain-separated Ed25519 proof. Tests cover the
 complete LAN verification flow plus tampered proof and schema mismatch.
 Host-local success explicitly excludes external reachability, forced TURN, and
 real media; those still require separate external/native evidence.
+The read-only Unraid SSH attempt on 2026-07-28 was denied because no approved
+key was available, so the verifier has not been copied into or run against
+production. No password or long-lived credential was requested.
 
 ### Cross-Server Identity and Direct-Message Gate
 
