@@ -84,10 +84,11 @@ foreach ($artifact in Get-ChildItem -Path $bundle -Recurse -File) {
   $content = [Text.Encoding]::Latin1.GetString(
     [IO.File]::ReadAllBytes($artifact.FullName)
   )
-  if ($forbidden.IsMatch($content)) {
+  $match = $forbidden.Match($content)
+  if ($match.Success) {
     throw (
       "Forbidden builder path, secret, or retired transport marker in " +
-      "Windows bundle: $($artifact.Name)"
+      "Windows bundle: $($artifact.Name) (matched '$($match.Value)')"
     )
   }
 }

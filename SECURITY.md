@@ -827,6 +827,14 @@ Shared music implementation must define:
   rotation and revocation, unlinking, CSRF/state protection, redirect
   validation, and strict exclusion of provider tokens from logs, telemetry,
   databases not designed for them, and release artifacts.
+- Linked-provider identity, imported library data, and reusable rich-presence
+  activity are separate consent surfaces. Linking an account must not
+  automatically publish listening activity, and presence visibility must be
+  revocable without unlinking the provider.
+- Catalog matching across providers must treat metadata as untrusted until the
+  user-visible title, artist, duration, explicit-content state, and playback
+  source are resolved. Provider linking never authorizes extraction, proxying,
+  or redistribution through an unrelated service.
 - What listening activity, provider identity, playback state, search queries,
   queue history, votes, and external requests are visible to the server,
   Yappa members, and each provider.
@@ -842,6 +850,37 @@ Both features require explicit threat-model review, secure storage and
 migration designs, automated negative tests, real multi-client validation,
 production deployment verification, accurate user disclosures, and
 documentation before they can satisfy the full-public-release gate.
+
+### Cross-Server Identity and Direct-Message Gate
+
+The existing YUID is derived from the first 20 base64url characters of a
+SHA-256 digest of an Ed25519 public key. Authentication proofs are signed over
+the destination server identity, normalized username, and a single-use nonce,
+and the server derives the claimed YUID from the verified full key. This is a
+real anti-spoofing foundation for current server login and device bindings; it
+does not by itself establish a safe global directory, recovery authority, or
+DM protocol.
+
+Before public DMs, Yappa must additionally define and verify:
+
+- Full-public-key comparison at every security boundary. The shortened YUID is
+  a display/discovery handle, not sufficient cryptographic identity evidence.
+- Domain-separated signed identity documents, protocol downgrade resistance,
+  canonical encoding, key-purpose separation, replay rejection, and test
+  vectors shared by client and server implementations.
+- Contact verification and conspicuous key-change handling, including recovery
+  and new-device events. No server may silently replace a known contact key.
+- Multi-device authorization, device removal, lost-device response, encrypted
+  identity backup, rotation, and post-compromise recovery without a universal
+  server-held impersonation key.
+- Private, abuse-resistant discovery that prevents YUID enumeration, server
+  membership correlation, unsolicited-message flooding, and block evasion.
+- An explicit DM trust and routing model plus reviewed E2EE session design,
+  metadata analysis, attachment encryption, offline queues, deletion and
+  retention semantics, reporting tradeoffs, and compromised-relay tests.
+- Independent protocol review and real cross-server, multi-device validation
+  covering interception, substitution, replay, rollback, reinstall, recovery,
+  device removal, server outage, and malicious-server scenarios.
 
 ## Priority 5: At-Rest, Supply-Chain, and Operational Security
 

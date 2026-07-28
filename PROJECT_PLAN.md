@@ -1056,19 +1056,23 @@ The remaining full-public-release work is:
 6. Complete and soak-test KDE Wayland and Windows screen sharing, including
    1080p60, separate microphone/system audio, repeated start/stop, and
    hours-long broadcasts.
-7. Design and implement the integrated server calendar described below,
+7. Complete the cross-server Yappa identity and direct-message architecture
+   described below. Prove that YUID ownership cannot be spoofed, define
+   discovery and privacy behavior, implement multi-device E2EE DMs, and cover
+   recovery, key change, blocking, reporting, and compromised-server cases.
+8. Design and implement the integrated server calendar described below,
    including backend persistence, authorization, realtime synchronization,
    migrations, cross-device client behavior, and production deployment.
-8. Design and implement the integrated shared server music experience
+9. Design and implement the integrated shared server music experience
    described below, including a legally and technically valid provider model,
    synchronized state, moderation, linked-account protection, and production
    deployment.
-9. Complete release engineering: supported-version and vulnerability policy,
+10. Complete release engineering: supported-version and vulnerability policy,
    production version numbers, release notes, code signing, checksums,
    provenance, reproducibility evidence, update/distribution guidance, and a
    final secret/dependency/bundle audit. Run the complete candidate matrix from
    the exact tagged commit and retain the evidence.
-10. Perform a full product-readiness pass across onboarding, joining,
+11. Perform a full product-readiness pass across onboarding, joining,
     administration, accessibility, empty/error/offline states, data migration,
     backup/restore, and the connections among chat, voice, calendar, and music.
     Update all handoff and user-facing documentation before declaring the
@@ -1115,14 +1119,26 @@ route. The local follow-up now checksum-pins and builds the official libsodium
 Frameworks directory, enables the Dart MLS integration suite on macOS, and
 targets loopback explicitly for protocol-level discovery tests while
 production discovery retains broadcast. Linux analysis and all 58 tests plus
-the deployment/secret policies pass after the fix. A successful hosted macOS
-rerun is still required before recording artifact evidence.
+the deployment/secret policies pass after the fix.
 The same first hosted Windows run passed the complete shared validation gate
 and compiled `yappa.exe`; its bundle scan then correctly rejected a
 runner-account path retained in Dart AOT through the default Pub cache. The
 follow-up assigns clean neutral Pub caches to Linux, Windows, and macOS release
 builds and removes Windows generated metadata before artifact compilation
 rather than weakening the builder-path scan.
+
+Hosted macOS run `30403399013` on commit `124cb3a` subsequently passed the
+complete shared native MLS, official vector, Flutter analysis, and 58-test
+gate; built the release app with checksum-pinned libsodium; verified code
+signing, literal dotted entitlements, runtime search paths, and forbidden
+bundle markers; kept the packaged executable alive through its smoke test; and
+uploaded both the development artifact and diagnostics. This is valid hosted
+macOS workflow evidence for that commit. Security run `30403401906` on the
+same commit also passed. Windows again compiled the release executable and
+packaged native dependencies, but its strict scan still found a builder-path
+class in `app.so`. The scan remains enforced and now reports only the matched
+marker class, without disclosing surrounding binary content, so the retained
+path can be identified and removed on the next hosted run.
 
 As of 2026-07-24, newly created text feeds default to the non-downgradable
 `e2ee` version `1` contract. The backend writes that mode at channel creation,
@@ -1166,9 +1182,53 @@ Windows job must be rerun to prove compilation and packaging.
 
 ## First Public Release Product Pillars
 
-The following two capabilities are part of the intended first full public
+The following capabilities are part of the intended first full public
 release, not commitments for the next friend-test artifact. Their detailed
 product and technical designs must be completed before implementation.
+
+### Cross-Server Identity and Direct Messages
+
+Yappa IDs (YUIDs) are intended to identify the same person across independently
+hosted servers and to support private relationships that are not owned by one
+server. The current foundation derives the 20-character YUID from a SHA-256
+digest of an Ed25519 public key and requires a server-specific, nonce-bound
+signature during authentication. That prevents a server client from choosing
+another person's YUID without the corresponding private key, but it is not yet
+a complete global identity or DM system.
+
+The design must resolve and implement:
+
+- A canonical identity document and proof format that binds the full public
+  key, YUID, protocol version, and key purpose. Security checks must compare
+  and verify the full key rather than trusting the shortened display
+  identifier alone, with collision and malformed-encoding tests.
+- A discovery model that does not require publishing every user's server
+  memberships or making YUIDs globally enumerable. Contact codes, invitations,
+  mutual-server discovery, and explicit lookup consent must be evaluated
+  against spam, stalking, scraping, and account-correlation risks.
+- A user-verifiable identity view with safety-number or QR comparison,
+  verified-contact state, clear key-change warnings, and no implication that a
+  cryptographic key proves a person's civil identity.
+- Multi-device identity and recovery semantics. New devices, reinstall,
+  backup/restore, lost or stolen devices, revocation, rotation, and deliberate
+  identity replacement must not silently let a server or attacker impersonate
+  an established contact.
+- A server-independent DM routing model or an explicitly trusted home-service
+  model, including offline delivery, retries, ordering, attachments,
+  notifications, retention, deletion, portability, and behavior when one
+  participant's usual server is unavailable.
+- End-to-end encrypted one-to-one and group-DM sessions built on reviewed
+  protocols, with authenticated device membership, forward secrecy,
+  post-compromise recovery, replay protection, transcript consistency, and
+  fail-closed handling. Existing server-channel MLS code is useful evidence,
+  not automatic proof that the DM topology is safe.
+- Blocking, message requests, rate limits, spam controls, reporting that does
+  not silently expose unrelated plaintext, abuse-evidence choices, and
+  protection against blocked users evading controls through another server.
+- Backend storage, authenticated APIs, realtime delivery, migrations,
+  cross-device synchronization, backup/restore boundaries, negative
+  authorization tests, independent protocol review, and real clients on
+  separate servers before public-release claims.
 
 ### Integrated Server Calendar
 
@@ -1229,10 +1289,24 @@ limits, and synchronization restrictions.
 
 The design must resolve and implement:
 
+- A reusable rich-presence model rather than a music-only status field.
+  Optional Spotify linking may power consented listening presence, while the
+  same presence foundation can later represent other Yappa activities without
+  exposing them by default. Spotify linking and library access are not
+  prerequisites for the shared music experience.
+- A strict separation between catalog identity and playback delivery. A track
+  identified through any provider may be mapped to an authorized playback
+  source only where both providers permit that integration, and then only with
+  deterministic metadata matching, explicit source attribution, mismatch
+  reporting, and user control. Catalog access never grants Yappa permission to
+  obtain or redistribute the recording from elsewhere.
 - Whether playback is synchronized individual provider playback, an approved
   embed, server-relayed content, or another licensed model for each source.
   Yappa must not download, rebroadcast, proxy, or strip protection from media
-  without explicit authorization.
+  without explicit authorization. Command-line extraction or downloader tools
+  such as `yt-dlp` are not an approved public-release playback architecture
+  unless the applicable provider and rights holders explicitly authorize the
+  exact use.
 - OAuth/account linking with minimum scopes, secure token storage, revocation,
   expiry/refresh handling, account unlinking, log redaction, and a useful
   experience for people who do not link a provider.
@@ -1257,6 +1331,16 @@ The design must resolve and implement:
 
 An original Yappa interaction and visual design should be developed rather
 than cloning plug.dj or another product's protected assets or exact interface.
+
+As a preliminary provider constraint check on 2026-07-28, Spotify's official
+Developer Policy prohibited non-interactive internet webcasting and products
+integrated with streams or content from another service, while YouTube's
+official API Developer Policies prohibited downloading, separating, or
+redistributing YouTube audiovisual content without the required approval.
+Consequently, optional Spotify rich presence is not coupled to music-room
+playback, and `yt-dlp`-style extraction is not a release architecture. These
+policies must be rechecked during detailed adapter design because provider
+terms can change.
 
 ## Future Hosted File Sharing
 
