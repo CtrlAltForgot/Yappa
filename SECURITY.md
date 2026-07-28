@@ -749,13 +749,15 @@ to remain alive for eight seconds, catching immediate loader/runtime failures
 before upload. Native Rust diagnostics remap the Windows builder account,
 Flutter debug symbols stay outside the distributable directory, and a binary
 scan rejects builder-home, retired `sslip.io`, Codex-key-label, and private-key
-markers before upload. A hosted run and real Windows connection,
-credential-vault, and media validation remain required.
+markers before upload. An exact-candidate hosted artifact run now passes this
+packaging and loader gate. Real Windows connection, credential-vault, and media
+validation remain required.
 The first current hosted run exposed MSVC 14.51 error `STL1011` in
 `webview_all_windows` 1.2.1 because that dependency still opts into legacy
 `/await`. The compatibility definition recommended by the STL diagnostic is
 applied only to `webview_all_windows_plugin`; Yappa and every other dependency
-retain normal deprecation enforcement. A hosted rerun remains required.
+retain normal deprecation enforcement. The exact-candidate hosted rerun
+compiled and packaged successfully with that scoped compatibility fix.
 
 The design must cover:
 
@@ -909,6 +911,21 @@ identity verification, backup encryption, rate limits, or other controls.
 
 Before either platform is supported:
 
+- The client “Create server” flow must use a signed machine-readable release
+  manifest and checksum-pinned installers. Generated remote commands must not
+  contain passwords, private keys, server secrets, provider tokens, or client
+  sessions, and the client must independently verify the resulting TLS/server
+  identity before trusting it.
+- Local hosting must use protected per-server data/secrets, bind internal
+  services safely, prevent duplicate supervisors, expose firewall/public-
+  reachability choices, and stop or recover deterministically across crashes,
+  sleep, network changes, upgrades, and OS shutdown.
+- Tray/background operation and sign-in autostart require explicit informed
+  opt-in, an OS-visible registration, least privilege, a clear running
+  indicator, and complete removal without deleting server data by default.
+- Yappa must not accept or retain remote root/administrator passwords. Any
+  future automated SSH deployment requires verified host keys, scoped
+  credentials, previewed actions, and post-operation credential cleanup.
 - Installers and upgrades must pin/checksum inputs, protect secret files with
   OS-appropriate permissions or ACLs, avoid command-line secret exposure, and
   fail closed on missing prerequisites or occupied/public internal ports.
@@ -1014,7 +1031,9 @@ Before public DMs, Yappa must additionally define and verify:
   `rust-toolchain.toml`, mirrored in the release manifest, and checked by the
   deployment policy test. Security CI uses the same shared native
   MLS/vector/Flutter entry point as every artifact workflow, preventing the
-  security and packaging gates from drifting apart.
+  security and packaging gates from drifting apart. Exact-candidate Windows,
+  macOS, and security runs now pass; hosted Linux, production signing,
+  provenance, and publishing policy remain release gates.
 - GitHub run history was inspected on 2026-07-24. Workflow run
   `23470775087` successfully built Linux, Windows, and macOS artifacts for
   revision `d3e2ebeead049a96d6cac5cf7b41e799cd045246` on 2026-03-24. That
@@ -1038,9 +1057,9 @@ Before public DMs, Yappa must additionally define and verify:
   native MLS tests, all 25 checksum-pinned official vector-reader tests,
   Flutter analysis, and all 58 Flutter tests. The extracted Linux packaging
   script then completed a neutral-source release build and its native
-  dependency, path, secret-marker, and packaging inspections. Windows
-  PowerShell execution and Windows/macOS artifact production remain unverified
-  until the new workflows run on their native hosted runners.
+  dependency, path, secret-marker, and packaging inspections. Exact-candidate
+  hosted Windows and macOS artifact evidence is recorded below; hosted Linux
+  remains pending because its required self-hosted runner was unavailable.
 - The official fixtures omitted from the OpenMLS crates.io package were run
   from the exact signed `openmls-v0.8.1` release archive on Linux. Its
   SHA-256 was
@@ -1051,7 +1070,8 @@ Before public DMs, Yappa must additionally define and verify:
   lockfile, and fails unless `cargo tree` proves Yappa's vendored HPKE `0.6.1`
   is active. All 25 official vector-reader tests passed against that exact
   graph on Linux. Security CI and every desktop artifact job enforce the
-  runner; hosted Windows and macOS execution remain release gates.
+  runner. Exact-candidate hosted Windows and macOS jobs now enforce it
+  successfully; hosted Linux remains a release gate.
 - Pin and verify critical dependencies and container images.
 - The 2026-07-23 backend audit originally reported nine dependency advisories
   (four moderate and five high) across Express, Multer, Socket.IO, Engine.IO,
@@ -1176,18 +1196,25 @@ builder-path/secret-marker isolation, and an eight-second packaged startup
 smoke. Release compilation occurs from a neutral `/tmp` source root, keeps
 split debug information outside the app, and rejects absolute build paths in
 Mach-O runtime search metadata. Static deployment policy, XML, shell,
-workflow-YAML, and Flutter analysis checks pass locally. A hosted macOS run
-that completes the new Dart integration, bundle, signature, and smoke gates
-remains required evidence.
+workflow-YAML, and Flutter analysis checks pass locally. Exact-candidate macOS
+artifact run `30405281961` on commit `4140abd` completed the native/Dart
+integration, bundle, signature, entitlement, path/marker, startup-smoke, and
+artifact-upload gates.
 
 The first split Windows run on 2026-07-28 passed native MLS, official vectors,
 Flutter analysis/tests, and the full MSVC release compile. The artifact scan
 then rejected `app.so` because the default Pub cache retained the GitHub runner
 account in AOT metadata. Release scripts now use clean neutral Pub caches on
 all three platforms, and Windows removes generated package/build metadata
-before compiling the artifact. The builder-home scan remains strict; a hosted
-rerun must prove the neutral-cache artifact passes instead of suppressing the
-finding.
+before compiling the artifact. A later diagnostic proved the remaining
+lowercase `/users/` match was a legitimate API route rejected by an
+over-broad case-insensitive `/Users/` alternative. That correction is guarded
+by a regression test rather than a weaker scan. Exact-candidate Windows run
+`30405281982` on commit `4140abd` passed shared validation, native packaging,
+the corrected path/secret inspection, the packaged startup smoke test, and
+artifact/diagnostic upload. Security run `30405285412` passed on the same
+commit. Temporary candidate-branch push triggers were removed after collecting
+this evidence; desktop artifact workflows are manual again.
 
 After the player, cross-platform packaging, and encrypted-attachment failure
 changes, the exact current Linux client was rebuilt once more from a neutral

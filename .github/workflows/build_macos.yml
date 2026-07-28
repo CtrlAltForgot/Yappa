@@ -1,8 +1,6 @@
 name: Build Yappa macOS
 
 on:
-  push:
-    branches: [codex/rebuild-desktop-workflows]
   workflow_dispatch:
 
 permissions:

@@ -20,6 +20,59 @@ The intended setup experience is:
 The launcher must never invent weak production secrets, expose raw backend
 ports, skip TLS, or claim success before health and connectivity checks pass.
 
+## Client “Create Server” Experience
+
+The desktop client should make server creation feel native to Yappa rather
+than sending every user to deployment documentation. “Create server” offers
+two explicit paths backed by the same server release:
+
+### Host on this computer
+
+- The client installs or locates the canonical server package and supervises
+  its lifecycle. The initial supported mode keeps the server running while the
+  Yappa client is open and states clearly that closing Yappa makes the server
+  unavailable.
+- A later, explicit setting may install a tray/background supervisor and
+  launch it at operating-system sign-in. Autostart is opt-in, reversible, and
+  visible in both Yappa and the OS startup/service controls.
+- The flow chooses a durable data location, shows expected disk/network use,
+  performs port/firewall/TLS preflight, generates protected secrets, starts the
+  stack, verifies every health boundary, and then adds the new server to the
+  client.
+- The server dashboard exposes running/degraded/stopped state, local and
+  external reachability, current version, storage/headroom, last verified
+  backup, logs with secret redaction, restart, backup, update, and safe stop.
+- Sleep, hibernate, network changes, public-IP changes, client crashes,
+  duplicate client launches, OS shutdown, port conflicts, partial startup,
+  updates, and supervisor crashes require deterministic recovery behavior.
+- Resource limits and a warning are required before hosting a large or public
+  community on a workstation. A locally hosted server remains the same Yappa
+  server and may later move to another supported host through verified backup
+  and restore.
+
+### Host on another computer
+
+- The client asks for the remote operating system, distribution/version,
+  architecture, container/native availability, domain or direct-IP choice,
+  storage location, and intended LAN/public reachability.
+- It generates a short, version-pinned installer command plus inspectable
+  step-by-step instructions from the same release manifest. Commands must
+  checksum the installer before execution and must not embed server secrets,
+  client session tokens, passwords, or private SSH keys.
+- The default flow never asks the user to paste a root/administrator password
+  into Yappa and never executes remote privileged commands. A future managed
+  SSH flow would require explicit authorization, host-key verification,
+  least-privilege credentials, previewed actions, and reliable cleanup.
+- After installation, the client accepts a signed invitation or connection
+  proof and independently verifies TLS, server identity, protocol/capability
+  compatibility, realtime, media, and ownership setup before adding the
+  server.
+- Unsupported host choices produce honest compatibility guidance rather than
+  a best-guess command labeled as supported.
+
+Both paths are generated from a machine-readable support/install manifest so
+the client UI, documentation, release artifacts, and CI matrix cannot drift.
+
 ## Current State
 
 The canonical deployed stack is Linux-container based and includes:
@@ -83,6 +136,9 @@ be documented as best-effort only until their matrix passes.
 
 - Provide `install-yappa.sh` and `Install-Yappa.ps1` as thin front ends to the
   same declarative install manifest and validation rules.
+- Publish that manifest for the client’s “Create server” wizard, including
+  exact supported hosts, prerequisites, artifact URLs/digests, configuration
+  schema, capabilities, health checks, and upgrade compatibility.
 - Offer interactive prompts and unattended flags. Generate a local config from
   a versioned example, display every network/storage decision, and preserve
   user edits during upgrades.
@@ -126,6 +182,9 @@ the installer and must not change user-facing features or security claims.
 - Test clean install, upgrade from the previous supported version, failed
   upgrade rollback, uninstall that preserves data by default, and restore onto
   another supported OS.
+- Test client-supervised local hosting, explicit tray/autostart registration
+  and removal, remote-command generation for every Tier-1 host, and connection
+  verification against the installed server.
 - Publish support windows and an explicit best-effort tier. Never describe an
   untested distribution or Windows configuration as supported.
 

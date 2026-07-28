@@ -1059,7 +1059,9 @@ The remaining full-public-release work is:
 7. Complete the cross-platform server deployment and parity contract in
    `SERVER_PORTABILITY.md`: one canonical server, guided Linux and Windows
    installers, common-distribution validation, cross-platform LAN discovery,
-   identical conformance tests, upgrades, backups, and support matrix.
+   identical conformance tests, upgrades, backups, support matrix, and an
+   integrated client “Create server” wizard for local supervised hosting or
+   safe remote-install guidance.
 8. Complete the durable-chat contract in `PERSISTENT_CHAT.md`: indefinite
    default history and attachment retention, indexed cursor pagination,
    bounded client caching, explicit storage-full behavior, secure E2EE history
@@ -1162,8 +1164,22 @@ builder-path alternative to reject `/users/`. The local correction scopes
 case-insensitivity to drive-letter `C:\Users\...` paths and retired hostname
 markers while retaining case-sensitive `/Users/`, `/home/`, and private-key
 checks. A policy regression test prevents the false-positive pattern from
-returning. One final hosted Windows artifact run is required to validate the
-correction.
+returning.
+
+Exact-commit security run `30405285412`, macOS artifact run `30405281961`,
+and Windows artifact run `30405281982` passed on commit `4140abd`. The Windows
+run passed the complete shared native MLS, official-vector, Flutter analysis,
+and 58-test gate; built the release executable with its pinned native
+dependencies; passed the corrected builder-path and secret-marker inspection;
+kept the packaged executable alive through its smoke test; and uploaded the
+development artifact and bounded diagnostics. The macOS run repeated its
+signing, entitlement, runtime-path, bundle inspection, smoke, and artifact
+checks successfully. The temporary candidate-branch push triggers used to
+collect this evidence were then removed; desktop artifact workflows are manual
+again. Hosted Linux remains pending because its required self-hosted runner was
+unavailable; the equivalent repository-owned Linux script has passed locally
+from a neutral source tree, including native dependency, path, marker,
+packaging, and startup-smoke checks.
 
 As of 2026-07-24, newly created text feeds default to the non-downgradable
 `e2ee` version `1` contract. The backend writes that mode at channel creation,
