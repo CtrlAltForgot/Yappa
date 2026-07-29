@@ -89,7 +89,9 @@ $global:YappaWslCalls.Clear()
     -Sha256 $digest `
     -Backup "C:\Yappa backups\before upgrade.tar.gz.age"
 $upgrade = $global:YappaWslCalls[-1]
-Assert-True ($upgrade[1] -eq "/home/yappa/Yappa Server/install-yappa.sh") `
+$bashIndex = [Array]::IndexOf($upgrade, "bash")
+Assert-True ($bashIndex -ge 0) "Upgrade must enter the canonical Bash installer."
+Assert-True ($upgrade[$bashIndex + 1] -eq "/home/yappa/Yappa Server/install-yappa.sh") `
     "Installed lifecycle commands must target the selected installation."
 Assert-True ($upgrade -contains "/mnt/c/contract/before upgrade.tar.gz.age") `
     "Backup paths with spaces must remain a single converted argument."
