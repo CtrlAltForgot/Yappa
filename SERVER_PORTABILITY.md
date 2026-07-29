@@ -269,8 +269,11 @@ network namespace. Local execution passes all four targets. Hosted evidence is
 split honestly at the GitHub boundary: Ubuntu/Debian require both the real
 user-service and firewall contracts, while Fedora/Rocky still require real
 firewalld mutation but explicitly leave user-service runtime unclaimed if and
-only if their PAM wrapper fails with systemd status `224/PAM`. This closes
-neither full Docker-stack operation nor bare-metal boot,
+only if their PAM wrapper fails with systemd status `224/PAM`. Exact-head run
+`30413430381` passed all four jobs on commit `c5522f9`; Ubuntu/Debian completed
+both contracts, and Fedora/Rocky completed the firewalld contract with that
+user-service limitation reported. This closes neither full Docker-stack
+operation nor bare-metal boot,
 sleep, network-transition, reboot, firewall-policy, or unattended recovery
 testing.
 

@@ -1222,14 +1222,19 @@ Current implementation slice:
   passing locally. Their hosted jobs now leave user-service runtime explicitly
   unclaimed only for that exact failure and continue to mandatory real
   firewalld mutation/removal; every other manager failure remains fatal. A
-  corrected hosted run is pending. This is not full Docker/media, bare-metal
-  reboot, sleep/network, or unattended recovery evidence.
+  corrected exact-head run `30413430381` passed all four non-optional jobs on
+  commit `c5522f9`: Ubuntu and Debian proved the complete real user-service
+  plus UFW contract, while Fedora and Rocky proved real firewalld mutation and
+  removal with the hosted `224/PAM` limitation reported explicitly. The same
+  commit also passed the four-target host contract in run `30413430382` and
+  the backend security suite in run `30413430380`. This is not full
+  Docker/media, bare-metal reboot, sleep/network, or unattended recovery
+  evidence.
 
 Next work, in order:
 
-1. Obtain green hosted evidence for the isolated Linux runtime matrix, then
-   add full Docker workload, bare-metal/reboot, sleep/network, and unattended
-   recovery evidence and implement Windows server lifecycle parity.
+1. Add full Docker workload, bare-metal/reboot, sleep/network, and unattended
+   recovery evidence, and implement Windows server lifecycle parity.
 2. Obtain hosted Linux desktop evidence and finish signed release engineering:
    production versions, signing, SBOMs, provenance, tagged publication,
    supported-version/vulnerability policy, and update/distribution behavior.

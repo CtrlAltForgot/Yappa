@@ -993,9 +993,12 @@ cleanup. Local execution exposed and corrected two production defects that
 mocked tests missed: quoted `WorkingDirectory=` values broke installations in
 paths containing spaces, and firewalld requires hyphenated port ranges rather
 than UFW's colon syntax. Registration now verifies that both units are
-actually active before reporting success. Hosted runtime evidence remains
-pending, and isolated privilege is not evidence of a safe bare-metal firewall
-policy or full Docker/media operation.
+actually active before reporting success. Hosted runtime evidence is bounded:
+exact-head run `30413430381` passed all four jobs on commit `c5522f9`. Ubuntu
+and Debian proved the complete user-service plus UFW contract; Fedora and
+Rocky proved real firewalld mutation/removal while reporting the hosted
+limitation below. Isolated privilege is not evidence of a safe bare-metal
+firewall policy or full Docker/media operation.
 
 GitHub's container host permits the Ubuntu/Debian `user@.service` wrapper but
 blocks Fedora/Rocky's wrapper at PAM setup with systemd status `224/PAM`.
@@ -1004,6 +1007,7 @@ that result into user-service evidence. Those jobs continue only for mandatory
 real firewalld mutation/removal and print that user-service runtime is
 unclaimed; any other manager failure remains fatal. Local Fedora/Rocky
 execution still passes the complete real user-manager contract.
+The same exact head passed the backend security suite in run `30413430380`.
 
 Local development bundle installation now requires a caller-supplied full
 lowercase SHA-256, one versioned archive root matching embedded metadata, a
