@@ -382,17 +382,20 @@ messages. An offline device replays the missing sequence from its last accepted
 epoch and processes it locally.
 
 MLS intentionally prevents a newly added device from decrypting messages sent
-before it joined. Yappa's first release preserves that property:
+before it joined. Yappa preserves that property:
 
 - existing devices can synchronize ciphertext for epochs in which they were
   members;
 - a brand-new or reinstalled device starts readable history at its join epoch;
 - the server cannot escrow or recover earlier plaintext;
-- a future explicit device-to-device history transfer requires a separate
-  reviewed design and must not be disguised as ordinary MLS behavior.
+- first-public-release recovery uses the explicit same-account device-assisted
+  protocol in `ENCRYPTED_HISTORY_RECOVERY.md`; it is separate from MLS and must
+  not be disguised as ordinary MLS behavior.
 
 This limitation must be visible before a user removes their last functioning
-device. Account recovery restores account access, not old E2EE content.
+device. Account recovery restores account access, not old E2EE content. If no
+authorized device or encrypted client export retains the old epochs, the
+history remains unrecoverable.
 
 ## Application Events
 

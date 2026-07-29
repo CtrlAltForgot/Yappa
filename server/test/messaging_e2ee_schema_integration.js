@@ -64,6 +64,7 @@ try {
 
   const requiredTables = [
     'schema_migrations',
+    'history_recovery_device_keys',
     'mls_key_packages',
     'mls_channel_state',
     'mls_delivery_messages',
@@ -377,7 +378,7 @@ try {
     `)
     .run(retentionServerId, retentionChannelId, userId, createdAt);
   retentionLegacy.exec(`
-    DELETE FROM schema_migrations WHERE version = 4;
+    DELETE FROM schema_migrations WHERE version >= 4;
     INSERT OR REPLACE INTO schema_migrations (version, applied_at)
     VALUES (3, '2026-07-24T02:00:00.000Z');
   `);

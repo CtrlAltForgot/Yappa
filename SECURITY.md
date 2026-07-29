@@ -968,11 +968,11 @@ required before this gate is complete.
 
 Verified destructive durable-chat restore increment, 2026-07-28:
 
-- The distributable install manifest now declares database schema 4, matching
-  the backend's attachment-retention migration. Restore and upgrade guards
-  therefore accept current backups and reject schema 5 rather than incorrectly
-  treating the current schema as future data.
-- A disposable schema-4 installation writes 5,000 messages and 128 linked,
+- The distributable install manifest now tracks the backend's current schema,
+  including attachment retention and history-recovery device keys. Restore and
+  upgrade guards therefore accept current backups and reject the next unknown
+  schema rather than treating current data as future data.
+- A disposable current-schema installation writes 5,000 messages and 128 linked,
   non-expiring 64-KiB attachments, runs the production encrypted backup script,
   and then deletes the entire source installation before fresh restore.
 - The restored database passes SQLite quick and foreign-key checks, retains
@@ -981,6 +981,28 @@ Verified destructive durable-chat restore increment, 2026-07-28:
 
 This is deterministic destructive-restore evidence, not a substitute for a
 production backup drill or authenticated post-restore client download test.
+
+Encrypted-history recovery design decision, 2026-07-28:
+
+- Public-release recovery will be explicit and same-account
+  device-assisted. It does not alter MLS history secrecy and introduces no
+  server, administrator, or universal recovery key.
+- Every device uses a dedicated X25519 recovery key independently authorized
+  by its YUID Ed25519 identity. Signed manifests and per-chunk authenticated
+  encryption bind account, server, channel, source/destination devices,
+  sequence range, chunk order, and ciphertext digests.
+- The server may retain only bounded opaque resumable chunks. A destination
+  exposes no partial projection and acknowledges consumption only after
+  signature/key-binding checks, complete authenticated decryption, event-rule
+  revalidation, rollback-safe merge, and durable encrypted local storage.
+
+The complete contract and negative-test matrix are in
+`ENCRYPTED_HISTORY_RECOVERY.md`. Schema 5 implements the dedicated
+recovery-key directory: registration verifies the YUID signature for the
+authenticated active device, exact retry is idempotent, conflicting rebinding
+fails closed, and directory reads expose only active devices belonging to the
+same account. Transfer storage/client recovery and a release claim remain
+incomplete.
 
 Verified plaintext reconnect increment, 2026-07-28:
 

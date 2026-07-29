@@ -1314,12 +1314,22 @@ Current implementation slice:
   silently disrupt an older visible window. Bidirectional 100-row replacement
   widget coverage holds the retained visible item within one logical pixel,
   including lazy rematerialization after its list index changes.
-  The server manifest now correctly declares database schema 4. A destructive
+  The server manifest now tracks the current database schema. A destructive
   fixture writes 5,000 messages plus 128 linked permanent 64-KiB attachments,
   runs the production encrypted backup script, deletes the source installation,
   fresh-restores it, passes SQLite integrity/foreign-key checks, and verifies
   every restored file against its pre-backup SHA-256 digest. Production backup
   drill and authenticated post-restore download evidence remain.
+  Encrypted history recovery now has a selected architecture in
+  `ENCRYPTED_HISTORY_RECOVERY.md`: explicit same-account transfer from an
+  existing device to a dedicated YUID-bound destination X25519 key, using a
+  signed manifest and bounded resumable authenticated chunks. It preserves MLS
+  pre-join secrecy and provides no server/admin recovery key. Schema 5 and its
+  authenticated APIs now store and list dedicated device recovery keys only
+  after verifying their YUID signatures; exact retries are idempotent,
+  conflicting rebinding fails closed, and accounts cannot enumerate each
+  other's keys. Backend transfer storage, client cryptography, staged merge,
+  UI, and the full negative/real device matrix remain to be implemented.
   Threads are not implemented.
 
 Next work, in order:

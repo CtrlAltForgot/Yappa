@@ -374,6 +374,85 @@ async function run() {
   assert.ok(voiceChannel);
   assert.ok(secondVoiceChannel);
 
+  function buildHistoryRecoveryKey(account, publicKeyBytes = crypto.randomBytes(32)) {
+    const publicKey = publicKeyBytes.toString('base64url');
+    const binding = Buffer.from(
+      `yappa-history-recovery-device-v1|${owner.server.id}|` +
+        `${account.user.yuid}|${account.mediaDeviceId}|${publicKey}`,
+      'utf8',
+    );
+    return {
+      publicKey,
+      yuidAuthorizationSignature: Buffer.from(
+        nacl.sign.detached(
+          new Uint8Array(binding),
+          account.yuidKeyPair.secretKey,
+        ),
+      ).toString('base64url'),
+    };
+  }
+
+  const ownerRecoveryKey = buildHistoryRecoveryKey(owner);
+  const invalidRecoveryKeyResponse = await request(
+    '/api/mls/history-recovery/keys',
+    {
+      method: 'POST',
+      token: owner.token,
+      body: {
+        ...ownerRecoveryKey,
+        yuidAuthorizationSignature: Buffer.alloc(64, 0x33).toString(
+          'base64url',
+        ),
+      },
+    },
+  );
+  assert.equal(invalidRecoveryKeyResponse.status, 401);
+  const recoveryKeyResponse = await request(
+    '/api/mls/history-recovery/keys',
+    {
+      method: 'POST',
+      token: owner.token,
+      body: ownerRecoveryKey,
+    },
+  );
+  assert.equal(recoveryKeyResponse.status, 201);
+  const recoveryKey = await recoveryKeyResponse.json();
+  assert.equal(recoveryKey.created, true);
+  assert.equal(recoveryKey.key.deviceId, owner.mediaDeviceId);
+  assert.equal(recoveryKey.key.publicKey, ownerRecoveryKey.publicKey);
+  const recoveryKeyRetry = await request(
+    '/api/mls/history-recovery/keys',
+    {
+      method: 'POST',
+      token: owner.token,
+      body: ownerRecoveryKey,
+    },
+  );
+  assert.equal(recoveryKeyRetry.status, 200);
+  assert.equal((await recoveryKeyRetry.json()).created, false);
+  const recoveryKeyConflict = await request(
+    '/api/mls/history-recovery/keys',
+    {
+      method: 'POST',
+      token: owner.token,
+      body: buildHistoryRecoveryKey(owner),
+    },
+  );
+  assert.equal(recoveryKeyConflict.status, 409);
+  const ownerRecoveryDirectory = await (
+    await request('/api/mls/history-recovery/keys', {token: owner.token})
+  ).json();
+  assert.equal(ownerRecoveryDirectory.accountYuid, owner.user.yuid);
+  assert.deepEqual(
+    ownerRecoveryDirectory.keys.map((key) => key.deviceId),
+    [owner.mediaDeviceId],
+  );
+  const memberRecoveryDirectory = await (
+    await request('/api/mls/history-recovery/keys', {token: member.token})
+  ).json();
+  assert.equal(memberRecoveryDirectory.accountYuid, member.user.yuid);
+  assert.deepEqual(memberRecoveryDirectory.keys, []);
+
   for (const privateTarget of [
     `http://127.0.0.1:${port}/health`,
     `http://localhost:${port}/health`,

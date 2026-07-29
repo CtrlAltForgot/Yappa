@@ -76,7 +76,7 @@ client must not make the conversation look complete when it is not.
 - The production backup and fresh-install restore scripts now have a
   destructive scale fixture with 5,000 linked messages and 128 permanent
   64-KiB attachments. The source installation is erased after encrypted backup;
-  the restored schema-4 database passes SQLite integrity and foreign-key
+  the restored current-schema database passes SQLite integrity and foreign-key
   checks, retains both end messages and every attachment link, and every
   restored file matches its pre-backup SHA-256 digest.
 - Fresh servers now use indefinite (`0`) retention for ordinary and encrypted
@@ -168,6 +168,10 @@ contract.
   history transfer or encrypted recovery package authorized by an existing
   account device. The server may store opaque transfer material but cannot
   possess a universal history-decryption key.
+- `ENCRYPTED_HISTORY_RECOVERY.md` defines the selected same-account,
+  device-assisted protocol, its dedicated YUID-bound X25519 recovery keys,
+  signed manifests, resumable encrypted chunks, destination merge rules,
+  fail-closed states, limits, and required evidence.
 - Transfers bind account/YUID, destination device key, server, channel, source
   device, history range, and version; use chunk integrity and resumable
   cursors; and reject replay, rollback, substitution, and removed devices.

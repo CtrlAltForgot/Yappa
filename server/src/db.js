@@ -3,7 +3,7 @@ const path = require('path');
 const crypto = require('crypto');
 const Database = require('better-sqlite3');
 
-const CURRENT_SCHEMA_VERSION = 4;
+const CURRENT_SCHEMA_VERSION = 5;
 
 function ensureDirForFile(filePath) {
   const dir = path.dirname(filePath);
@@ -121,6 +121,17 @@ function createBaseTables(db) {
     created_at TEXT NOT NULL,
     last_seen_at TEXT NOT NULL,
     revoked_at TEXT,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS history_recovery_device_keys (
+    device_id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    public_key TEXT NOT NULL UNIQUE,
+    yuid_authorization_signature TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (device_id) REFERENCES media_devices(id),
     FOREIGN KEY (user_id) REFERENCES users(id)
   );
 
@@ -393,6 +404,17 @@ function runMigrations(db) {
     );
   }
   db.exec(`
+  CREATE TABLE IF NOT EXISTS history_recovery_device_keys (
+    device_id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    public_key TEXT NOT NULL UNIQUE,
+    yuid_authorization_signature TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (device_id) REFERENCES media_devices(id),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
   CREATE TABLE IF NOT EXISTS mls_device_credentials (
     device_id TEXT NOT NULL,
     signature_public_key TEXT NOT NULL,
@@ -475,6 +497,8 @@ function runMigrations(db) {
   ON media_devices (user_id);
   CREATE INDEX IF NOT EXISTS idx_media_devices_active
   ON media_devices (revoked_at);
+  CREATE INDEX IF NOT EXISTS idx_history_recovery_keys_user
+  ON history_recovery_device_keys (user_id, device_id);
   DROP INDEX IF EXISTS idx_messages_channel_id;
   CREATE INDEX IF NOT EXISTS idx_messages_channel_id_id
   ON messages (channel_id, id);

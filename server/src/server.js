@@ -3873,6 +3873,196 @@ app.delete(
   },
 );
 
+app.get('/api/mls/history-recovery/keys', authRequired, (req, res) => {
+  const deviceId = req.auth.session.mediaDeviceId;
+  if (!deviceId) {
+    return apiError(
+      res,
+      409,
+      'media_device_required',
+      'This session must be bound to an active device.',
+    );
+  }
+  const user = db.prepare(`
+    SELECT yuid
+    FROM users
+    WHERE id = ?
+  `).get(req.auth.user.id);
+  if (!user?.yuid) {
+    return apiError(
+      res,
+      409,
+      'verified_yuid_required',
+      'A verified YUID is required for encrypted history recovery.',
+    );
+  }
+  const keys = db.prepare(`
+    SELECT
+      history_recovery_device_keys.device_id,
+      history_recovery_device_keys.public_key,
+      history_recovery_device_keys.yuid_authorization_signature,
+      history_recovery_device_keys.created_at,
+      history_recovery_device_keys.updated_at
+    FROM history_recovery_device_keys
+    JOIN media_devices
+      ON media_devices.id = history_recovery_device_keys.device_id
+    WHERE history_recovery_device_keys.user_id = ?
+      AND media_devices.user_id = ?
+      AND media_devices.revoked_at IS NULL
+    ORDER BY history_recovery_device_keys.device_id ASC
+  `).all(req.auth.user.id, req.auth.user.id);
+  return res.json({
+    ok: true,
+    accountYuid: user.yuid,
+    keys: keys.map((key) => ({
+      deviceId: key.device_id,
+      publicKey: key.public_key,
+      yuidAuthorizationSignature: key.yuid_authorization_signature,
+      createdAt: key.created_at,
+      updatedAt: key.updated_at,
+    })),
+  });
+});
+
+app.post(
+  '/api/mls/history-recovery/keys',
+  authRequired,
+  accountMutationRateLimit,
+  (req, res) => {
+    const deviceId = req.auth.session.mediaDeviceId;
+    if (!deviceId) {
+      return apiError(
+        res,
+        409,
+        'media_device_required',
+        'This session must be bound to an active device.',
+      );
+    }
+    const publicKey = String(req.body?.publicKey || '').trim();
+    const yuidAuthorizationSignature = String(
+      req.body?.yuidAuthorizationSignature || '',
+    ).trim();
+    if (
+      !/^[A-Za-z0-9_-]{43}$/.test(publicKey) ||
+      !/^[A-Za-z0-9_-]{86}$/.test(yuidAuthorizationSignature)
+    ) {
+      return apiError(
+        res,
+        400,
+        'invalid_history_recovery_key',
+        'Invalid encrypted-history recovery key binding.',
+      );
+    }
+    const user = db.prepare(`
+      SELECT yuid, yuid_public_key
+      FROM users
+      WHERE id = ?
+    `).get(req.auth.user.id);
+    const yuidPublicKey = decodeBase64Url(user?.yuid_public_key);
+    const signature = decodeBase64Url(yuidAuthorizationSignature);
+    if (
+      !user?.yuid ||
+      !yuidPublicKey ||
+      yuidPublicKey.length !== 32 ||
+      !signature ||
+      signature.length !== 64
+    ) {
+      return apiError(
+        res,
+        409,
+        'verified_yuid_required',
+        'A verified YUID is required for encrypted history recovery.',
+      );
+    }
+    const binding = Buffer.from(
+      `yappa-history-recovery-device-v1|${serverId}|${user.yuid}|` +
+        `${deviceId}|${publicKey}`,
+      'utf8',
+    );
+    if (
+      !nacl.sign.detached.verify(
+        new Uint8Array(binding),
+        new Uint8Array(signature),
+        new Uint8Array(yuidPublicKey),
+      )
+    ) {
+      return apiError(
+        res,
+        401,
+        'invalid_history_recovery_key_signature',
+        'This encrypted-history recovery key could not be verified.',
+      );
+    }
+    const existing = db.prepare(`
+      SELECT public_key, yuid_authorization_signature, created_at, updated_at
+      FROM history_recovery_device_keys
+      WHERE device_id = ?
+    `).get(deviceId);
+    if (existing) {
+      if (
+        existing.public_key !== publicKey ||
+        existing.yuid_authorization_signature !== yuidAuthorizationSignature
+      ) {
+        return apiError(
+          res,
+          409,
+          'history_recovery_key_conflict',
+          'This device already has a different recovery key binding.',
+        );
+      }
+      return res.json({
+        ok: true,
+        created: false,
+        key: {
+          deviceId,
+          publicKey,
+          yuidAuthorizationSignature,
+          createdAt: existing.created_at,
+          updatedAt: existing.updated_at,
+        },
+      });
+    }
+    const now = nowIso();
+    try {
+      db.prepare(`
+        INSERT INTO history_recovery_device_keys (
+          device_id, user_id, public_key, yuid_authorization_signature,
+          created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(
+        deviceId,
+        req.auth.user.id,
+        publicKey,
+        yuidAuthorizationSignature,
+        now,
+        now,
+      );
+    } catch (error) {
+      if (String(error?.code || '').startsWith('SQLITE_CONSTRAINT')) {
+        return apiError(
+          res,
+          409,
+          'history_recovery_key_conflict',
+          'That recovery key is already bound to another device.',
+        );
+      }
+      throw error;
+    }
+    return res.status(201).json({
+      ok: true,
+      created: true,
+      key: {
+        deviceId,
+        publicKey,
+        yuidAuthorizationSignature,
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+  },
+);
+
 app.get('/api/mls/key-packages', authRequired, (req, res) => {
   const deviceId = req.auth.session.mediaDeviceId;
   if (!deviceId) {
