@@ -49,6 +49,11 @@ client must not make the conversation look complete when it is not.
   either scroll edge can shift that bounded window while retaining an
   authenticated cursor back toward the evicted side; evicted rows remain
   authoritative and recoverable from the server.
+- Before shifting either edge, the client records a visible retained message
+  boundary. It restores that boundary after the lazy list is rebuilt, including
+  when the retained item must first be materialized from its new approximate
+  list position. A widget test replaces 100-row windows backward and forward
+  and holds the retained item within one logical pixel in both directions.
 - Authenticated clients can mint an opaque before/after cursor for an exact
   retained message boundary. The server resolves that message inside the
   requested plaintext channel and binds the cursor to server, channel,
@@ -61,7 +66,7 @@ client must not make the conversation look complete when it is not.
   by account/server-secret change fails closed and refreshes from a new
   authenticated newest page.
 - The complete backend/security/deployment-policy suite, Flutter analysis, and
-  all 62 Flutter tests pass with this increment. Production deployment remains
+  all 63 Flutter tests pass with this increment. Production deployment remains
   unverified because approved Unraid SSH access is unavailable.
 - The client stores its decrypted MLS event view in an authenticated encrypted
   local store protected by an OS-vault key, and fails closed if that key or
@@ -95,9 +100,6 @@ contract.
 
 ## Confirmed Gaps
 
-- Plaintext bounded-window navigation is implemented, but automated widget
-  evidence for exact viewport continuity across repeated backward/forward
-  shifts remains required before that interaction is a completed release gate.
 - Encrypted client history needs the same explicit bounded-window UX and
   honest older-history/recovery states; its server delivery cursor alone does
   not complete that product behavior.

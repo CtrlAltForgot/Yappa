@@ -207,6 +207,7 @@ class _EncryptedTextLifecycleNotice extends StatelessWidget {
 class _ChatAreaState extends State<ChatArea> {
   final GlobalKey<MessageInputState> _messageInputKey =
       GlobalKey<MessageInputState>();
+  final Map<String, GlobalKey> _messageItemKeys = {};
   final FocusNode _voiceKeyboardFocusNode = FocusNode(
     debugLabel: 'yappa_voice_keyboard_focus',
   );
@@ -215,6 +216,7 @@ class _ChatAreaState extends State<ChatArea> {
   bool _isDragActive = false;
   bool _isNearMessageBottom = true;
   bool _isNearMessageTop = false;
+  bool _historyViewportShiftInProgress = false;
   int _unseenMessageCount = 0;
   bool _forceScrollToLatestOnNextMessage = false;
   Timer? _ticker;
@@ -277,7 +279,9 @@ class _ChatAreaState extends State<ChatArea> {
       return;
     }
 
-    if (!_isVoiceDeck && _hasIncomingMessageChange(oldWidget)) {
+    if (!_isVoiceDeck &&
+        !_historyViewportShiftInProgress &&
+        _hasIncomingMessageChange(oldWidget)) {
       final shouldForceScroll = _forceScrollToLatestOnNextMessage;
       _forceScrollToLatestOnNextMessage = false;
 
@@ -319,6 +323,153 @@ class _ChatAreaState extends State<ChatArea> {
     }
 
     return widget.messages.last.id != oldWidget.messages.last.id;
+  }
+
+  Future<void> _loadHistoryPreservingViewport({
+    required bool older,
+    required Future<void> Function()? load,
+  }) async {
+    if (load == null || widget.messages.isEmpty) {
+      return;
+    }
+    final anchorId = _visibleHistoryAnchorId(older: older);
+    if (anchorId == null) {
+      await load();
+      return;
+    }
+    final anchorContext = _messageItemKeys[anchorId]?.currentContext;
+    final anchorBox = anchorContext?.findRenderObject() as RenderBox?;
+    final originalY = anchorBox
+        ?.localToGlobal(Offset(0, anchorBox.size.height))
+        .dy;
+
+    _historyViewportShiftInProgress = true;
+    try {
+      await load();
+      if (!mounted || originalY == null) {
+        return;
+      }
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted || !_messageScrollController.hasClients) {
+        return;
+      }
+      var updatedContext = _messageItemKeys[anchorId]?.currentContext;
+      if (updatedContext == null) {
+        final sourceIndex = widget.messages.indexWhere(
+          (message) => message.id == anchorId,
+        );
+        if (sourceIndex < 0) {
+          return;
+        }
+        final position = _messageScrollController.position;
+        final reverseIndex = widget.messages.length - 1 - sourceIndex;
+        final denominator = (widget.messages.length - 1).clamp(1, 1 << 30);
+        position.jumpTo(
+          (position.maxScrollExtent * reverseIndex / denominator).clamp(
+            position.minScrollExtent,
+            position.maxScrollExtent,
+          ),
+        );
+        await WidgetsBinding.instance.endOfFrame;
+        if (!mounted) {
+          return;
+        }
+        updatedContext = _messageItemKeys[anchorId]?.currentContext;
+      }
+      final updatedBox = updatedContext?.findRenderObject() as RenderBox?;
+      if (updatedBox == null || !updatedBox.attached) {
+        return;
+      }
+      await _restoreHistoryAnchorY(anchorId, originalY);
+    } finally {
+      _historyViewportShiftInProgress = false;
+    }
+  }
+
+  Future<void> _restoreHistoryAnchorY(String anchorId, double targetY) async {
+    for (var attempt = 0; attempt < 3; attempt += 1) {
+      if (!mounted || !_messageScrollController.hasClients) {
+        return;
+      }
+      final context = _messageItemKeys[anchorId]?.currentContext;
+      final box = context?.findRenderObject() as RenderBox?;
+      if (box == null || !box.attached) {
+        return;
+      }
+      final currentY = box.localToGlobal(Offset(0, box.size.height)).dy;
+      if ((targetY - currentY).abs() < 0.5) {
+        return;
+      }
+
+      final position = _messageScrollController.position;
+      final positiveRoom = position.maxScrollExtent - position.pixels;
+      final negativeRoom = position.pixels - position.minScrollExtent;
+      final probeDelta = positiveRoom >= 8
+          ? 8.0
+          : negativeRoom >= 8
+          ? -8.0
+          : 0.0;
+      if (probeDelta == 0) {
+        return;
+      }
+      position.jumpTo(position.pixels + probeDelta);
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) {
+        return;
+      }
+      final probeContext = _messageItemKeys[anchorId]?.currentContext;
+      final probeBox = probeContext?.findRenderObject() as RenderBox?;
+      if (probeBox == null || !probeBox.attached) {
+        return;
+      }
+      final probeY = probeBox.localToGlobal(Offset(0, probeBox.size.height)).dy;
+      final slope = (probeY - currentY) / probeDelta;
+      if (slope.abs() < 0.01) {
+        return;
+      }
+      final correctedPixels = position.pixels + ((targetY - probeY) / slope);
+      position.jumpTo(
+        correctedPixels.clamp(
+          position.minScrollExtent,
+          position.maxScrollExtent,
+        ),
+      );
+      await WidgetsBinding.instance.endOfFrame;
+    }
+  }
+
+  String? _visibleHistoryAnchorId({required bool older}) {
+    if (!_messageScrollController.hasClients) {
+      return null;
+    }
+    final viewportBox =
+        _messageScrollController.position.context.storageContext
+                .findRenderObject()
+            as RenderBox?;
+    if (viewportBox == null || !viewportBox.hasSize) {
+      return null;
+    }
+    final viewport = viewportBox.localToGlobal(Offset.zero) & viewportBox.size;
+    String? selectedId;
+    double? selectedY;
+    for (final message in widget.messages) {
+      final box =
+          _messageItemKeys[message.id]?.currentContext?.findRenderObject()
+              as RenderBox?;
+      if (box == null || !box.attached || !box.hasSize) {
+        continue;
+      }
+      final bounds = box.localToGlobal(Offset.zero) & box.size;
+      if (bounds.intersect(viewport).isEmpty) {
+        continue;
+      }
+      final y = bounds.center.dy;
+      if (selectedY == null || (older ? y < selectedY : y > selectedY)) {
+        selectedId = message.id;
+        selectedY = y;
+      }
+    }
+    return selectedId;
   }
 
   bool _isScrolledNearBottom() {
@@ -909,7 +1060,10 @@ class _ChatAreaState extends State<ChatArea> {
                     loading: widget.loadingOlderMessages,
                     enabledAtBoundary: _isNearMessageTop,
                     direction: 'older',
-                    onLoad: widget.onLoadOlderMessages,
+                    onLoad: () => _loadHistoryPreservingViewport(
+                      older: true,
+                      load: widget.onLoadOlderMessages,
+                    ),
                   ),
                 Expanded(
                   child: Stack(
@@ -920,6 +1074,7 @@ class _ChatAreaState extends State<ChatArea> {
                           messages: widget.messages,
                           members: widget.members,
                           controller: _messageScrollController,
+                          messageItemKeys: _messageItemKeys,
                           previewLoader: widget.onLoadLinkPreview,
                           currentUserId: widget.currentUserId,
                           canDeleteAnyMessage: widget.canDeleteAnyMessage,
@@ -957,7 +1112,10 @@ class _ChatAreaState extends State<ChatArea> {
                     loading: widget.loadingNewerMessages,
                     enabledAtBoundary: _isNearMessageBottom,
                     direction: 'newer',
-                    onLoad: widget.onLoadNewerMessages,
+                    onLoad: () => _loadHistoryPreservingViewport(
+                      older: false,
+                      load: widget.onLoadNewerMessages,
+                    ),
                   ),
                 if (widget.channel.encryptionMode == ChannelEncryptionMode.e2ee)
                   _EncryptedTextLifecycleNotice(

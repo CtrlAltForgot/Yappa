@@ -1003,8 +1003,9 @@ Verified plaintext bounded-window increment, 2026-07-28:
   durable resume checkpoint until the user returns toward current history.
 
 Focused anchor, tamper/substitution, direction, boundary, and client parsing
-coverage is present. Exact viewport widget testing, scale/race evidence, and
-production deployment remain required.
+coverage is present. Bidirectional 100-row replacement widget coverage proves
+the retained visible message boundary remains within one logical pixel.
+Scale/race evidence and production deployment remain required.
 
 ### Cross-Platform Server Deployment Gate
 

@@ -1287,14 +1287,14 @@ Current implementation slice:
   validates page metadata, deduplicates chronological pages, offers older and
   newer edge navigation, persists only the newest 200 plaintext messages per
   channel, and slides a 1,000-message active window using authenticated return
-  boundaries. Focused
-  backend and client tests, Flutter analysis, the complete 62-test Flutter
+  boundaries. Focused backend and client tests, Flutter analysis, the complete
+  63-test Flutter
   suite, and the complete backend/security/deployment-policy suite pass
   locally. Production deployment verification is unavailable because approved
   Unraid SSH access is still unavailable. Forward reconnect catch-up,
-  exact viewport-continuity testing, attachment scale/restore validation,
-  encrypted new-device history, scale, and destructive restore evidence remain
-  open. Durable writes now reserve validated filesystem headroom (512 MiB
+  attachment scale/restore validation, encrypted new-device history, scale,
+  and destructive restore evidence remain open. Durable writes now reserve
+  validated filesystem headroom (512 MiB
   critical, 2 GiB warning by default), fail with retryable HTTP 507 when
   capacity is critical/unavailable, and translate real SQLite/filesystem-full
   write errors to the same contract. Owner-only status reports filesystem,
@@ -1311,14 +1311,15 @@ Current implementation slice:
   The client now slides backward or forward at the corresponding scroll edge,
   evicts the opposite side at 1,000 rows, and mints an authenticated exact
   return cursor instead of constructing one locally. New realtime rows do not
-  silently disrupt an older visible window. Exact viewport widget evidence
-  remains.
+  silently disrupt an older visible window. Bidirectional 100-row replacement
+  widget coverage holds the retained visible item within one logical pixel,
+  including lazy rematerialization after its list index changes.
   Threads are not implemented.
 
 Next work, in order:
 
-1. Finish `PERSISTENT_CHAT.md` viewport-continuity widget evidence,
-   attachment scale/restore, encrypted-history continuity,
+1. Continue `PERSISTENT_CHAT.md` attachment scale/restore,
+   encrypted-history continuity,
    real constrained-filesystem/concurrency capacity evidence, scale, and
    restore gates. Deploy and verify these history changes on Unraid when
    approved access becomes available.

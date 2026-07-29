@@ -34,6 +34,7 @@ class MessageList extends StatelessWidget {
   final List<ChatMessage> messages;
   final List<Member> members;
   final ScrollController? controller;
+  final Map<String, GlobalKey>? messageItemKeys;
   final Future<LinkPreview?> Function(String url)? previewLoader;
   final String? currentUserId;
   final bool canDeleteAnyMessage;
@@ -51,6 +52,7 @@ class MessageList extends StatelessWidget {
     required this.messages,
     this.members = const [],
     this.controller,
+    this.messageItemKeys,
     this.previewLoader,
     this.currentUserId,
     this.canDeleteAnyMessage = false,
@@ -72,10 +74,29 @@ class MessageList extends StatelessWidget {
       );
     }
 
+    final keys = messageItemKeys;
+    final sourceIndexByKey = <Key, int>{};
+    if (keys != null) {
+      for (var index = 0; index < messages.length; index += 1) {
+        final message = messages[index];
+        final key = keys.putIfAbsent(message.id, GlobalKey.new);
+        sourceIndexByKey[key] = index;
+      }
+    }
+
     return ListView.builder(
+      key: const ValueKey<String>('message-list-scroll'),
       controller: controller,
       reverse: true,
       padding: const EdgeInsets.fromLTRB(8, 16, 12, 10),
+      findChildIndexCallback: keys == null
+          ? null
+          : (key) {
+              final sourceIndex = sourceIndexByKey[key];
+              return sourceIndex == null
+                  ? null
+                  : messages.length - 1 - sourceIndex;
+            },
       itemBuilder: (context, index) {
         final sourceIndex = messages.length - 1 - index;
         final message = messages[sourceIndex];
@@ -90,11 +111,14 @@ class MessageList extends StatelessWidget {
                 const Duration(minutes: 7);
 
         return Column(
-          key: ValueKey<String>('message-${message.id}'),
+          key:
+              keys?.putIfAbsent(message.id, GlobalKey.new) ??
+              ValueKey<String>('message-${message.id}'),
           mainAxisSize: MainAxisSize.min,
           children: [
             if (startsDay) _MessageDayDivider(date: message.sentAt),
             _MessageTile(
+              key: ValueKey<String>('message-item-${message.id}'),
               message: message,
               member: _resolveMemberForMessage(message),
               showHeader: showHeader,
@@ -169,6 +193,7 @@ class _MessageTile extends StatefulWidget {
   onToggleReaction;
 
   const _MessageTile({
+    super.key,
     required this.message,
     required this.member,
     required this.showHeader,
