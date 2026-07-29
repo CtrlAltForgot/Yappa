@@ -29,6 +29,7 @@ class MlsHistoryRecoveryReceipt {
   final String destinationDeviceId;
   final int firstServerSequence;
   final int lastServerSequence;
+  final int eventCount;
 
   const MlsHistoryRecoveryReceipt({
     required this.transferId,
@@ -37,6 +38,7 @@ class MlsHistoryRecoveryReceipt {
     required this.destinationDeviceId,
     required this.firstServerSequence,
     required this.lastServerSequence,
+    required this.eventCount,
   });
 
   void validate() {
@@ -46,7 +48,9 @@ class MlsHistoryRecoveryReceipt {
         !RegExp(r'^device_[A-Za-z0-9_-]{24}$').hasMatch(destinationDeviceId) ||
         sourceDeviceId == destinationDeviceId ||
         firstServerSequence < 1 ||
-        lastServerSequence < firstServerSequence) {
+        lastServerSequence < firstServerSequence ||
+        eventCount < 1 ||
+        eventCount > lastServerSequence - firstServerSequence + 1) {
       throw const FormatException('Invalid history recovery receipt.');
     }
   }
@@ -433,18 +437,21 @@ class MlsEventStore {
               event.serverSequence <= lastServerSequence,
         )
         .toList(growable: false);
-    if (selected.length != lastServerSequence - firstServerSequence + 1) {
+    if (selected.isEmpty ||
+        selected.first.serverSequence != firstServerSequence ||
+        selected.last.serverSequence != lastServerSequence) {
       throw const FormatException(
         'Encrypted history is incomplete for that export range.',
       );
     }
-    for (var index = 0; index < selected.length; index++) {
-      if (selected[index].serverSequence != firstServerSequence + index ||
-          selected[index].channelId != _channelId) {
+    var previous = firstServerSequence - 1;
+    for (final event in selected) {
+      if (event.serverSequence <= previous || event.channelId != _channelId) {
         throw const FormatException(
           'Encrypted history is incomplete for that export range.',
         );
       }
+      previous = event.serverSequence;
     }
     return Uint8List.fromList(
       utf8.encode(
@@ -487,6 +494,7 @@ class MlsEventStore {
       canonicalRecords,
       firstServerSequence: receipt.firstServerSequence,
       lastServerSequence: receipt.lastServerSequence,
+      eventCount: receipt.eventCount,
     );
     final authorization = <int, MlsRecoveredSenderAuthorization>{};
     for (final event in recovered) {
@@ -794,6 +802,7 @@ class MlsEventStore {
     Uint8List canonicalRecords, {
     required int firstServerSequence,
     required int lastServerSequence,
+    required int eventCount,
   }) {
     try {
       final text = utf8.decode(canonicalRecords);
@@ -804,17 +813,26 @@ class MlsEventStore {
         throw const FormatException();
       }
       final raw = json['events'] as List;
-      if (raw.length != lastServerSequence - firstServerSequence + 1) {
+      if (raw.length != eventCount) {
         throw const FormatException();
       }
       final result = raw
           .map((item) => _decodeEvent(Map<String, dynamic>.from(item as Map)))
           .toList(growable: false);
+      var previous = firstServerSequence - 1;
       for (var index = 0; index < result.length; index++) {
-        if (result[index].serverSequence != firstServerSequence + index ||
-            result[index].channelId != _channelId) {
+        final event = result[index];
+        if (event.serverSequence <= previous ||
+            event.serverSequence < firstServerSequence ||
+            event.serverSequence > lastServerSequence ||
+            event.channelId != _channelId) {
           throw const FormatException();
         }
+        previous = event.serverSequence;
+      }
+      if (result.first.serverSequence != firstServerSequence ||
+          result.last.serverSequence != lastServerSequence) {
+        throw const FormatException();
       }
       return result;
     } catch (_) {
@@ -860,6 +878,7 @@ class MlsEventStore {
     MlsHistoryRecoveryReceipt receipt,
   ) => {
     'destinationDeviceId': receipt.destinationDeviceId,
+    'eventCount': receipt.eventCount,
     'firstServerSequence': receipt.firstServerSequence,
     'lastServerSequence': receipt.lastServerSequence,
     'manifestSha256': receipt.manifestSha256,
@@ -868,7 +887,7 @@ class MlsEventStore {
   };
 
   static MlsHistoryRecoveryReceipt _decodeReceipt(Map<String, dynamic> json) {
-    if (json.length != 6) throw const FormatException();
+    if (json.length != 7) throw const FormatException();
     final receipt = MlsHistoryRecoveryReceipt(
       transferId: json['transferId']?.toString() ?? '',
       manifestSha256: json['manifestSha256']?.toString() ?? '',
@@ -880,6 +899,7 @@ class MlsEventStore {
       lastServerSequence: json['lastServerSequence'] is int
           ? json['lastServerSequence'] as int
           : -1,
+      eventCount: json['eventCount'] is int ? json['eventCount'] as int : -1,
     );
     receipt.validate();
     return receipt;

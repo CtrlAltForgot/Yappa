@@ -172,6 +172,7 @@ void main() {
         destinationDeviceId: _destinationDeviceId,
         firstServerSequence: 10,
         lastServerSequence: 11,
+        eventCount: 2,
         chunkCount: 2,
         totalBytes: 6,
         manifest: manifest,

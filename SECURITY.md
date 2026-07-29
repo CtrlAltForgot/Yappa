@@ -1035,6 +1035,16 @@ encrypted store commits events plus the manifest receipt in one restart-safe
 write before relay consumption. Recovery UI, the remaining adversarial/scale
 matrix, real-device evidence, and a release claim remain incomplete.
 
+Sparse MLS-sequence correction, 2026-07-28:
+
+- Recovery ranges no longer incorrectly require one application event for
+  every MLS delivery sequence. Commits and Welcomes legitimately create gaps.
+- The signed context and relay now require `1 <= eventCount <= range width`.
+  Canonical records must contain exactly `eventCount` strictly increasing
+  application events, match the declared first/last application boundaries,
+  and stay inside the signed range. Focused client cryptography/store tests and
+  the backend authorization integration test cover a sparse range.
+
 Verified plaintext reconnect increment, 2026-07-28:
 
 - History cursors authenticate backward or forward direction in addition to

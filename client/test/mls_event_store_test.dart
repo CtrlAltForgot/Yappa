@@ -125,7 +125,7 @@ void main() {
       );
       await source.apply(
         _historyEvent(
-          sequence: 2,
+          sequence: 3,
           eventId: 'e' * 22,
           kind: EncryptedApplicationEventKind.edit,
           targetEventId: originalId,
@@ -135,7 +135,7 @@ void main() {
       );
       final records = source.exportRecoveryRecords(
         firstServerSequence: 1,
-        lastServerSequence: 2,
+        lastServerSequence: 3,
       );
       await source.close();
 
@@ -153,7 +153,8 @@ void main() {
         sourceDeviceId: 'device_ssssssssssssssssssssssss',
         destinationDeviceId: 'device_dddddddddddddddddddddddd',
         firstServerSequence: 1,
-        lastServerSequence: 2,
+        lastServerSequence: 3,
+        eventCount: 2,
       );
       var authorizationChecks = 0;
       expect(
@@ -171,7 +172,7 @@ void main() {
         isTrue,
       );
       expect(authorizationChecks, 2);
-      expect(destination.events.map((event) => event.serverSequence), [1, 2]);
+      expect(destination.events.map((event) => event.serverSequence), [1, 3]);
       expect(
         destination.recoveryReceipts.single.transferId,
         receipt.transferId,
@@ -244,6 +245,7 @@ void main() {
             destinationDeviceId: 'device_dddddddddddddddddddddddd',
             firstServerSequence: 1,
             lastServerSequence: 1,
+            eventCount: 1,
           ),
           authorizeSender: (_) async => const MlsRecoveredSenderAuthorization(
             authorized: false,

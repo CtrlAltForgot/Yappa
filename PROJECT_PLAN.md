@@ -1353,6 +1353,20 @@ Current implementation slice:
   production deployment, and an authenticated post-restore client download
   remain open. Flutter analysis and all 71 client tests pass with the complete
   source-to-destination coordinator increment.
+  A real-channel contract defect found during UI wiring is corrected:
+  application history may be sparse in MLS delivery sequence because commits
+  and Welcomes consume sequence numbers. Signed manifests and the relay now
+  distinguish range width from application `eventCount`; canonical export and
+  merge require exact count, increasing in-range sequences, and matching
+  first/last application boundaries. Focused client coverage and the backend
+  authorization integration pass with a sparse range.
+  A recovery notice component now has explicit confirmation for sharing or
+  accepting history and honest waiting, bounded progress, completed-through,
+  and safe failure states. Live AppState discovery/action wiring and an
+  end-to-end widget integration remain open, so this is not yet a user-visible
+  completed feature.
+  Flutter analysis and all 73 client tests pass after the sparse-range and UI
+  component increments.
   Threads are not implemented.
 
 Next work, in order:

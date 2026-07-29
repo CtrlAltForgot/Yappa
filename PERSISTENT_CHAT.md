@@ -181,6 +181,10 @@ contract.
   protection, and durable recovery receipts are implemented. User-facing
   recovery states and the remaining scale/real-device matrix remain
   incomplete.
+- Recovery preserves legitimate gaps created by MLS commits and Welcomes:
+  signed range width and application-event count are distinct, while exported
+  application sequences must remain strictly increasing and within the exact
+  authenticated boundaries.
 - Transfers bind account/YUID, destination device key, server, channel, source
   device, history range, and version; use chunk integrity and resumable
   cursors; and reject replay, rollback, substitution, and removed devices.

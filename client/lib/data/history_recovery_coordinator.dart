@@ -68,6 +68,7 @@ class HistoryRecoveryCoordinator {
           destinationDeviceId: transfer.destinationDeviceId,
           firstServerSequence: transfer.firstServerSequence,
           lastServerSequence: transfer.lastServerSequence,
+          eventCount: transfer.eventCount,
         ),
         authorizeSender: (event) async {
           final matches = directory.where(

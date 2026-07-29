@@ -20,6 +20,7 @@ import '../../models/voice_models.dart';
 import '../../shared/avatar_image.dart';
 import 'message_input.dart';
 import 'message_list.dart';
+import 'history_recovery_notice.dart';
 
 class ChatArea extends StatefulWidget {
   final ChatChannel channel;
@@ -48,6 +49,8 @@ class ChatArea extends StatefulWidget {
   final bool loadingNewerMessages;
   final bool canDeleteAnyMessage;
   final MlsChannelStartup? textE2eeStartup;
+  final HistoryRecoveryUiState? historyRecovery;
+  final Future<void> Function()? onHistoryRecoveryAction;
 
   final List<Member> members;
   final List<Member> voiceMembers;
@@ -116,6 +119,8 @@ class ChatArea extends StatefulWidget {
     this.loadingNewerMessages = false,
     this.canDeleteAnyMessage = false,
     this.textE2eeStartup,
+    this.historyRecovery,
+    this.onHistoryRecoveryAction,
     this.members = const [],
     this.voiceMembers = const [],
     this.voiceDeckState,
@@ -1120,6 +1125,15 @@ class _ChatAreaState extends State<ChatArea> {
                 if (widget.channel.encryptionMode == ChannelEncryptionMode.e2ee)
                   _EncryptedTextLifecycleNotice(
                     startup: widget.textE2eeStartup,
+                  ),
+                if (widget.channel.encryptionMode ==
+                        ChannelEncryptionMode.e2ee &&
+                    widget.textE2eeStartup?.readiness ==
+                        MlsChannelReadiness.ready &&
+                    widget.historyRecovery != null)
+                  HistoryRecoveryNotice(
+                    state: widget.historyRecovery!,
+                    onAction: widget.onHistoryRecoveryAction,
                   ),
                 if (widget.channel.encryptionMode !=
                         ChannelEncryptionMode.e2ee ||

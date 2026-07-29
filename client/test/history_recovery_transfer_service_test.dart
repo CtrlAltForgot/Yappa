@@ -32,6 +32,7 @@ class _TransferApi extends ApiClient {
     required String destinationDeviceId,
     required int firstServerSequence,
     required int lastServerSequence,
+    required int eventCount,
     required int chunkCount,
     required int totalBytes,
     required Uint8List manifest,

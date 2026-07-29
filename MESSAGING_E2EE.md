@@ -400,6 +400,10 @@ reauthorize retained MLS credentials and mutation rules, reject conflicting
 overlap/replay, and persist a receipt before consumption. Recovery UI and the
 remaining release evidence remain incomplete.
 
+Recovery `eventCount` is intentionally distinct from MLS delivery-range width.
+Commits, Welcomes, and other non-application deliveries create authenticated
+sequence gaps and are not fabricated as application history records.
+
 This limitation must be visible before a user removes their last functioning
 device. Account recovery restores account access, not old E2EE content. If no
 authorized device or encrypted client export retains the old epochs, the

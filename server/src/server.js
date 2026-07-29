@@ -4230,7 +4230,8 @@ app.post(
       !Number.isSafeInteger(lastServerSequence) ||
       lastServerSequence < firstServerSequence ||
       !Number.isSafeInteger(eventCount) ||
-      eventCount !== rangeCount ||
+      eventCount < 1 ||
+      eventCount > rangeCount ||
       !Number.isSafeInteger(chunkCount) ||
       chunkCount < 1 ||
       chunkCount > 1024 ||

@@ -23,6 +23,11 @@ mutations, and atomically persists the merged projection plus a replay receipt
 before acknowledging consumption. Recovery UI and the full
 negative/scale/real-device matrix remain incomplete.
 
+The recovery notice UI component implements the required honest states and
+explicit confirmation before either sharing or accepting history. It is not
+yet connected to live AppState discovery/actions, so the user-facing feature
+remains incomplete.
+
 Yappa will use explicit, same-account, device-assisted recovery. An existing
 authorized device decrypts its authenticated local event history and
 re-encrypts it directly to a separately authorized recovery key belonging to
@@ -78,7 +83,7 @@ The source creates a random 128-bit transfer id and one canonical manifest:
   "destinationRecoveryPublicKey": "...",
   "firstServerSequence": 1,
   "lastServerSequence": 5000,
-  "eventCount": 5000,
+  "eventCount": 4821,
   "chunkCount": 40,
   "plaintextBytes": 9000000,
   "chunkCiphertextSha256": ["...", "..."],
@@ -86,6 +91,13 @@ The source creates a random 128-bit transfer id and one canonical manifest:
   "expiresAt": "..."
 }
 ```
+
+`firstServerSequence` and `lastServerSequence` bind the enclosing MLS delivery
+range. `eventCount` counts recovered application events and may be smaller
+because commits, Welcomes, and other non-application MLS deliveries occupy
+sequence numbers but do not belong in the application-event history export.
+The exported events remain strictly increasing, start and end at the declared
+application-event boundaries, and may contain only those authenticated gaps.
 
 The source signs the canonical manifest hash with its YUID Ed25519 key. The
 destination requires that signature and both verified recovery-key bindings.

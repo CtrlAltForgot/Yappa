@@ -280,7 +280,8 @@ class HistoryRecoveryTransfer {
         last is! int ||
         last < first ||
         eventCount is! int ||
-        eventCount != last - first + 1 ||
+        eventCount < 1 ||
+        eventCount > last - first + 1 ||
         chunkCount is! int ||
         chunkCount < 1 ||
         chunkCount > 1024 ||
@@ -1406,6 +1407,7 @@ class ApiClient {
     required String destinationDeviceId,
     required int firstServerSequence,
     required int lastServerSequence,
+    required int eventCount,
     required int chunkCount,
     required int totalBytes,
     required Uint8List manifest,
@@ -1422,7 +1424,7 @@ class ApiClient {
         'destinationDeviceId': destinationDeviceId,
         'firstServerSequence': firstServerSequence,
         'lastServerSequence': lastServerSequence,
-        'eventCount': lastServerSequence - firstServerSequence + 1,
+        'eventCount': eventCount,
         'chunkCount': chunkCount,
         'totalBytes': totalBytes,
         'manifest': base64Url.encode(manifest).replaceAll('=', ''),
@@ -1440,6 +1442,7 @@ class ApiClient {
           transfer.destinationDeviceId != destinationDeviceId ||
           transfer.firstServerSequence != firstServerSequence ||
           transfer.lastServerSequence != lastServerSequence ||
+          transfer.eventCount != eventCount ||
           transfer.chunkCount != chunkCount ||
           transfer.totalBytes != totalBytes ||
           transfer.manifestSha256 != manifestSha256 ||

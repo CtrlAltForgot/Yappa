@@ -28,7 +28,7 @@ void main() {
         destinationRecoveryPublicKey: '',
         firstServerSequence: 1,
         lastServerSequence: 3,
-        eventCount: 3,
+        eventCount: 2,
       );
       final boundContext = HistoryRecoveryContext(
         transferId: context.transferId,

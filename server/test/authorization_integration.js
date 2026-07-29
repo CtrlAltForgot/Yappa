@@ -991,7 +991,7 @@ async function run() {
       destinationDeviceId: ownerRecoveryDestination.mediaDeviceId,
       firstServerSequence: 1,
       lastServerSequence: 2,
-      eventCount: 2,
+      eventCount: 1,
       chunkCount: transferChunks.length,
       totalBytes: transferChunks.reduce(
         (total, chunk) => total + chunk.length,
@@ -1014,7 +1014,7 @@ async function run() {
     destinationDeviceId: ownerRecoveryDestination.mediaDeviceId,
     firstServerSequence: 1,
     lastServerSequence: 2,
-    eventCount: 2,
+    eventCount: 1,
     chunkCount: transferChunks.length,
     totalBytes: transferChunks.reduce(
       (total, chunk) => total + chunk.length,

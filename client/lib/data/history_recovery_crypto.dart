@@ -46,7 +46,8 @@ class HistoryRecoveryContext {
         ).hasMatch(destinationRecoveryPublicKey) ||
         firstServerSequence < 1 ||
         lastServerSequence < firstServerSequence ||
-        eventCount != lastServerSequence - firstServerSequence + 1) {
+        eventCount < 1 ||
+        eventCount > lastServerSequence - firstServerSequence + 1) {
       throw const FormatException('Invalid history recovery context.');
     }
   }

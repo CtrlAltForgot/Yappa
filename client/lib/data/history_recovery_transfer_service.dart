@@ -45,6 +45,7 @@ class HistoryRecoveryTransferService {
       destinationDeviceId: context.destinationDeviceId,
       firstServerSequence: context.firstServerSequence,
       lastServerSequence: context.lastServerSequence,
+      eventCount: context.eventCount,
       chunkCount: sealed.chunks.length,
       totalBytes: totalBytes,
       manifest: sealed.manifest,
