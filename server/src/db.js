@@ -517,7 +517,7 @@ function ensureServerConfig(db, defaults) {
   }
 
   const createdAt = nowIso();
-  const serverId = randomId('node');
+  const serverId = `srv_${crypto.randomBytes(16).toString('hex')}`;
   db.prepare(`
   INSERT INTO server_config (
     id,

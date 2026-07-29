@@ -128,6 +128,10 @@ const identityVerifier = fs.readFileSync(
   path.join(serverRoot, 'src', 'verify-server-identity.js'),
   'utf8',
 );
+const dbSource = fs.readFileSync(
+  path.join(serverRoot, 'src', 'db.js'),
+  'utf8',
+);
 const compose = fs.readFileSync(
   path.join(serverRoot, 'docker-compose.yml'),
   'utf8',
@@ -828,6 +832,16 @@ assert.match(installVerifier, /stat -c '%a' data/);
 assert.match(installVerifier, /SELECT COALESCE\(MAX\(version\), 0\)/);
 assert.match(installVerifier, /PRAGMA quick_check/);
 assert.match(installVerifier, /server-identity\.json/);
+assert.match(
+  installVerifier,
+  /\^\(srv_\[a-f0-9\]\{32\}\|node_\[a-f0-9\]\{16\}\)\$/,
+  'Install verification must accept canonical IDs and immutable legacy IDs.',
+);
+assert.match(
+  dbSource,
+  /`srv_\$\{crypto\.randomBytes\(16\)\.toString\('hex'\)\}`/,
+  'Fresh servers must receive a 128-bit canonical server identifier.',
+);
 assert.match(installVerifier, /docker compose ps --status running --services/);
 assert.match(installVerifier, /docker inspect -f '\{\{\.State\.Health\.Status\}\}'/);
 assert.match(installVerifier, /node src\/verify-server-identity\.js/);

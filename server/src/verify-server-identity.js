@@ -42,7 +42,10 @@ async function main() {
 
   const serverResponse = await readJson(`${origin}/api/server`);
   const serverId = String(serverResponse?.server?.id || '');
-  if (!/^srv_[a-f0-9]{32}$/.test(serverId)) {
+  if (
+    !/^srv_[a-f0-9]{32}$/.test(serverId) &&
+    !/^node_[a-f0-9]{16}$/.test(serverId)
+  ) {
     fail('Yappa server response has an invalid server id.');
   }
 

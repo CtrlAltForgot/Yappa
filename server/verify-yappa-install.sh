@@ -113,7 +113,7 @@ INTERNAL_SERVER_ID="$(
 INTERNAL_PUBLIC_KEY="$(
   sed -n 's/.*"publicKey":"\([^"]*\)".*/\1/p' <<< "$INTERNAL_IDENTITY"
 )"
-if [[ ! "$INTERNAL_SERVER_ID" =~ ^srv_[a-f0-9]{32}$ ]] ||
+if [[ ! "$INTERNAL_SERVER_ID" =~ ^(srv_[a-f0-9]{32}|node_[a-f0-9]{16})$ ]] ||
   [[ ! "$INTERNAL_PUBLIC_KEY" =~ ^[A-Za-z0-9_-]{43}$ ]]; then
   echo "Yappa backend returned invalid verified identity metadata." >&2
   exit 1
