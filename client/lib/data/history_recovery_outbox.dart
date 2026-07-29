@@ -33,6 +33,9 @@ class HistoryRecoveryOutboxException implements Exception {
 class HistoryRecoveryOutbox {
   static const _keyPrefix = 'yappa.history_recovery_outbox_key.v1.';
   static const _maxEncryptedBytes = 96 * 1024 * 1024;
+  static final Uint8List _binaryMagic = Uint8List.fromList(
+    ascii.encode('YHRO2'),
+  );
   static final AesGcm _cipher = AesGcm.with256bits();
 
   final Uint8List _key;
@@ -127,9 +130,7 @@ class HistoryRecoveryOutbox {
 
   Future<void> write(HistoryRecoveryOutboxEntry entry) async {
     _validateEntry(entry);
-    final plaintext = Uint8List.fromList(
-      utf8.encode(jsonEncode(_encodeEntry(entry))),
-    );
+    final plaintext = _encodeBinaryEntry(entry);
     try {
       final box = await _cipher.encrypt(
         plaintext,
@@ -137,11 +138,20 @@ class HistoryRecoveryOutbox {
         nonce: _cipher.newNonce(),
         aad: _aad,
       );
-      final bytes = Uint8List.fromList([
-        ...box.nonce,
-        ...box.cipherText,
-        ...box.mac.bytes,
-      ]);
+      final bytes = Uint8List(
+        box.nonce.length + box.cipherText.length + box.mac.bytes.length,
+      );
+      bytes.setRange(0, box.nonce.length, box.nonce);
+      bytes.setRange(
+        box.nonce.length,
+        box.nonce.length + box.cipherText.length,
+        box.cipherText,
+      );
+      bytes.setRange(
+        box.nonce.length + box.cipherText.length,
+        bytes.length,
+        box.mac.bytes,
+      );
       if (bytes.length > _maxEncryptedBytes) {
         throw const HistoryRecoveryOutboxException(
           'Encrypted-history recovery is too large for the local outbox.',
@@ -174,17 +184,16 @@ class HistoryRecoveryOutbox {
       );
     }
     try {
-      return Uint8List.fromList(
-        await _cipher.decrypt(
-          SecretBox(
-            bytes.sublist(12, bytes.length - 16),
-            nonce: bytes.sublist(0, 12),
-            mac: Mac(bytes.sublist(bytes.length - 16)),
-          ),
-          secretKey: SecretKey(_key),
-          aad: _aad,
+      final cleartext = await _cipher.decrypt(
+        SecretBox(
+          bytes.sublist(12, bytes.length - 16),
+          nonce: bytes.sublist(0, 12),
+          mac: Mac(bytes.sublist(bytes.length - 16)),
         ),
+        secretKey: SecretKey(_key),
+        aad: _aad,
       );
+      return cleartext is Uint8List ? cleartext : Uint8List.fromList(cleartext);
     } catch (_) {
       throw const HistoryRecoveryOutboxException(
         'The encrypted-history outbox failed authentication.',
@@ -192,30 +201,166 @@ class HistoryRecoveryOutbox {
     }
   }
 
-  static Map<String, dynamic> _encodeEntry(HistoryRecoveryOutboxEntry entry) =>
+  static Map<String, dynamic> _encodeContext(HistoryRecoveryContext context) =>
       {
-        'context': {
-          'accountYuid': entry.context.accountYuid,
-          'channelId': entry.context.channelId,
-          'destinationDeviceId': entry.context.destinationDeviceId,
-          'destinationRecoveryPublicKey':
-              entry.context.destinationRecoveryPublicKey,
-          'eventCount': entry.context.eventCount,
-          'firstServerSequence': entry.context.firstServerSequence,
-          'lastServerSequence': entry.context.lastServerSequence,
-          'serverId': entry.context.serverId,
-          'sourceDeviceId': entry.context.sourceDeviceId,
-          'sourceRecoveryPublicKey': entry.context.sourceRecoveryPublicKey,
-          'transferId': entry.context.transferId,
-        },
-        'manifest': _encode(entry.sealed.manifest),
-        'manifestSha256': entry.sealed.manifestSha256,
-        'yuidSignature': entry.sealed.yuidSignature,
-        'chunks': entry.sealed.chunks.map(_encode).toList(growable: false),
-        'version': 1,
+        'accountYuid': context.accountYuid,
+        'channelId': context.channelId,
+        'destinationDeviceId': context.destinationDeviceId,
+        'destinationRecoveryPublicKey': context.destinationRecoveryPublicKey,
+        'eventCount': context.eventCount,
+        'firstServerSequence': context.firstServerSequence,
+        'lastServerSequence': context.lastServerSequence,
+        'serverId': context.serverId,
+        'sourceDeviceId': context.sourceDeviceId,
+        'sourceRecoveryPublicKey': context.sourceRecoveryPublicKey,
+        'transferId': context.transferId,
       };
 
+  static Uint8List _encodeBinaryEntry(HistoryRecoveryOutboxEntry entry) {
+    final metadata = Uint8List.fromList(
+      utf8.encode(
+        jsonEncode({
+          'chunkLengths': entry.sealed.chunks
+              .map((chunk) => chunk.length)
+              .toList(growable: false),
+          'context': _encodeContext(entry.context),
+          'manifestLength': entry.sealed.manifest.length,
+          'manifestSha256': entry.sealed.manifestSha256,
+          'version': 2,
+          'yuidSignature': entry.sealed.yuidSignature,
+        }),
+      ),
+    );
+    final totalLength =
+        _binaryMagic.length +
+        4 +
+        metadata.length +
+        entry.sealed.manifest.length +
+        entry.sealed.chunks.fold<int>(
+          0,
+          (total, chunk) => total + chunk.length,
+        );
+    final result = Uint8List(totalLength);
+    var offset = 0;
+    result.setRange(offset, offset + _binaryMagic.length, _binaryMagic);
+    offset += _binaryMagic.length;
+    ByteData.sublistView(
+      result,
+      offset,
+      offset + 4,
+    ).setUint32(0, metadata.length, Endian.big);
+    offset += 4;
+    result.setRange(offset, offset + metadata.length, metadata);
+    offset += metadata.length;
+    result.setRange(
+      offset,
+      offset + entry.sealed.manifest.length,
+      entry.sealed.manifest,
+    );
+    offset += entry.sealed.manifest.length;
+    for (final chunk in entry.sealed.chunks) {
+      result.setRange(offset, offset + chunk.length, chunk);
+      offset += chunk.length;
+    }
+    return result;
+  }
+
   static HistoryRecoveryOutboxEntry _decodeEntry(Uint8List plaintext) {
+    if (plaintext.length >= _binaryMagic.length &&
+        _sameBytes(
+          Uint8List.sublistView(plaintext, 0, _binaryMagic.length),
+          _binaryMagic,
+        )) {
+      return _decodeBinaryEntry(plaintext);
+    }
+    return _decodeLegacyEntry(plaintext);
+  }
+
+  static HistoryRecoveryOutboxEntry _decodeBinaryEntry(Uint8List plaintext) {
+    try {
+      var offset = _binaryMagic.length;
+      if (plaintext.length < offset + 4) throw const FormatException();
+      final metadataLength = ByteData.sublistView(
+        plaintext,
+        offset,
+        offset + 4,
+      ).getUint32(0, Endian.big);
+      offset += 4;
+      if (metadataLength < 1 || plaintext.length < offset + metadataLength) {
+        throw const FormatException();
+      }
+      final metadata = Map<String, dynamic>.from(
+        jsonDecode(
+              utf8.decode(
+                Uint8List.sublistView(
+                  plaintext,
+                  offset,
+                  offset + metadataLength,
+                ),
+              ),
+            )
+            as Map,
+      );
+      offset += metadataLength;
+      if (metadata.length != 6 || metadata['version'] != 2) {
+        throw const FormatException();
+      }
+      final context = _decodeContext(
+        Map<String, dynamic>.from(metadata['context'] as Map),
+      );
+      final manifestLength = metadata['manifestLength'];
+      final rawChunkLengths = metadata['chunkLengths'];
+      if (manifestLength is! int ||
+          manifestLength < 1 ||
+          manifestLength > 64 * 1024 ||
+          rawChunkLengths is! List ||
+          rawChunkLengths.isEmpty ||
+          rawChunkLengths.length > HistoryRecoveryCryptor.maxChunkCount ||
+          plaintext.length < offset + manifestLength) {
+        throw const FormatException();
+      }
+      final manifest = Uint8List.fromList(
+        Uint8List.sublistView(plaintext, offset, offset + manifestLength),
+      );
+      offset += manifestLength;
+      final chunks = <Uint8List>[];
+      for (final rawLength in rawChunkLengths) {
+        if (rawLength is! int ||
+            rawLength < 1 ||
+            rawLength > HistoryRecoveryCryptor.maxCiphertextChunkBytes ||
+            plaintext.length < offset + rawLength) {
+          throw const FormatException();
+        }
+        chunks.add(
+          Uint8List.fromList(
+            Uint8List.sublistView(plaintext, offset, offset + rawLength),
+          ),
+        );
+        offset += rawLength;
+      }
+      if (offset != plaintext.length) throw const FormatException();
+      final entry = HistoryRecoveryOutboxEntry(
+        context: context,
+        sealed: SealedHistoryRecoveryTransfer(
+          manifest: manifest,
+          manifestSha256: metadata['manifestSha256'] as String,
+          yuidSignature: metadata['yuidSignature'] as String,
+          chunks: chunks,
+        ),
+      );
+      _validateEntry(entry);
+      return entry;
+    } catch (error) {
+      if (error is HistoryRecoveryOutboxException) rethrow;
+      throw const HistoryRecoveryOutboxException(
+        'Invalid encrypted-history outbox contents.',
+      );
+    } finally {
+      plaintext.fillRange(0, plaintext.length, 0);
+    }
+  }
+
+  static HistoryRecoveryOutboxEntry _decodeLegacyEntry(Uint8List plaintext) {
     try {
       final json = Map<String, dynamic>.from(
         jsonDecode(utf8.decode(plaintext)) as Map,
@@ -224,22 +369,7 @@ class HistoryRecoveryOutbox {
       if (json.length != 6 || json['version'] != 1) {
         throw const FormatException();
       }
-      final context = HistoryRecoveryContext(
-        transferId: contextJson['transferId']?.toString() ?? '',
-        serverId: contextJson['serverId']?.toString() ?? '',
-        channelId: contextJson['channelId']?.toString() ?? '',
-        accountYuid: contextJson['accountYuid']?.toString() ?? '',
-        sourceDeviceId: contextJson['sourceDeviceId']?.toString() ?? '',
-        destinationDeviceId:
-            contextJson['destinationDeviceId']?.toString() ?? '',
-        sourceRecoveryPublicKey:
-            contextJson['sourceRecoveryPublicKey']?.toString() ?? '',
-        destinationRecoveryPublicKey:
-            contextJson['destinationRecoveryPublicKey']?.toString() ?? '',
-        firstServerSequence: contextJson['firstServerSequence'] as int,
-        lastServerSequence: contextJson['lastServerSequence'] as int,
-        eventCount: contextJson['eventCount'] as int,
-      );
+      final context = _decodeContext(contextJson);
       final entry = HistoryRecoveryOutboxEntry(
         context: context,
         sealed: SealedHistoryRecoveryTransfer(
@@ -262,6 +392,23 @@ class HistoryRecoveryOutbox {
       plaintext.fillRange(0, plaintext.length, 0);
     }
   }
+
+  static HistoryRecoveryContext _decodeContext(Map<String, dynamic> json) =>
+      HistoryRecoveryContext(
+        transferId: json['transferId']?.toString() ?? '',
+        serverId: json['serverId']?.toString() ?? '',
+        channelId: json['channelId']?.toString() ?? '',
+        accountYuid: json['accountYuid']?.toString() ?? '',
+        sourceDeviceId: json['sourceDeviceId']?.toString() ?? '',
+        destinationDeviceId: json['destinationDeviceId']?.toString() ?? '',
+        sourceRecoveryPublicKey:
+            json['sourceRecoveryPublicKey']?.toString() ?? '',
+        destinationRecoveryPublicKey:
+            json['destinationRecoveryPublicKey']?.toString() ?? '',
+        firstServerSequence: json['firstServerSequence'] as int,
+        lastServerSequence: json['lastServerSequence'] as int,
+        eventCount: json['eventCount'] as int,
+      );
 
   static void _validateEntry(HistoryRecoveryOutboxEntry entry) {
     entry.context.validate();
@@ -288,8 +435,14 @@ class HistoryRecoveryOutbox {
     }
   }
 
-  static String _encode(List<int> value) =>
-      base64Url.encode(value).replaceAll('=', '');
+  static bool _sameBytes(List<int> first, List<int> second) {
+    if (first.length != second.length) return false;
+    var difference = 0;
+    for (var index = 0; index < first.length; index += 1) {
+      difference |= first[index] ^ second[index];
+    }
+    return difference == 0;
+  }
 
   static Uint8List _decode(String value) => Uint8List.fromList(
     base64Url.decode(

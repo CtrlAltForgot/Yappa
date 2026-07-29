@@ -201,7 +201,10 @@ contract.
   relay: 64 MiB of canonical encrypted event history, at most 257 chunks, and
   at most 67,116,060 ciphertext bytes. This replaces the unreachable 256 MiB
   relay-only claim. Boundary rejection is automated; near-ceiling runtime and
-  disk measurement remain.
+  disk measurement now passes on Linux with a 60 MiB payload. Compact
+  authenticated binary outbox storage uses 62,952,989 bytes and 769,464 KiB
+  peak test-process RSS, down from 83,935,683 bytes and 1,874,452 KiB for the
+  superseded JSON/base64 form. Protected v1 outboxes remain readable.
 - Transfers bind account/YUID, destination device key, server, channel, source
   device, history range, and version; use chunk integrity and resumable
   cursors; and reject replay, rollback, substitution, and removed devices.

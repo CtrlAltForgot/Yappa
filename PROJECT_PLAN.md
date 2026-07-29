@@ -1400,9 +1400,19 @@ Current implementation slice:
   67,116,060 ciphertext bytes. Boundary rejection tests cover both client and
   server enforcement. Flutter analysis, all 79 client tests, and the complete
   backend security/storage/backup/deployment/recovery suite pass.
-  Representative near-ceiling runtime measurement remains open. This backend
-  limit correction is not yet deployed to Unraid because approved deployment
-  access remains unavailable.
+  An opt-in Linux release-scale gate now seals, persists, reopens,
+  authenticates, and decrypts a 60 MiB canonical payload (94% of the live
+  ceiling). The original JSON/base64 outbox passed but used 83,935,683 bytes,
+  about 31.3 seconds inside the test, and 1,874,452 KiB peak RSS. Replacing it
+  with a compact authenticated binary-v2 container reduced the same gate to
+  62,952,989 outbox bytes, about 23.6 seconds, and 769,464 KiB peak RSS—a
+  roughly 59% peak-memory reduction. Protected v1 outboxes remain readable and
+  tampering still fails closed. Flutter analysis and all 80 routine client
+  tests pass; the scale gate passes separately with
+  `YAPPA_RUN_RECOVERY_CAPACITY=1 flutter test
+  test/history_recovery_capacity_test.dart`. This backend limit correction is
+  not yet deployed to Unraid because approved deployment access remains
+  unavailable.
   Threads are not implemented.
 
 Next work, in order:

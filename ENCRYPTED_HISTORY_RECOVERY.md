@@ -57,6 +57,17 @@ and the complete backend security/storage/backup/deployment/recovery suite.
 The backend correction remains undeployed because approved Unraid access is
 currently unavailable.
 
+Representative Linux scale evidence uses a 60 MiB canonical payload, 241
+chunks, and 62,921,308 ciphertext bytes. It completes sealing, authenticated
+outbox persistence, restart/reopen, and decryption. The first JSON/base64
+outbox measurement consumed 83,935,683 bytes on disk and 1,874,452 KiB peak
+RSS. The compact authenticated binary-v2 container reduced this to 62,952,989
+bytes and 769,464 KiB peak RSS while retaining protected v1 read compatibility.
+The repeatable opt-in command is
+`YAPPA_RUN_RECOVERY_CAPACITY=1 flutter test
+test/history_recovery_capacity_test.dart`; routine runs skip the high-memory
+case. Flutter analysis and all 80 routine client tests pass.
+
 Yappa will use explicit, same-account, device-assisted recovery. An existing
 authorized device decrypts its authenticated local event history and
 re-encrypts it directly to a separately authorized recovery key belonging to

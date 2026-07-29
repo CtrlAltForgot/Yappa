@@ -1084,10 +1084,16 @@ Restart-durable recovery upload increment, 2026-07-28:
   history, no more than 257 chunks, and no more than 67,116,060 ciphertext
   bytes. Client and server boundary rejections are automated. Flutter
   analysis, all 79 client tests, and the complete backend
-  security/storage/backup/deployment/recovery suite pass. A representative
-  near-ceiling runtime measurement remains required. The backend correction is
-  not yet deployed to Unraid because approved deployment access remains
-  unavailable.
+  security/storage/backup/deployment/recovery suite pass.
+- A Linux opt-in scale gate exercises a 60 MiB canonical payload through
+  sealing, protected persistence, restart/reopen, authentication, and
+  decryption. Compact authenticated binary-v2 outbox storage reduced measured
+  disk use from 83,935,683 to 62,952,989 bytes and peak test-process RSS from
+  1,874,452 to 769,464 KiB versus the prior JSON/base64 representation.
+  Existing protected v1 outboxes remain readable, while malformed or tampered
+  storage fails closed. Flutter analysis, all 80 routine client tests, and the
+  opt-in scale gate pass. The backend correction is not yet deployed to Unraid
+  because approved deployment access remains unavailable.
 
 Sparse MLS-sequence correction, 2026-07-28:
 
