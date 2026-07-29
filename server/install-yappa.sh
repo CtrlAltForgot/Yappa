@@ -6,6 +6,7 @@ export LC_ALL=C
 SCRIPT_ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 MANIFEST="$SCRIPT_ROOT/install-manifest.json"
 COMMAND="${1:-help}"
+BUNDLE_EXTRACTION_ROOT=""
 shift || true
 
 usage() {
@@ -223,13 +224,16 @@ install_local_bundle() {
     preflight
   fi
 
-  local extraction_root
-  extraction_root="$(mktemp -d "${TMPDIR:-/tmp}/yappa-local-install.XXXXXXXX")"
-  chmod 700 "$extraction_root"
+  BUNDLE_EXTRACTION_ROOT="$(
+    mktemp -d "${TMPDIR:-/tmp}/yappa-local-install.XXXXXXXX"
+  )"
+  chmod 700 "$BUNDLE_EXTRACTION_ROOT"
   cleanup_local_bundle() {
     local status=$?
     trap - EXIT INT TERM
-    rm -rf -- "$extraction_root"
+    if [[ -n "$BUNDLE_EXTRACTION_ROOT" ]]; then
+      rm -rf -- "$BUNDLE_EXTRACTION_ROOT"
+    fi
     exit "$status"
   }
   trap cleanup_local_bundle EXIT INT TERM
@@ -238,10 +242,10 @@ install_local_bundle() {
     --extract \
     --gzip \
     --file="$archive" \
-    --directory="$extraction_root" \
+    --directory="$BUNDLE_EXTRACTION_ROOT" \
     --no-same-owner \
     --no-same-permissions
-  local extracted_bundle="$extraction_root/$bundle_root_name"
+  local extracted_bundle="$BUNDLE_EXTRACTION_ROOT/$bundle_root_name"
   if [[ ! -d "$extracted_bundle" ]] ||
     [[ ! -f "$extracted_bundle/BUILD-METADATA.json" ]] ||
     [[ ! -f "$extracted_bundle/install-manifest.json" ]] ||
@@ -288,12 +292,15 @@ install_local_bundle() {
     uninstall-yappa.sh \
     verify-yappa-install.sh \
     verify-yappa-backup.sh; do
-    chmod 755 "$install_directory/$installed_executable"
+    if [[ -f "$install_directory/$installed_executable" ]]; then
+      chmod 755 "$install_directory/$installed_executable"
+    fi
   done
   chmod 700 "$install_directory"
 
   trap - EXIT INT TERM
-  rm -rf -- "$extraction_root"
+  rm -rf -- "$BUNDLE_EXTRACTION_ROOT"
+  BUNDLE_EXTRACTION_ROOT=""
   echo "Local Yappa development bundle checksum verified."
   echo "Verified local Yappa development bundle installed at $install_directory."
   if [[ "$no_start" == true ]]; then
