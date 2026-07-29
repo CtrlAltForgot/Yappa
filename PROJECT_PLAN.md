@@ -1217,11 +1217,13 @@ Current implementation slice:
   release defects: invalid quoted systemd working directories and colon-form
   firewalld port ranges. Service registration now also checks that both units
   are active before claiming success. Initial hosted run `30412562488` passed
-  Ubuntu and Debian; Fedora and Rocky failed while their distribution
-  `user@.service` wrappers started, before any Yappa unit or firewall action.
-  Focused manager diagnostics are added for the follow-up. This is not full
-  Docker/media, bare-metal reboot, sleep/network, or unattended recovery
-  evidence.
+  Ubuntu and Debian. Fedora and Rocky's distribution `user@.service` wrappers
+  are blocked by GitHub at PAM setup with systemd status `224/PAM`, despite
+  passing locally. Their hosted jobs now leave user-service runtime explicitly
+  unclaimed only for that exact failure and continue to mandatory real
+  firewalld mutation/removal; every other manager failure remains fatal. A
+  corrected hosted run is pending. This is not full Docker/media, bare-metal
+  reboot, sleep/network, or unattended recovery evidence.
 
 Next work, in order:
 

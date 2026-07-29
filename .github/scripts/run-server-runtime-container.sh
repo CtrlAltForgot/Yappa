@@ -3,14 +3,15 @@ set -euo pipefail
 umask 077
 export LC_ALL=C
 
-if [[ $# -ne 4 ]]; then
-  echo "Use: run-server-runtime-container.sh IMAGE PACKAGE_MANAGER BACKEND NAME" >&2
+if [[ $# -ne 5 ]]; then
+  echo "Use: run-server-runtime-container.sh IMAGE PACKAGE_MANAGER BACKEND MANAGER_MODE NAME" >&2
   exit 64
 fi
 BASE_IMAGE="$1"
 PACKAGE_MANAGER="$2"
 BACKEND="$3"
-NAME="$4"
+MANAGER_MODE="$4"
+NAME="$5"
 REPOSITORY_ROOT="$(git rev-parse --show-toplevel)"
 IMAGE_TAG="yappa-runtime-contract:${NAME//[^a-zA-Z0-9_.-]/-}"
 CONTAINER_NAME="yappa-runtime-${NAME//[^a-zA-Z0-9_.-]/-}-$$"
@@ -43,4 +44,5 @@ for _ in {1..40}; do
   sleep 0.5
 done
 docker exec "$CONTAINER_NAME" \
-  /workspace/.github/scripts/test-server-runtime-contract.sh "$BACKEND"
+  /workspace/.github/scripts/test-server-runtime-contract.sh \
+  "$BACKEND" "$MANAGER_MODE"

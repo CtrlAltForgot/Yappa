@@ -3,11 +3,13 @@ set -euo pipefail
 umask 077
 export LC_ALL=C
 
-if [[ $# -ne 1 || ! "$1" =~ ^(ufw|firewalld)$ ]]; then
-  echo "Use: test-server-runtime-contract.sh ufw|firewalld" >&2
+if [[ $# -ne 2 || ! "$1" =~ ^(ufw|firewalld)$ ||
+  ! "$2" =~ ^(required|allow-hosted-pam-block)$ ]]; then
+  echo "Use: test-server-runtime-contract.sh ufw|firewalld required|allow-hosted-pam-block" >&2
   exit 64
 fi
 BACKEND="$1"
+MANAGER_MODE="$2"
 REPOSITORY_ROOT="${YAPPA_REPOSITORY_ROOT:-/workspace}"
 TEST_USER=yappa-runtime
 TEST_UID=18080
@@ -57,6 +59,7 @@ chmod 700 "$INSTALLATION/install-yappa.sh"
 install -m 600 -o "$TEST_UID" -g "$TEST_UID" /dev/null "$ACTION_LOG"
 
 loginctl enable-linger "$TEST_USER"
+MANAGER_AVAILABLE=true
 if ! systemctl start "user@$TEST_UID.service"; then
   systemctl status "user@$TEST_UID.service" --no-pager || true
   journalctl -u "user@$TEST_UID.service" --no-pager -n 80 || true
@@ -64,67 +67,56 @@ if ! systemctl start "user@$TEST_UID.service"; then
     systemctl show "user@$TEST_UID.service" \
       --property=ExecMainStatus --value
   )"
-  if [[ "$MANAGER_STATUS" != 224 ]]; then
+  if [[ "$MANAGER_STATUS" != 224 ||
+    "$MANAGER_MODE" != allow-hosted-pam-block ]]; then
     exit 1
   fi
-  echo "Distro PAM wrapper is blocked by the hosted container boundary."
-  echo "Installing a disposable pam_permit policy and retrying."
-  install -d -m 755 /etc/pam.d
-  {
-    echo "auth required pam_permit.so"
-    echo "account required pam_permit.so"
-    echo "session required pam_permit.so"
-  } > /etc/pam.d/systemd-user
-  chmod 644 /etc/pam.d/systemd-user
-  [[ -f /usr/lib/pam.d/systemd-user ]] ||
-    { echo "No vendor systemd-user PAM policy is available." >&2; exit 1; }
-  install -m 644 /etc/pam.d/systemd-user /usr/lib/pam.d/systemd-user
-  systemctl reset-failed "user@$TEST_UID.service"
-  systemctl start "user@$TEST_UID.service"
+  echo "Hosted container blocked the distro PAM wrapper with status 224."
+  echo "User-service runtime is not claimed for this job; firewalld remains mandatory."
+  MANAGER_AVAILABLE=false
 fi
-RUNTIME_DIRECTORY="/run/user/$TEST_UID"
-for _ in {1..20}; do
-  [[ -S "$RUNTIME_DIRECTORY/bus" ]] && break
-  sleep 0.25
-done
-[[ -S "$RUNTIME_DIRECTORY/bus" ]] ||
-  { echo "Per-user systemd bus did not start." >&2; exit 1; }
 
-run_as_test_user() {
-  runuser -u "$TEST_USER" -- env \
-    HOME="$TEST_HOME" \
-    XDG_CONFIG_HOME="$TEST_HOME/.config" \
-    XDG_RUNTIME_DIR="$RUNTIME_DIRECTORY" \
-    DBUS_SESSION_BUS_ADDRESS="unix:path=$RUNTIME_DIRECTORY/bus" \
-    "$@"
-}
+if [[ "$MANAGER_AVAILABLE" == true ]]; then
+  RUNTIME_DIRECTORY="/run/user/$TEST_UID"
+  for _ in {1..20}; do
+    [[ -S "$RUNTIME_DIRECTORY/bus" ]] && break
+    sleep 0.25
+  done
+  [[ -S "$RUNTIME_DIRECTORY/bus" ]] ||
+    { echo "Per-user systemd bus did not start." >&2; exit 1; }
 
-if ! run_as_test_user "$INSTALLATION/service-yappa.sh" install; then
-  journalctl "_UID=$TEST_UID" --no-pager -n 80 || true
-  exit 1
-fi
-REGISTRATION="$INSTALLATION/.yappa-host-state/service-registration"
-mapfile -t UNITS < "$REGISTRATION"
-[[ ${#UNITS[@]} -eq 3 ]]
-if ! run_as_test_user systemctl --user is-active --quiet "${UNITS[0]}"; then
-  run_as_test_user systemctl --user status "${UNITS[0]}" --no-pager || true
-  journalctl "_UID=$TEST_UID" --no-pager -n 80 || true
-  exit 1
-fi
-run_as_test_user systemctl --user is-active --quiet "${UNITS[2]}"
-grep -Fxq start "$ACTION_LOG"
-grep -Fxq verify "$ACTION_LOG"
-run_as_test_user "$INSTALLATION/service-yappa.sh" status >/dev/null
-run_as_test_user "$INSTALLATION/service-yappa.sh" remove
-grep -Fxq stop "$ACTION_LOG"
-[[ ! -e "$REGISTRATION" ]]
-if run_as_test_user systemctl --user is-enabled --quiet "${UNITS[0]}"; then
-  echo "Removed Yappa user service remains enabled." >&2
-  exit 1
-fi
-if run_as_test_user systemctl --user is-enabled --quiet "${UNITS[2]}"; then
-  echo "Removed Yappa recovery timer remains enabled." >&2
-  exit 1
+  run_as_test_user() {
+    runuser -u "$TEST_USER" -- env \
+      HOME="$TEST_HOME" \
+      XDG_CONFIG_HOME="$TEST_HOME/.config" \
+      XDG_RUNTIME_DIR="$RUNTIME_DIRECTORY" \
+      DBUS_SESSION_BUS_ADDRESS="unix:path=$RUNTIME_DIRECTORY/bus" \
+      "$@"
+  }
+
+  if ! run_as_test_user "$INSTALLATION/service-yappa.sh" install; then
+    journalctl "_UID=$TEST_UID" --no-pager -n 80 || true
+    exit 1
+  fi
+  REGISTRATION="$INSTALLATION/.yappa-host-state/service-registration"
+  mapfile -t UNITS < "$REGISTRATION"
+  [[ ${#UNITS[@]} -eq 3 ]]
+  run_as_test_user systemctl --user is-active --quiet "${UNITS[0]}"
+  run_as_test_user systemctl --user is-active --quiet "${UNITS[2]}"
+  grep -Fxq start "$ACTION_LOG"
+  grep -Fxq verify "$ACTION_LOG"
+  run_as_test_user "$INSTALLATION/service-yappa.sh" status >/dev/null
+  run_as_test_user "$INSTALLATION/service-yappa.sh" remove
+  grep -Fxq stop "$ACTION_LOG"
+  [[ ! -e "$REGISTRATION" ]]
+  if run_as_test_user systemctl --user is-enabled --quiet "${UNITS[0]}"; then
+    echo "Removed Yappa user service remains enabled." >&2
+    exit 1
+  fi
+  if run_as_test_user systemctl --user is-enabled --quiet "${UNITS[2]}"; then
+    echo "Removed Yappa recovery timer remains enabled." >&2
+    exit 1
+  fi
 fi
 
 case "$BACKEND" in
@@ -146,4 +138,8 @@ ROOT_REGISTRATION="$(find /var/lib/yappa -maxdepth 1 -type f -name 'firewall-*')
 [[ ! -e "$LOCAL_MARKER" ]]
 [[ ! -e "$ROOT_REGISTRATION" ]]
 
-echo "Real systemd user-service and $BACKEND mutation/removal contract passed."
+if [[ "$MANAGER_AVAILABLE" == true ]]; then
+  echo "Real systemd user-service and $BACKEND mutation/removal contract passed."
+else
+  echo "Real $BACKEND mutation/removal contract passed; user-service runtime unclaimed."
+fi

@@ -46,21 +46,25 @@ jobs:
             image: ubuntu@sha256:52df9b1ee71626e0088f7d400d5c6b5f7bb916f8f0c82b474289a4ece6cf3faf
             package_manager: apt
             backend: ufw
+            manager_mode: required
             fixture: ubuntu-24.04
           - name: Debian 13 systemd + UFW
             image: debian@sha256:9bb8a3626890e084ab54e888fdd7c4b6d2f119071cd4c5dc5fecb4d73062aa5f
             package_manager: apt
             backend: ufw
+            manager_mode: required
             fixture: debian-13
           - name: Fedora 44 systemd + firewalld
             image: fedora@sha256:89f61a124414261868224666aa7fb8df1b78397a53623774bdfb105d1612b48b
             package_manager: dnf
             backend: firewalld
+            manager_mode: allow-hosted-pam-block
             fixture: fedora-44
           - name: Rocky Linux 10 systemd + firewalld
             image: rockylinux/rockylinux@sha256:86b31f19c0ce9c9153ad06e4f35c022901275b9c16683a1b27429f0178e494dc
             package_manager: microdnf
             backend: firewalld
+            manager_mode: allow-hosted-pam-block
             fixture: rocky-10
 
     steps:
@@ -76,4 +80,5 @@ jobs:
             "${{ matrix.image }}" \
             "${{ matrix.package_manager }}" \
             "${{ matrix.backend }}" \
+            "${{ matrix.manager_mode }}" \
             "${{ matrix.fixture }}"
