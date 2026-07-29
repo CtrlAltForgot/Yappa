@@ -966,6 +966,27 @@ Actual constrained-filesystem exhaustion/recovery, simultaneous boundary
 writes, portable backup-root monitoring, and production deployment remain
 required before this gate is complete.
 
+Verified plaintext reconnect increment, 2026-07-28:
+
+- History cursors authenticate backward or forward direction in addition to
+  server, channel, boundary message, viewer, and protocol version. A cursor
+  cannot be transplanted across account/channel/server or have its direction
+  changed without failing authentication.
+- Forward reads use the composite `(channel_id, id)` index, return ascending
+  bounded pages, preserve an empty resume boundary, and issue separate
+  continuation/backward/newest cursors. Every page re-runs active session/ban
+  authorization and the plaintext/E2EE channel boundary.
+- The client persists opaque cursors, detects repeated continuations, checks
+  response direction and shape, deduplicates catch-up, and bounds the retained
+  window. Invalid persisted cursors fail closed to a newly authenticated
+  newest-page refresh rather than being trusted or numerically reconstructed.
+- Integration tests cover multiple missed pages, ordering, no overlap, empty
+  catch-up, viewer substitution, tampering, E2EE cutover, and both backward and
+  forward indexed query plans.
+
+Interactive bidirectional window sliding, viewport continuity, long-offline
+scale, concurrent catch-up/realtime races, and production deployment remain.
+
 ### Cross-Platform Server Deployment Gate
 
 `SERVER_PORTABILITY.md` defines the supported-host and parity contract. Windows

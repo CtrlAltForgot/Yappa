@@ -34,6 +34,11 @@ client must not make the conversation look complete when it is not.
   server, channel, direction, message ID, and viewer account; cross-account
   substitution and signature tampering fail closed. Every page re-runs active
   session/ban authorization and rejects plaintext reads after an E2EE cutover.
+- The same cursor protocol now pages forward for reconnect catch-up. Direction
+  is signed into the cursor; forward rows are ascending, bounded to 100, and
+  return authenticated continuation, newest-resume, and oldest-backward
+  cursors. Empty catch-up preserves the resume cursor. Automated coverage
+  proves multiple forward pages have no gaps, overlap, or direction confusion.
 - Plaintext history reads use the composite `(channel_id, id)` index. The
   migration removes the superseded channel-only index, and an automated query
   plan assertion proves the older-than lookup uses the composite index.
@@ -43,6 +48,12 @@ client must not make the conversation look complete when it is not.
   per channel and its interactive backward-history window is capped at 1,000
   messages with an honest limit notice; evicted persisted rows remain
   authoritative and recoverable from the server.
+- The client persists viewer-bound forward and backward cursors alongside its
+  bounded cache. Reconnect follows every forward continuation with cursor-loop
+  detection, deduplicates missed realtime rows, retains the newest 1,000
+  messages, and preserves a backward recovery boundary. A cursor invalidated
+  by account/server-secret change fails closed and refreshes from a new
+  authenticated newest page.
 - The complete backend/security/deployment-policy suite, Flutter analysis, and
   all 61 Flutter tests pass with this increment. Production deployment remains
   unverified because approved Unraid SSH access is unavailable.
@@ -78,9 +89,10 @@ contract.
 
 ## Confirmed Gaps
 
-- Plaintext reconnect catch-up does not yet use a forward cursor. The current
-  client refreshes the newest page and can page backward, but it cannot slide
-  beyond its explicit 1,000-message interactive window without reconnecting.
+- Interactive navigation still cannot slide backward beyond the explicit
+  1,000-message window and then return forward without reconnecting. The
+  server protocol now supports both directions; the remaining work is a
+  bounded client window/navigation UX with exact viewport preservation.
 - Encrypted client history needs the same explicit bounded-window UX and
   honest older-history/recovery states; its server delivery cursor alone does
   not complete that product behavior.

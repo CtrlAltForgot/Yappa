@@ -1049,7 +1049,16 @@ async function run() {
     historyMessageIds.slice(-2),
   );
   assert.equal(newestHistory.page.hasMore, true);
+  assert.equal(newestHistory.page.direction, 'before');
   assert.match(newestHistory.page.nextCursor, /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
+  assert.match(
+    newestHistory.page.forwardCursor,
+    /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/,
+  );
+  assert.match(
+    newestHistory.page.backwardCursor,
+    /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/,
+  );
 
   const olderHistoryResponse = await request(
     `/api/channels/${textChannel.id}/messages?limit=2&cursor=${encodeURIComponent(
@@ -1099,6 +1108,68 @@ async function run() {
     `/api/channels/${textChannel.id}/messages?limit=101`,
     400,
     { token: owner.token },
+  );
+
+  const missedMessageIds = [];
+  for (let index = 1; index <= 3; index += 1) {
+    const response = await request(
+      `/api/channels/${textChannel.id}/messages`,
+      {
+        method: 'POST',
+        token: owner.token,
+        body: { content: `offline catch-up ${index}` },
+      },
+    );
+    assert.equal(response.status, 201);
+    missedMessageIds.push((await response.json()).message.id);
+  }
+  const firstCatchUpResponse = await request(
+    `/api/channels/${textChannel.id}/messages?limit=2&cursor=${encodeURIComponent(
+      newestHistory.page.forwardCursor,
+    )}`,
+    { token: owner.token },
+  );
+  assert.equal(firstCatchUpResponse.status, 200);
+  const firstCatchUp = await firstCatchUpResponse.json();
+  assert.equal(firstCatchUp.page.direction, 'after');
+  assert.equal(firstCatchUp.page.hasMore, true);
+  assert.deepEqual(
+    firstCatchUp.messages.map((item) => item.id),
+    missedMessageIds.slice(0, 2),
+  );
+  const secondCatchUpResponse = await request(
+    `/api/channels/${textChannel.id}/messages?limit=2&cursor=${encodeURIComponent(
+      firstCatchUp.page.nextCursor,
+    )}`,
+    { token: owner.token },
+  );
+  assert.equal(secondCatchUpResponse.status, 200);
+  const secondCatchUp = await secondCatchUpResponse.json();
+  assert.equal(secondCatchUp.page.direction, 'after');
+  assert.equal(secondCatchUp.page.hasMore, false);
+  assert.equal(secondCatchUp.page.nextCursor, null);
+  assert.deepEqual(
+    secondCatchUp.messages.map((item) => item.id),
+    missedMessageIds.slice(2),
+  );
+  assert.equal(
+    firstCatchUp.messages.some((item) =>
+      secondCatchUp.messages.some((next) => next.id === item.id)),
+    false,
+  );
+  const emptyCatchUpResponse = await request(
+    `/api/channels/${textChannel.id}/messages?cursor=${encodeURIComponent(
+      secondCatchUp.page.forwardCursor,
+    )}`,
+    { token: owner.token },
+  );
+  const emptyCatchUp = await emptyCatchUpResponse.json();
+  assert.equal(emptyCatchUpResponse.status, 200);
+  assert.deepEqual(emptyCatchUp.messages, []);
+  assert.equal(emptyCatchUp.page.direction, 'after');
+  assert.equal(
+    emptyCatchUp.page.forwardCursor,
+    secondCatchUp.page.forwardCursor,
   );
 
   const encryptionDb = new Database(dbPath);

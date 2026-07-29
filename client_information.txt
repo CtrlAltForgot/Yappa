@@ -29,6 +29,9 @@ independent review justify that claim.
   pages instead of disappearing beyond the newest screenful. Yappa keeps the
   server as the durable record, limits the local cache, and clearly tells you
   when the current on-screen history window is full.
+- After reconnecting, ordinary text feeds now resume from an authenticated
+  history checkpoint and retrieve every missed page in order instead of merely
+  replacing the screen with the latest batch.
 - New and upgraded servers now keep chat attachments indefinitely unless an
   authorized person explicitly deletes them. Yappa no longer schedules
   ordinary or encrypted chat files to disappear after 30 days.

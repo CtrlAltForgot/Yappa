@@ -1302,12 +1302,18 @@ Current implementation slice:
   backup-monitoring state with manual refresh. Deterministic threshold, HTTP
   rejection, authorization, client parsing, and analysis tests pass;
   constrained real filesystem recovery, configured backup-size monitoring,
-  and threshold-concurrency evidence remain. Threads are not implemented.
+  and threshold-concurrency evidence remain. Plaintext reconnect now persists
+  an authenticated forward cursor and follows every bounded ascending page,
+  with cursor-loop rejection, deduplication, newest-1,000 trimming, and a
+  backward recovery boundary. Multi-page forward ordering/no-overlap, empty
+  catch-up, cursor integrity, and both indexed query directions are tested.
+  Interactive backward/forward sliding and viewport preservation remain.
+  Threads are not implemented.
 
 Next work, in order:
 
-1. Continue the remaining `PERSISTENT_CHAT.md` forward-catch-up,
-   sliding-window, attachment scale/restore, encrypted-history continuity,
+1. Continue the remaining `PERSISTENT_CHAT.md` sliding-window navigation,
+   attachment scale/restore, encrypted-history continuity,
    real constrained-filesystem/concurrency capacity evidence, scale, and
    restore gates. Deploy and verify these history changes on Unraid when
    approved access becomes available.

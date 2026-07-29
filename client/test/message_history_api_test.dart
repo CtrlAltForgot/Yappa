@@ -28,8 +28,11 @@ void main() {
                 },
               ],
               'page': {
+                'direction': 'before',
                 'hasMore': true,
                 'nextCursor': 'opaque_payload.opaque_signature',
+                'forwardCursor': 'forward_payload.forward_signature',
+                'backwardCursor': 'backward_payload.backward_signature',
               },
             }),
             200,
@@ -54,8 +57,11 @@ void main() {
       expect(captured.headers['authorization'], 'Bearer session-token');
       expect(page.messages.single.id, '41');
       expect(page.messages.single.author, 'Mira');
+      expect(page.direction, 'before');
       expect(page.hasMore, true);
       expect(page.nextCursor, 'opaque_payload.opaque_signature');
+      expect(page.forwardCursor, 'forward_payload.forward_signature');
+      expect(page.backwardCursor, 'backward_payload.backward_signature');
     },
   );
 
@@ -66,7 +72,13 @@ void main() {
           jsonEncode({
             'ok': true,
             'messages': [],
-            'page': {'hasMore': true, 'nextCursor': null},
+            'page': {
+              'direction': 'before',
+              'hasMore': true,
+              'nextCursor': null,
+              'forwardCursor': null,
+              'backwardCursor': null,
+            },
           }),
           200,
           headers: {'content-type': 'application/json'},

@@ -155,6 +155,22 @@ try {
     historyQueryPlan,
     /idx_messages_channel_id_id \(channel_id=\? AND id<\?\)/,
   );
+  const forwardHistoryQueryPlan = db
+    .prepare(`
+      EXPLAIN QUERY PLAN
+      SELECT id
+      FROM messages
+      WHERE channel_id = ? AND id > ?
+      ORDER BY id ASC
+      LIMIT ?
+    `)
+    .all(1, 0, 50)
+    .map((row) => row.detail)
+    .join('\n');
+  assert.match(
+    forwardHistoryQueryPlan,
+    /idx_messages_channel_id_id \(channel_id=\? AND id>\?\)/,
+  );
   assert.equal(attachmentColumns.includes('ciphertext_sha256'), true);
   assert.equal(attachmentColumns.includes('secretstream_header'), true);
 

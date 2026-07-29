@@ -2313,7 +2313,15 @@ function historyCursorSignature(encodedPayload) {
     .digest('base64url');
 }
 
-function encodeHistoryCursor({ channelId, messageId, userId }) {
+function encodeHistoryCursor({
+  channelId,
+  messageId,
+  userId,
+  direction,
+}) {
+  if (direction !== 'before' && direction !== 'after') {
+    throw new TypeError('Invalid history cursor direction.');
+  }
   const encodedPayload = Buffer.from(
     JSON.stringify({
       v: HISTORY_CURSOR_VERSION,
@@ -2321,7 +2329,7 @@ function encodeHistoryCursor({ channelId, messageId, userId }) {
       c: toId(channelId),
       m: toId(messageId),
       u: toId(userId),
-      d: 'before',
+      d: direction,
     }),
     'utf8',
   ).toString('base64url');
@@ -2362,14 +2370,17 @@ function decodeHistoryCursor(cursor, { channelId, userId }) {
     payload?.s !== serverId ||
     payload?.c !== toId(channelId) ||
     payload?.u !== toId(userId) ||
-    payload?.d !== 'before' ||
+    (payload?.d !== 'before' && payload?.d !== 'after') ||
     !Number.isSafeInteger(messageId) ||
     messageId <= 0 ||
     payload.m !== toId(messageId)
   ) {
     return null;
   }
-  return messageId;
+  return {
+    messageId,
+    direction: payload.d,
+  };
 }
 
 function signedAttachmentUrl(row, viewerUserId) {
@@ -5482,13 +5493,13 @@ app.get('/api/channels/:channelId/messages', authRequired, (req, res) => {
     );
   }
 
-  let beforeMessageId = null;
+  let decodedCursor = null;
   if (req.query.cursor != null) {
-    beforeMessageId = decodeHistoryCursor(String(req.query.cursor), {
+    decodedCursor = decodeHistoryCursor(String(req.query.cursor), {
       channelId,
       userId: req.auth.user.id,
     });
-    if (beforeMessageId == null) {
+    if (decodedCursor == null) {
       return apiError(
         res,
         400,
@@ -5514,24 +5525,34 @@ app.get('/api/channels/:channelId/messages', authRequired, (req, res) => {
   JOIN users ON users.id = messages.user_id
   WHERE messages.channel_id = ?
   `;
-  const rows = beforeMessageId == null
+  const direction = decodedCursor?.direction || 'before';
+  const rows = decodedCursor == null
     ? db.prepare(`
   ${historySelect}
   ORDER BY messages.id DESC
   LIMIT ?
   `).all(channelId, limit + 1)
-    : db.prepare(`
+    : direction === 'before'
+      ? db.prepare(`
   ${historySelect}
   AND messages.id < ?
   ORDER BY messages.id DESC
   LIMIT ?
-  `).all(channelId, beforeMessageId, limit + 1);
+  `).all(channelId, decodedCursor.messageId, limit + 1)
+      : db.prepare(`
+  ${historySelect}
+  AND messages.id > ?
+  ORDER BY messages.id ASC
+  LIMIT ?
+  `).all(channelId, decodedCursor.messageId, limit + 1);
 
   const hasMore = rows.length > limit;
   if (hasMore) {
     rows.pop();
   }
-  rows.reverse();
+  if (direction === 'before') {
+    rows.reverse();
+  }
 
   const attachmentsMap = getAttachmentsForMessageIds(
     db,
@@ -5548,13 +5569,38 @@ app.get('/api/channels/:channelId/messages', authRequired, (req, res) => {
     ),
     ),
     page: {
+      direction,
       hasMore,
       nextCursor:
         hasMore && rows.length > 0
           ? encodeHistoryCursor({
               channelId,
+              messageId:
+                direction === 'before'
+                  ? rows[0].id
+                  : rows[rows.length - 1].id,
+              userId: req.auth.user.id,
+              direction,
+            })
+          : null,
+      forwardCursor:
+        rows.length > 0
+          ? encodeHistoryCursor({
+              channelId,
+              messageId: rows[rows.length - 1].id,
+              userId: req.auth.user.id,
+              direction: 'after',
+            })
+          : direction === 'after'
+            ? String(req.query.cursor)
+            : null,
+      backwardCursor:
+        rows.length > 0
+          ? encodeHistoryCursor({
+              channelId,
               messageId: rows[0].id,
               userId: req.auth.user.id,
+              direction: 'before',
             })
           : null,
     },

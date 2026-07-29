@@ -34,6 +34,8 @@ class AppState extends ChangeNotifier {
   static const _channelsKey = 'yappa_channels';
   static const _membersKey = 'yappa_members';
   static const _messagesKey = 'yappa_messages';
+  static const _messageForwardCursorsKey = 'yappa_message_forward_cursors_v1';
+  static const _messageBackwardCursorsKey = 'yappa_message_backward_cursors_v1';
   static const _tokensKey = 'yappa_tokens';
   static const _secureTokensKey = 'yappa.session_tokens.v1';
   static const _rememberedUsersKey = 'yappa_authenticated_users';
@@ -61,6 +63,7 @@ class AppState extends ChangeNotifier {
   final Map<String, Future<LinkPreview?>> _linkPreviewCache = {};
   final Set<String> _refreshedMessageChannelIds = {};
   final Map<String, String> _olderMessageCursorByChannel = {};
+  final Map<String, String> _forwardMessageCursorByChannel = {};
   final Map<String, bool> _hasOlderMessagesByChannel = {};
   final Set<String> _loadingOlderMessageChannelIds = {};
   final Set<String> _rotatedSessionServerIds = {};
@@ -798,12 +801,11 @@ class AppState extends ChangeNotifier {
               channel: channel,
             );
           } else if (channel.allowsPlaintextMessaging) {
-            final page = await _api.fetchMessages(
-              baseUrl: server.address,
+            await _refreshPlaintextMessageHistory(
+              server: server,
               token: token,
-              channelId: channel.id,
+              channel: channel,
             );
-            _replaceMessageHistoryPage(channel.id, page);
             _refreshedMessageChannelIds.add(channel.id);
           }
         } catch (_) {
@@ -1822,6 +1824,10 @@ class AppState extends ChangeNotifier {
       );
 
       _messagesByChannel.remove(channelId);
+      _olderMessageCursorByChannel.remove(channelId);
+      _forwardMessageCursorByChannel.remove(channelId);
+      _hasOlderMessagesByChannel.remove(channelId);
+      _refreshedMessageChannelIds.remove(channelId);
       _replaceChannelsForServer(server.id, channels);
       if (_selectedChannelId == channelId) {
         _selectedChannelId = _firstChannelIdForServer(server.id);
@@ -1975,6 +1981,10 @@ class AppState extends ChangeNotifier {
 
     for (final channelId in removedChannelIds) {
       _messagesByChannel.remove(channelId);
+      _olderMessageCursorByChannel.remove(channelId);
+      _forwardMessageCursorByChannel.remove(channelId);
+      _hasOlderMessagesByChannel.remove(channelId);
+      _refreshedMessageChannelIds.remove(channelId);
     }
 
     _membersByServer.remove(serverId);
@@ -2518,14 +2528,108 @@ class AppState extends ChangeNotifier {
       return;
     }
     if (!targetChannel.allowsPlaintextMessaging) return;
-    final page = await _api.fetchMessages(
-      baseUrl: server.address,
+    await _refreshPlaintextMessageHistory(
+      server: server,
       token: token,
-      channelId: targetChannel.id,
+      channel: targetChannel,
     );
 
-    _replaceMessageHistoryPage(targetChannel.id, page);
     _refreshedMessageChannelIds.add(targetChannel.id);
+  }
+
+  Future<void> _refreshPlaintextMessageHistory({
+    required ChatServer server,
+    required String token,
+    required ChatChannel channel,
+  }) async {
+    final cached = List<ChatMessage>.from(
+      _messagesByChannel[channel.id] ?? const <ChatMessage>[],
+    );
+    final savedForwardCursor = _forwardMessageCursorByChannel[channel.id];
+    if (cached.isEmpty || savedForwardCursor == null) {
+      final page = await _api.fetchMessages(
+        baseUrl: server.address,
+        token: token,
+        channelId: channel.id,
+      );
+      _replaceMessageHistoryPage(channel.id, page);
+      return;
+    }
+
+    try {
+      var active = cached;
+      final originallyCachedIds = cached.map((message) => message.id).toSet();
+      var cursor = savedForwardCursor;
+      final seenCursors = <String>{};
+      while (true) {
+        if (!seenCursors.add(cursor)) {
+          throw ApiException(
+            'The server repeated a message history cursor.',
+            code: 'invalid_history_response',
+          );
+        }
+        final page = await _api.fetchMessages(
+          baseUrl: server.address,
+          token: token,
+          channelId: channel.id,
+          cursor: cursor,
+          limit: 100,
+        );
+        if (page.direction != 'after') {
+          throw ApiException(
+            'The server returned the wrong message history direction.',
+            code: 'invalid_history_response',
+          );
+        }
+        if (page.messages.isNotEmpty) {
+          final byId = <String, ChatMessage>{
+            for (final message in active) message.id: message,
+            for (final message in page.messages) message.id: message,
+          };
+          active = byId.values.toList()
+            ..sort((left, right) => left.sentAt.compareTo(right.sentAt));
+          if (active.length > _activeMessagesPerChannel) {
+            active = active.sublist(active.length - _activeMessagesPerChannel);
+            _hasOlderMessagesByChannel[channel.id] = true;
+            _olderMessageCursorByChannel[channel.id] = page.backwardCursor!;
+          }
+          _forwardMessageCursorByChannel[channel.id] = page.forwardCursor!;
+        }
+        if (!page.hasMore) {
+          break;
+        }
+        cursor = page.nextCursor!;
+      }
+      final live = List<ChatMessage>.from(
+        _messagesByChannel[channel.id] ?? const <ChatMessage>[],
+      );
+      final liveIds = live.map((message) => message.id).toSet();
+      active.removeWhere(
+        (message) =>
+            originallyCachedIds.contains(message.id) &&
+            !liveIds.contains(message.id),
+      );
+      final merged =
+          <String, ChatMessage>{
+              for (final message in active) message.id: message,
+              for (final message in live) message.id: message,
+            }.values.toList()
+            ..sort((left, right) => left.sentAt.compareTo(right.sentAt));
+      _messagesByChannel[channel.id] = merged.length > _activeMessagesPerChannel
+          ? merged.sublist(merged.length - _activeMessagesPerChannel)
+          : merged;
+    } on ApiException catch (error) {
+      if (error.code != 'invalid_history_cursor') rethrow;
+      _forwardMessageCursorByChannel.remove(channel.id);
+      _olderMessageCursorByChannel.remove(channel.id);
+      _hasOlderMessagesByChannel.remove(channel.id);
+      final page = await _api.fetchMessages(
+        baseUrl: server.address,
+        token: token,
+        channelId: channel.id,
+      );
+      _replaceMessageHistoryPage(channel.id, page);
+    }
   }
 
   Future<void> loadOlderSelectedMessages() async {
@@ -2556,6 +2660,12 @@ class AppState extends ChangeNotifier {
         cursor: cursor,
         limit: remaining.clamp(1, 100),
       );
+      if (page.direction != 'before') {
+        throw ApiException(
+          'The server returned the wrong message history direction.',
+          code: 'invalid_history_response',
+        );
+      }
       final byId = <String, ChatMessage>{
         for (final message in page.messages) message.id: message,
         for (final message in current) message.id: message,
@@ -3394,12 +3504,20 @@ class AppState extends ChangeNotifier {
   }
 
   void _replaceMessageHistoryPage(String channelId, MessageHistoryPage page) {
+    if (page.direction != 'before') {
+      throw StateError('Initial message history must page backward.');
+    }
     _messagesByChannel[channelId] = page.messages;
     _hasOlderMessagesByChannel[channelId] = page.hasMore;
     if (page.nextCursor == null) {
       _olderMessageCursorByChannel.remove(channelId);
     } else {
       _olderMessageCursorByChannel[channelId] = page.nextCursor!;
+    }
+    if (page.forwardCursor == null) {
+      _forwardMessageCursorByChannel.remove(channelId);
+    } else {
+      _forwardMessageCursorByChannel[channelId] = page.forwardCursor!;
     }
   }
 
@@ -3422,6 +3540,21 @@ class AppState extends ChangeNotifier {
     _decodeChannels(prefs.getString(_channelsKey));
     _decodeMembers(prefs.getString(_membersKey));
     _decodeMessages(prefs.getString(_messagesKey));
+    _decodeMessageCursors(
+      prefs.getString(_messageForwardCursorsKey),
+      _forwardMessageCursorByChannel,
+    );
+    _decodeMessageCursors(
+      prefs.getString(_messageBackwardCursorsKey),
+      _olderMessageCursorByChannel,
+    );
+    _hasOlderMessagesByChannel
+      ..clear()
+      ..addEntries(
+        _olderMessageCursorByChannel.keys.map(
+          (channelId) => MapEntry(channelId, true),
+        ),
+      );
     _decodeRememberedUsers(prefs.getString(_rememberedUsersKey));
     _decodeVoiceMemberVolumes(prefs.getString(_voiceMemberVolumesKey));
 
@@ -3494,6 +3627,14 @@ class AppState extends ChangeNotifier {
               .map((message) => message.toJson())
               .toList(),
       }),
+    );
+    await prefs.setString(
+      _messageForwardCursorsKey,
+      jsonEncode(_forwardMessageCursorByChannel),
+    );
+    await prefs.setString(
+      _messageBackwardCursorsKey,
+      jsonEncode(_olderMessageCursorByChannel),
     );
 
     await prefs.setString(
@@ -3649,6 +3790,23 @@ class AppState extends ChangeNotifier {
       return messages;
     }
     return messages.sublist(messages.length - _persistedMessagesPerChannel);
+  }
+
+  static void _decodeMessageCursors(
+    String? raw,
+    Map<String, String> destination,
+  ) {
+    destination.clear();
+    if (raw == null || raw.isEmpty) return;
+    final decoded = jsonDecode(raw);
+    if (decoded is! Map) return;
+    for (final entry in decoded.entries) {
+      final channelId = entry.key.toString();
+      final cursor = entry.value.toString();
+      if (channelId.isNotEmpty && cursor.isNotEmpty) {
+        destination[channelId] = cursor;
+      }
+    }
   }
 
   void _decodeTokens(String? raw) {

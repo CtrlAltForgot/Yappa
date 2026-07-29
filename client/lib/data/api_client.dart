@@ -1405,12 +1405,23 @@ class ApiClient {
       );
     }
     final page = Map<String, dynamic>.from(pageJson);
+    final direction = page['direction'];
     final hasMore = page['hasMore'];
     final nextCursor = page['nextCursor'];
-    if (hasMore is! bool ||
+    final forwardCursor = page['forwardCursor'];
+    final backwardCursor = page['backwardCursor'];
+    if ((direction != 'before' && direction != 'after') ||
+        hasMore is! bool ||
         (nextCursor != null && nextCursor is! String) ||
+        (forwardCursor != null && forwardCursor is! String) ||
+        (backwardCursor != null && backwardCursor is! String) ||
         (hasMore && (nextCursor is! String || nextCursor.isEmpty)) ||
-        (!hasMore && nextCursor != null)) {
+        (!hasMore && nextCursor != null) ||
+        (messages.isNotEmpty &&
+            (forwardCursor is! String ||
+                forwardCursor.isEmpty ||
+                backwardCursor is! String ||
+                backwardCursor.isEmpty))) {
       throw ApiException(
         'The server returned an invalid message history cursor.',
         code: 'invalid_history_response',
@@ -1418,8 +1429,11 @@ class ApiClient {
     }
     return MessageHistoryPage(
       messages: messages,
+      direction: direction as String,
       hasMore: hasMore,
       nextCursor: nextCursor as String?,
+      forwardCursor: forwardCursor as String?,
+      backwardCursor: backwardCursor as String?,
     );
   }
 
