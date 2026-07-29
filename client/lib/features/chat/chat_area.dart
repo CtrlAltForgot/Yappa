@@ -52,6 +52,7 @@ class ChatArea extends StatefulWidget {
   final HistoryRecoveryUiState? historyRecovery;
   final Future<void> Function(String? destinationDeviceId)?
   onHistoryRecoveryAction;
+  final Future<void> Function()? onCancelHistoryRecovery;
 
   final List<Member> members;
   final List<Member> voiceMembers;
@@ -122,6 +123,7 @@ class ChatArea extends StatefulWidget {
     this.textE2eeStartup,
     this.historyRecovery,
     this.onHistoryRecoveryAction,
+    this.onCancelHistoryRecovery,
     this.members = const [],
     this.voiceMembers = const [],
     this.voiceDeckState,
@@ -1135,6 +1137,7 @@ class _ChatAreaState extends State<ChatArea> {
                   HistoryRecoveryNotice(
                     state: widget.historyRecovery!,
                     onAction: widget.onHistoryRecoveryAction,
+                    onCancel: widget.onCancelHistoryRecovery,
                   ),
                 if (widget.channel.encryptionMode !=
                         ChannelEncryptionMode.e2ee ||

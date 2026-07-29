@@ -2891,6 +2891,23 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  Future<void> cancelEncryptedHistoryRecovery(String channelId) async {
+    final controller = _historyRecoveryByChannelId[channelId];
+    if (controller == null) {
+      throw StateError('Encrypted-history recovery is not ready.');
+    }
+    try {
+      await controller.cancelPendingUpload();
+      _lastError = null;
+    } catch (_) {
+      _lastError =
+          'Yappa could not safely stop that transfer. Its protected retry was kept.';
+      rethrow;
+    } finally {
+      notifyListeners();
+    }
+  }
+
   MlsChannelRuntime _requireReadyEncryptedChannel(String channelId) {
     final runtime = _mlsChannelsByChannelId[channelId];
     final startup = _mlsStartupByChannelId[channelId];

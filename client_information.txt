@@ -40,7 +40,9 @@ independent review justify that claim.
   existing Yappa devices to another. You choose the exact destination and
   confirm before sharing; the receiving device verifies the complete encrypted
   transfer before changing the conversation. The server relays encrypted data
-  and cannot read the recovered messages.
+  and cannot read the recovered messages. Interrupted sharing survives a
+  restart, and you can explicitly stop an unfinished transfer without changing
+  messages already stored on either device.
 - Servers now reserve emergency disk headroom before accepting another durable
   message or attachment. If safe storage is unavailable, Yappa reports a
   retryable storage problem instead of pretending the message was saved.

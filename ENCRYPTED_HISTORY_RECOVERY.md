@@ -37,9 +37,12 @@ outbox whose key is held in protected storage. Pending-file promotion is
 restart-safe. A fresh controller re-verifies the current account and both
 device-key bindings, then replays the exact transfer/chunks through the
 idempotent relay contract. The outbox is erased only after ready confirmation.
-Tampering or a missing protected key fails closed. User cancellation of a
-stopped pending upload, the remaining negative/scale/real-device matrix, and
-product polish remain incomplete.
+Tampering or a missing protected key fails closed. A failed upload offers a
+confirmed stop action; the local retry is erased only after authenticated
+relay cancellation or an exact not-found response proving the transfer never
+reached the relay. An uncertain or conflicting server response preserves the
+retry. The remaining negative/scale/real-device matrix and product polish
+remain incomplete.
 
 Yappa will use explicit, same-account, device-assisted recovery. An existing
 authorized device decrypts its authenticated local event history and

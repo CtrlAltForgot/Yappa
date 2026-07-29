@@ -1063,8 +1063,13 @@ Restart-durable recovery upload increment, 2026-07-28:
 - The outbox remains after a failed/lost upload response and is removed only
   after the relay confirms ready. Tampering and missing-key states fail closed.
   Focused crash/restart evidence and the full 76-test client suite pass.
-- Explicit cancellation/cleanup UX for a permanently stopped upload and the
-  remaining adversarial/real-device matrix remain open.
+- A failed source upload offers a confirmed stop action. The client removes
+  its protected retry only after the authenticated relay confirms cancellation
+  or returns the exact not-found result proving that transfer never reached
+  it. Network errors and every other ambiguous response preserve the retry.
+  Flutter analysis and all 77 client tests pass, including controller and
+  confirmation-widget evidence. The remaining adversarial/real-device matrix
+  remains open.
 
 Sparse MLS-sequence correction, 2026-07-28:
 

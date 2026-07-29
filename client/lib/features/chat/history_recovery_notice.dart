@@ -29,6 +29,7 @@ class HistoryRecoveryUiState {
   final double? progress;
   final String? safeError;
   final List<HistoryRecoveryDestination> destinations;
+  final bool canCancel;
 
   const HistoryRecoveryUiState({
     required this.phase,
@@ -38,6 +39,7 @@ class HistoryRecoveryUiState {
     this.progress,
     this.safeError,
     this.destinations = const [],
+    this.canCancel = false,
   });
 
   String get message => switch (phase) {
@@ -80,8 +82,14 @@ class HistoryRecoveryUiState {
 class HistoryRecoveryNotice extends StatelessWidget {
   final HistoryRecoveryUiState state;
   final Future<void> Function(String? destinationDeviceId)? onAction;
+  final Future<void> Function()? onCancel;
 
-  const HistoryRecoveryNotice({super.key, required this.state, this.onAction});
+  const HistoryRecoveryNotice({
+    super.key,
+    required this.state,
+    this.onAction,
+    this.onCancel,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -137,6 +145,13 @@ class HistoryRecoveryNotice extends StatelessWidget {
             TextButton(
               onPressed: () => _confirmAndRun(context),
               child: Text(state.actionLabel!),
+            ),
+          ],
+          if (state.canCancel && onCancel != null) ...[
+            const SizedBox(width: 6),
+            TextButton(
+              onPressed: () => _confirmCancel(context),
+              child: const Text('Stop transfer'),
             ),
           ],
         ],
@@ -218,5 +233,29 @@ class HistoryRecoveryNotice extends StatelessWidget {
       ),
     );
     if (accepted == true) await onAction?.call(selectedDestination);
+  }
+
+  Future<void> _confirmCancel(BuildContext context) async {
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Stop encrypted-history transfer?'),
+        content: const Text(
+          'Yappa will remove the unfinished encrypted relay copy and the '
+          'protected local retry. Existing messages on both devices stay unchanged.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Keep trying'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Stop transfer'),
+          ),
+        ],
+      ),
+    );
+    if (accepted == true) await onCancel?.call();
   }
 }

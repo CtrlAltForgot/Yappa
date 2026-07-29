@@ -191,8 +191,9 @@ contract.
   Existing projected history changes only after the encrypted store commits.
   Source upload state is now separately encrypted and restart-durable before
   network mutation; exact lost-response replay clears it only after ready
-  confirmation. Stopped-upload cancellation and real two-device evidence
-  remain.
+  confirmation. A confirmed stop removes both relay material and the local
+  retry, but ambiguous cancellation responses retain the retry so ciphertext
+  is never silently abandoned. Real two-device evidence remains.
 - Transfers bind account/YUID, destination device key, server, channel, source
   device, history range, and version; use chunk integrity and resumable
   cursors; and reject replay, rollback, substitution, and removed devices.

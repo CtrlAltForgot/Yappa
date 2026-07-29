@@ -219,6 +219,7 @@ class HistoryRecoveryChannelController {
         phase: HistoryRecoveryUiPhase.failed,
         safeError:
             'Encrypted history could not be shared. No local history was changed.',
+        canCancel: true,
       );
       rethrow;
     }
@@ -306,7 +307,20 @@ class HistoryRecoveryChannelController {
       firstServerSequence: context.firstServerSequence,
       lastServerSequence: context.lastServerSequence,
     );
-    await _coordinator.uploadPrepared(context: context, sealed: pending.sealed);
+    try {
+      await _coordinator.uploadPrepared(
+        context: context,
+        sealed: pending.sealed,
+      );
+    } catch (_) {
+      state = const HistoryRecoveryUiState(
+        phase: HistoryRecoveryUiPhase.failed,
+        safeError:
+            'Encrypted history could not be shared. Its protected retry was kept.',
+        canCancel: true,
+      );
+      rethrow;
+    }
     await outbox.clear();
     _sharedDestinationId = destination.deviceId;
     _sharedLastSequence = context.lastServerSequence;
@@ -316,6 +330,23 @@ class HistoryRecoveryChannelController {
       lastServerSequence: context.lastServerSequence,
     );
     return true;
+  }
+
+  Future<void> cancelPendingUpload() async {
+    final pending = await outbox.read();
+    if (pending == null) return;
+    try {
+      await _transport.cancel(pending.context.transferId);
+    } on ApiException catch (error) {
+      final neverReachedRelay =
+          error.statusCode == 404 &&
+          error.code == 'history_recovery_transfer_not_found';
+      if (!neverReachedRelay) rethrow;
+    }
+    await outbox.clear();
+    _sharedDestinationId = null;
+    _sharedLastSequence = null;
+    await refresh();
   }
 
   Future<void> close() => outbox.close();

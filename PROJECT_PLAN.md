@@ -1378,15 +1378,19 @@ Current implementation slice:
   account/source/destination bindings and resumes the same transfer id and
   bytes; lost-response evidence proves the outbox survives and clears only
   after ready confirmation. Tampering fails closed. Flutter analysis and all
-  76 client tests pass. Explicit stopped-upload cancellation, broader
-  adversarial/scale coverage, and real two-device validation remain open.
+  76 client tests pass.
+  A failed source upload now offers an explicitly confirmed stop action.
+  Yappa removes the protected retry only after the relay confirms cancellation
+  or proves the transfer never reached it; an uncertain response preserves the
+  exact retry. Flutter analysis and all 77 client tests pass, including
+  controller and confirmation-widget evidence. Broader adversarial/scale
+  coverage and real two-device validation remain open.
   Threads are not implemented.
 
 Next work, in order:
 
-1. Continue `PERSISTENT_CHAT.md` with stopped-transfer cancellation, the
-   remaining encrypted-history adversarial/scale matrix, and real two-device
-   evidence, then complete authenticated
+1. Continue `PERSISTENT_CHAT.md` with the remaining encrypted-history
+   adversarial/scale matrix and real two-device evidence, then complete authenticated
    restored-download evidence,
    real constrained-filesystem/concurrency capacity evidence, scale, and
    restore gates. Deploy and verify these history changes on Unraid when

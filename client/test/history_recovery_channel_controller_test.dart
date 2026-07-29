@@ -35,6 +35,9 @@ class _MemorySecrets implements SecretStorage {
 }
 
 class _EmptyTransport extends HistoryRecoveryTransferService {
+  String? canceledTransferId;
+  ApiException? cancelError;
+
   _EmptyTransport()
     : super(
         api: ApiClient(),
@@ -47,12 +50,20 @@ class _EmptyTransport extends HistoryRecoveryTransferService {
     required String channelId,
     required String destinationDeviceId,
   }) async => const [];
+
+  @override
+  Future<bool> cancel(String transferId) async {
+    canceledTransferId = transferId;
+    final error = cancelError;
+    if (error != null) throw error;
+    return true;
+  }
 }
 
 class _CapturingCoordinator extends HistoryRecoveryCoordinator {
   HistoryRecoveryContext? approvedContext;
   HistoryRecoveryContext? uploadedContext;
-  final bool failUploads;
+  bool failUploads;
 
   _CapturingCoordinator(
     HistoryRecoveryTransferService transport, {
@@ -249,6 +260,53 @@ void main() {
       expect((await resumed.refresh()).phase, HistoryRecoveryUiPhase.shared);
       expect(resumedCoordinator.uploadedContext?.transferId, pendingTransferId);
       expect(await resumedOutbox.read(), isNull);
+
+      await store.apply(
+        MlsApplicationEvent(
+          serverSequence: 5,
+          epoch: 1,
+          eventId: 'e' * 22,
+          channelId: '1',
+          kind: EncryptedApplicationEventKind.message,
+          targetEventId: null,
+          createdAt: DateTime.utc(2026, 7, 28, 12, 5),
+          body: const {'content': 'event 5'},
+          senderCredential: Uint8List.fromList([5]),
+          senderSignaturePublicKey: Uint8List.fromList(List<int>.filled(32, 5)),
+        ),
+        senderIsOwner: false,
+      );
+      resumedCoordinator.failUploads = true;
+      expect(
+        (await resumed.refresh()).phase,
+        HistoryRecoveryUiPhase.approvalRequired,
+      );
+      await expectLater(
+        resumed.perform(destinationDeviceId),
+        throwsA(isA<ApiException>()),
+      );
+      final stoppedTransferId =
+          (await resumedOutbox.read())!.context.transferId;
+      expect(resumed.state.canCancel, isTrue);
+      await resumed.cancelPendingUpload();
+      expect(transport.canceledTransferId, stoppedTransferId);
+      expect(await resumedOutbox.read(), isNull);
+
+      await resumed.perform(destinationDeviceId).catchError((_) => false);
+      final retainedTransferId =
+          (await resumedOutbox.read())!.context.transferId;
+      transport.cancelError = ApiException(
+        'Uncertain cancellation.',
+        statusCode: 503,
+      );
+      await expectLater(
+        resumed.cancelPendingUpload(),
+        throwsA(isA<ApiException>()),
+      );
+      expect(
+        (await resumedOutbox.read())?.context.transferId,
+        retainedTransferId,
+      );
       await resumed.close();
       await store.close();
     },

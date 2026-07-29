@@ -490,6 +490,10 @@ class _ShellScreenState extends State<ShellScreen> {
                                         selectedChannel.id,
                                         destinationDeviceId,
                                       ),
+                              onCancelHistoryRecovery: () => widget.appState
+                                  .cancelEncryptedHistoryRecovery(
+                                    selectedChannel.id,
+                                  ),
                               members: widget.appState.selectedMembers,
                               voiceMembers: isVoiceDeck
                                   ? widget.appState.membersForVoiceDeck(

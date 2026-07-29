@@ -88,4 +88,34 @@ void main() {
       expect(find.textContaining('/home/'), findsNothing);
     },
   );
+
+  testWidgets('requires confirmation before stopping a pending upload', (
+    tester,
+  ) async {
+    var cancellations = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: HistoryRecoveryNotice(
+            state: const HistoryRecoveryUiState(
+              phase: HistoryRecoveryUiPhase.failed,
+              safeError: 'The protected retry was kept.',
+              canCancel: true,
+            ),
+            onCancel: () async {
+              cancellations += 1;
+            },
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Stop transfer'));
+    await tester.pumpAndSettle();
+    expect(find.text('Stop encrypted-history transfer?'), findsOneWidget);
+    expect(cancellations, 0);
+    await tester.tap(find.widgetWithText(FilledButton, 'Stop transfer'));
+    await tester.pumpAndSettle();
+    expect(cancellations, 1);
+  });
 }
