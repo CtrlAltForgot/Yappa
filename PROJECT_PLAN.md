@@ -1338,18 +1338,22 @@ Current implementation slice:
   X25519/HKDF/AES-256-GCM sealing and opening; its immutable canonical header
   prevents server/channel/device substitution, and its final YUID-signed
   manifest binds the ordered ciphertext digests without circular associated
-  data. The complete backend/security/deployment-policy suite, Flutter
-  analysis, and all 65 client tests pass. Client API transport orchestration,
-  canonical event export, restart-safe staged merge, recovery UI, the
-  remaining negative/scale/real-device matrix, production deployment, and an
+  data. The complete backend/security/deployment-policy suite passes. The client now
+  also pins create/list/finalize/consume/cancel metadata, uploads binary chunks
+  with declared hash verification, resumes through exact chunk replay,
+  downloads only manifest-declared sizes/digests, and deliberately separates
+  download from server consumption until after durable merge. Canonical event
+  export, restart-safe staged merge, recovery UI, the remaining
+  negative/scale/real-device matrix, production deployment, and an
   authenticated post-restore client download remain open.
+  Flutter analysis and all 68 client tests pass with this transport increment.
   Threads are not implemented.
 
 Next work, in order:
 
-1. Continue `PERSISTENT_CHAT.md` by wiring the encrypted-history client
-   transport/export path to the schema-6 relay, implementing restart-safe
-   authenticated staged merge and recovery UI, then complete authenticated
+1. Continue `PERSISTENT_CHAT.md` by implementing canonical encrypted-history
+   event export, restart-safe authenticated staged merge, and recovery UI on
+   the now-wired schema-6 client transport, then complete authenticated
    restored-download evidence,
    real constrained-filesystem/concurrency capacity evidence, scale, and
    restore gates. Deploy and verify these history changes on Unraid when

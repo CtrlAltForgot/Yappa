@@ -12,9 +12,11 @@ verifies the same-account directory, and registers during encrypted-server
 session setup. Its transfer cryptor now derives a per-transfer X25519/HKDF key,
 encrypts bounded chunks with AES-256-GCM, binds them to an immutable canonical
 header, and verifies the final YUID-signed manifest before decryption.
-Client/server transport orchestration, canonical event export, restart-safe
-destination merge, recovery UI, and the full negative/real-device matrix
-remain incomplete.
+The client transport pins every create/list/lifecycle response, verifies every
+downloaded chunk against the manifest, resumes uploads through exact retries,
+and keeps server consumption separate from download so it can occur only after
+a durable local merge. Canonical event export, restart-safe destination merge,
+recovery UI, and the full negative/real-device matrix remain incomplete.
 
 Yappa will use explicit, same-account, device-assisted recovery. An existing
 authorized device decrypts its authenticated local event history and

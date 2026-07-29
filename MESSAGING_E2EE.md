@@ -393,8 +393,9 @@ before it joined. Yappa preserves that property:
   not be disguised as ordinary MLS behavior.
 
 The dedicated recovery-key directory, bounded opaque schema-6 transfer relay,
-and client chunk cryptography are implemented. Client transport orchestration,
-canonical historical-event export, restart-safe destination merge, and
+client chunk cryptography, and response-pinned resumable transfer transport are
+implemented. Server consumption remains a distinct post-merge operation.
+Canonical historical-event export, restart-safe destination merge, and
 recovery UI remain incomplete.
 
 This limitation must be visible before a user removes their last functioning

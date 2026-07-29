@@ -1023,9 +1023,12 @@ hash is the chunk associated-data root; the final YUID-signed manifest binds
 that header and every ordered ciphertext size and SHA-256 digest without a
 circular hash dependency. Automated round trips cover multi-chunk data, size
 limits, ciphertext tampering, and channel substitution. Client API
-orchestration, canonical event export, restart-safe authenticated merge,
-recovery UI, the remaining adversarial matrix, and a release claim remain
-incomplete.
+transport now pins the full returned transfer identity and lifecycle, validates
+binary upload receipts, checks downloaded bytes against signed-manifest size
+and digest metadata, resumes by safely replaying exact chunks, and exposes
+consumption only as a separate post-merge acknowledgement. Canonical event
+export, restart-safe authenticated merge, recovery UI, the remaining
+adversarial matrix, and a release claim remain incomplete.
 
 Verified plaintext reconnect increment, 2026-07-28:
 
