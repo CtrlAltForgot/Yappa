@@ -3142,12 +3142,12 @@ app.patch(
 
   if (attachmentRetentionDays !== undefined) {
     const value = Number(attachmentRetentionDays);
-    if (!Number.isInteger(value) || value < 0 || value > 3650) {
+    if (!Number.isInteger(value) || value !== 0) {
       return apiError(
         res,
         400,
         'invalid_attachment_retention_days',
-        'attachmentRetentionDays must be between 0 and 3650.',
+        'Public-release chat attachments must use indefinite retention (0).',
       );
     }
     patch.attachment_retention_days = value;

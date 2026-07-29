@@ -29,6 +29,9 @@ independent review justify that claim.
   pages instead of disappearing beyond the newest screenful. Yappa keeps the
   server as the durable record, limits the local cache, and clearly tells you
   when the current on-screen history window is full.
+- New and upgraded servers now keep chat attachments indefinitely unless an
+  authorized person explicitly deletes them. Yappa no longer schedules
+  ordinary or encrypted chat files to disappear after 30 days.
 - The current Linux release package was rebuilt and launched after these
   changes. Its native encryption, voice, protected-storage, and media-preview
   libraries all resolved successfully. Linux packages now use portable

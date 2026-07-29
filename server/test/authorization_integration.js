@@ -563,6 +563,25 @@ async function run() {
     await expectStatus(route, 403, { token: member.token, ...options });
   }
 
+  const settingsResponse = await request('/api/server/settings', {
+    token: owner.token,
+  });
+  assert.equal(settingsResponse.status, 200);
+  assert.equal(
+    (await settingsResponse.json()).settings.attachmentRetentionDays,
+    0,
+  );
+  const expiringRetentionResponse = await request('/api/server/settings', {
+    method: 'PATCH',
+    token: owner.token,
+    body: { attachmentRetentionDays: 30 },
+  });
+  assert.equal(expiringRetentionResponse.status, 400);
+  assert.equal(
+    (await expiringRetentionResponse.json()).error?.code,
+    'invalid_attachment_retention_days',
+  );
+
   const encryptedChannelCreateResponse = await request(
     '/api/admin/channels',
     {
@@ -1190,6 +1209,7 @@ async function run() {
   );
   assert.equal(encryptedAttachment.id, encryptedAttachmentId);
   assert.equal(encryptedAttachment.ciphertextSizeBytes, 256);
+  assert.equal(encryptedAttachment.expiresAt, null);
 
   const retryAttachmentForm = new FormData();
   retryAttachmentForm.append('attachmentId', encryptedAttachmentId);

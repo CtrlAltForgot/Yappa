@@ -118,6 +118,16 @@ version-2 fixture proves the binding fields are preserved by the additive
 backfill. Rollback to schema 2 requires the normal complete pre-upgrade
 restore.
 
+Schema version `4` establishes indefinite chat-attachment retention as the
+only public-release policy. It changes fresh-server retention to `0`, resets
+existing server settings to `0`, and clears `expires_at` from every active
+ordinary and encrypted attachment so previously scheduled cleanup cannot
+silently remove chat history after upgrade. Explicitly deleted rows remain
+deleted and are not resurrected. A version-3 fixture proves the setting and
+active attachment are preserved while their implicit expiry is removed.
+Rollback to schema 3 requires the normal complete pre-upgrade restore; opening
+the migrated database with a schema-3 binary is forbidden.
+
 The production Unraid database migrated from version 1 to version 2 on
 2026-07-24 after its encrypted pre-upgrade archive checksum was verified.
 Post-migration inspection confirmed schema 2, the operation column and index,
@@ -130,6 +140,12 @@ schema 3, the credential table, zero expected pre-activation credential rows,
 and preservation of one user, ten legacy messages, and zero MLS deliveries.
 The backend health check passed and the container remained UID/GID 1000 with
 `no-new-privileges`.
+
+Schema version 4 has not been deployed to production because approved Unraid
+access is unavailable. Deployment requires the normal encrypted, verified
+pre-upgrade backup and post-migration checks for schema version, zero active
+attachment expiries, preserved attachment rows/files, SQLite integrity, and
+backend health.
 
 On 2026-07-24, the production schema-3 installation completed a real
 passphrase-encrypted backup with checksum-verified `age` v1.3.1 and the bundled

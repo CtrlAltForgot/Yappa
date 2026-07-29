@@ -268,7 +268,7 @@ class ServerSettings {
 
     return ServerSettings(
       attachmentRetentionDays:
-          (json['attachmentRetentionDays'] as num?)?.toInt() ?? 30,
+          (json['attachmentRetentionDays'] as num?)?.toInt() ?? 0,
       attachmentMaxBytes:
           (json['attachmentMaxBytes'] as num?)?.toInt() ?? 26214400,
       attachmentAllowedTypes:

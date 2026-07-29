@@ -921,8 +921,27 @@ Verified plaintext-history increment, 2026-07-28:
 
 This increment does not complete durable-chat security. Forward catch-up,
 channel-specific membership if private channel ACLs are introduced, durable
-attachment defaults, storage exhaustion, encrypted device-history recovery,
+attachment scale/restore evidence, storage exhaustion, encrypted
+device-history recovery,
 large-scale behavior, and destructive restore proof remain required.
+
+Verified attachment-retention increment, 2026-07-28:
+
+- Schema version 4 makes indefinite retention the only accepted public-release
+  policy. Fresh settings use `0`; migration resets existing settings and
+  removes `expires_at` from every active ordinary and encrypted attachment.
+  Explicit deletion markers are not changed or resurrected.
+- The owner settings API rejects any nonzero timed-retention value. This avoids
+  presenting a hidden API-only deletion policy as an informed server choice;
+  a future retention feature must be prospective, visible, authorized, and
+  independently tested before this restriction changes.
+- A version-3 migration fixture proves an active attachment row survives with
+  expiry removed. Authorization coverage proves the default and rejection
+  boundary, and encrypted-upload coverage proves new ciphertext has no expiry.
+
+Schema version 4 is not deployed to Unraid because approved SSH access remains
+unavailable. A verified encrypted pre-upgrade backup and post-migration
+attachment/file/integrity checks are mandatory before production activation.
 
 ### Cross-Platform Server Deployment Gate
 
@@ -1317,7 +1336,8 @@ Before public DMs, Yappa must additionally define and verify:
   Version 2 adds the nullable-on-upgrade MLS client operation id plus its
   partial unique index without rewriting existing opaque rows; version 3 adds
   the authenticated MLS device credential directory and safe historical
-  backfill. Previous-version fixtures prove row preservation. Both migrations
+  backfill; version 4 removes implicit active chat-attachment expiry.
+  Previous-version fixtures prove row preservation. Versions 2 and 3
   were deployed to Unraid on 2026-07-24 after encrypted pre-upgrade backups.
   Production reached schema 3 while preserving one user and ten messages; the
   operation index, credential table, and healthy hardened container were

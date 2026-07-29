@@ -3,7 +3,7 @@ const path = require('path');
 const crypto = require('crypto');
 const Database = require('better-sqlite3');
 
-const CURRENT_SCHEMA_VERSION = 3;
+const CURRENT_SCHEMA_VERSION = 4;
 
 function ensureDirForFile(filePath) {
   const dir = path.dirname(filePath);
@@ -148,7 +148,7 @@ function createBaseTables(db) {
 
   CREATE TABLE IF NOT EXISTS server_settings (
     id INTEGER PRIMARY KEY CHECK (id = 1),
-                                              attachment_retention_days INTEGER NOT NULL DEFAULT 30,
+                                              attachment_retention_days INTEGER NOT NULL DEFAULT 0,
                                               attachment_max_bytes INTEGER NOT NULL DEFAULT 26214400,
                                               attachment_allowed_types_json TEXT NOT NULL DEFAULT '["image/","video/","audio/","text/","application/pdf","application/zip","application/json"]',
                                               file_storage_enabled INTEGER NOT NULL DEFAULT 1,
@@ -429,6 +429,19 @@ function runMigrations(db) {
   UPDATE sessions
   SET device_name = 'Existing Yappa client'
   WHERE device_name IS NULL OR device_name = '';
+
+  UPDATE server_settings
+  SET attachment_retention_days = 0,
+      updated_at = datetime('now')
+  WHERE attachment_retention_days != 0;
+
+  UPDATE attachments
+  SET expires_at = NULL
+  WHERE deleted_at IS NULL;
+
+  UPDATE encrypted_attachments
+  SET expires_at = NULL
+  WHERE deleted_at IS NULL;
   `);
 
   db.prepare(`
@@ -569,7 +582,7 @@ function ensureServerSettings(db) {
     created_at,
     updated_at
   )
-  VALUES (1, 30, 26214400, ?, 1, 2147483648, 262144000, ?, 1, ?, ?)
+  VALUES (1, 0, 26214400, ?, 1, 2147483648, 262144000, ?, 1, ?, ?)
   `).run(
     JSON.stringify(['image/', 'video/', 'audio/', 'text/', 'application/pdf', 'application/zip', 'application/json']),
          JSON.stringify(['*']),

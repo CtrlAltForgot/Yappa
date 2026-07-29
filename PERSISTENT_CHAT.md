@@ -51,6 +51,11 @@ client must not make the conversation look complete when it is not.
   store authentication is unavailable.
 - The backup workflow includes the database and attachment roots and has an
   integration test for encrypted backup/restore orchestration.
+- Fresh servers now use indefinite (`0`) retention for ordinary and encrypted
+  chat attachments. Schema version 4 clears scheduled expiry from every active
+  attachment and resets the server policy to indefinite without resurrecting
+  explicitly deleted rows. The API rejects timed-retention settings until a
+  visible, prospective, authorized policy is designed and tested.
 
 These facts prove a useful persistence foundation, not the complete product
 contract.
@@ -63,8 +68,9 @@ contract.
 - Encrypted client history needs the same explicit bounded-window UX and
   honest older-history/recovery states; its server delivery cursor alone does
   not complete that product behavior.
-- Ordinary and encrypted attachment retention defaults to 30 days. That does
-  not satisfy durable chat history for attachments.
+- Transactional message/attachment linking, explicit deletion, file/hash
+  presence, backup, and restored-download behavior still need a complete
+  multi-page persistence exercise at representative scale.
 - MLS gives a newly admitted device access from its admitted epoch forward;
   server-retained ciphertext alone does not give that device authenticated
   access to earlier plaintext. Secure history transfer/recovery semantics are

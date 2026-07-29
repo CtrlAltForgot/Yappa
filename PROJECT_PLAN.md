@@ -302,7 +302,7 @@ mode `0600`, no partial output remained, and the backend automatically resumed
 healthy under UID/GID `1000:1000`, a read-only root, and
 `no-new-privileges`.
 
-Database initialization now journals schema version `3` and runs base-schema
+Database initialization now journals schema version `4` and runs base-schema
 creation, additive migration, seed/config initialization, and version recording
 inside one SQLite transaction. A failed migration leaves the pre-upgrade
 schema/data intact, and a binary refuses to mutate or open a database with a
@@ -314,7 +314,10 @@ and `data/` together, never opening an upgraded database with an older image.
 Version 2 adds crash-safe MLS delivery operation ids without rewriting
 existing version-1 wire rows. Version 3 adds the authenticated MLS device
 credential directory and backfills verified historical bindings without
-restoring consumed KeyPackage wire bytes. Previous-version fixtures verify
+restoring consumed KeyPackage wire bytes. Version 4 removes all implicit
+ordinary/encrypted chat-attachment expiry, resets retention to indefinite, and
+rejects timed deletion until a visible prospective policy exists.
+Previous-version fixtures verify
 preservation and the new boundaries. Startup migration failures emit only a
 sanitized reason code rather than a
 stack trace, SQL statement, or database path; runtime log tests cover the
@@ -1288,14 +1291,14 @@ Current implementation slice:
   suite, and the complete backend/security/deployment-policy suite pass
   locally. Production deployment verification is unavailable because approved
   Unraid SSH access is still unavailable. Forward reconnect catch-up,
-  sliding-window navigation, ordinary attachment expiry,
+  sliding-window navigation, attachment scale/restore validation,
   storage-full behavior, encrypted new-device history, scale, and destructive
   restore evidence remain open. Threads are not implemented.
 
 Next work, in order:
 
 1. Continue the remaining `PERSISTENT_CHAT.md` forward-catch-up,
-   sliding-window, attachment-retention, encrypted-history continuity,
+   sliding-window, attachment scale/restore, encrypted-history continuity,
    capacity, scale, and restore gates. Deploy and verify this first history
    slice on Unraid when approved access becomes available.
 2. Add bare-metal/reboot and sleep/network-transition evidence; validate the
