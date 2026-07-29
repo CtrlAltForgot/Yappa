@@ -616,6 +616,7 @@ assert.match(serverRuntimeContract, /\/proc\/1\/comm/);
 assert.match(serverRuntimeContract, /systemctl --user is-active/);
 assert.match(serverRuntimeContract, /MANAGER_STATUS.*224/s);
 assert.match(serverRuntimeContract, /\/etc\/pam\.d\/systemd-user/);
+assert.match(serverRuntimeContract, /\/usr\/lib\/pam\.d\/systemd-user/);
 assert.match(serverRuntimeContract, /account required pam_permit\.so/);
 assert.match(serverRuntimeContract, /firewall-yappa\.sh" apply/);
 assert.match(serverRuntimeContract, /firewall-yappa\.sh" remove/);

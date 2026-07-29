@@ -76,6 +76,9 @@ if ! systemctl start "user@$TEST_UID.service"; then
     echo "session required pam_permit.so"
   } > /etc/pam.d/systemd-user
   chmod 644 /etc/pam.d/systemd-user
+  [[ -f /usr/lib/pam.d/systemd-user ]] ||
+    { echo "No vendor systemd-user PAM policy is available." >&2; exit 1; }
+  install -m 644 /etc/pam.d/systemd-user /usr/lib/pam.d/systemd-user
   systemctl reset-failed "user@$TEST_UID.service"
   systemctl start "user@$TEST_UID.service"
 fi
