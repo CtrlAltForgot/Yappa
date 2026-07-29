@@ -15,8 +15,13 @@ header, and verifies the final YUID-signed manifest before decryption.
 The client transport pins every create/list/lifecycle response, verifies every
 downloaded chunk against the manifest, resumes uploads through exact retries,
 and keeps server consumption separate from download so it can occur only after
-a durable local merge. Canonical event export, restart-safe destination merge,
-recovery UI, and the full negative/real-device matrix remain incomplete.
+a durable local merge. Existing devices export a canonical contiguous range.
+The destination coordinator verifies and decrypts the complete transfer,
+reauthorizes every recovered sender against the historical YUID-bound MLS
+credential directory, rejects conflicting sequences/event ids and invalid
+mutations, and atomically persists the merged projection plus a replay receipt
+before acknowledging consumption. Recovery UI and the full
+negative/scale/real-device matrix remain incomplete.
 
 Yappa will use explicit, same-account, device-assisted recovery. An existing
 authorized device decrypts its authenticated local event history and

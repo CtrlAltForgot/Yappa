@@ -176,8 +176,11 @@ contract.
   cryptor implements canonical-header-bound X25519/HKDF/AES-256-GCM chunks plus
   final signed-manifest verification. Client transport pins relay metadata and
   chunk bytes, supports safe exact-retry upload/download, and cannot consume
-  server material merely by downloading it. Canonical event export, atomic
-  destination merge, and user-facing recovery states remain incomplete.
+  server material merely by downloading it. Canonical contiguous event export,
+  credential-reauthenticated atomic destination merge, overlap/replay
+  protection, and durable recovery receipts are implemented. User-facing
+  recovery states and the remaining scale/real-device matrix remain
+  incomplete.
 - Transfers bind account/YUID, destination device key, server, channel, source
   device, history range, and version; use chunk integrity and resumable
   cursors; and reject replay, rollback, substitution, and removed devices.

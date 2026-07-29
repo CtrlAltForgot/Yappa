@@ -395,8 +395,10 @@ before it joined. Yappa preserves that property:
 The dedicated recovery-key directory, bounded opaque schema-6 transfer relay,
 client chunk cryptography, and response-pinned resumable transfer transport are
 implemented. Server consumption remains a distinct post-merge operation.
-Canonical historical-event export, restart-safe destination merge, and
-recovery UI remain incomplete.
+Canonical historical-event export and restart-safe destination merge now
+reauthorize retained MLS credentials and mutation rules, reject conflicting
+overlap/replay, and persist a receipt before consumption. Recovery UI and the
+remaining release evidence remain incomplete.
 
 This limitation must be visible before a user removes their last functioning
 device. Account recovery restores account access, not old E2EE content. If no

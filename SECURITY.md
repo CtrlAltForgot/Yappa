@@ -1027,8 +1027,13 @@ transport now pins the full returned transfer identity and lifecycle, validates
 binary upload receipts, checks downloaded bytes against signed-manifest size
 and digest metadata, resumes by safely replaying exact chunks, and exposes
 consumption only as a separate post-merge acknowledgement. Canonical event
-export, restart-safe authenticated merge, recovery UI, the remaining
-adversarial matrix, and a release claim remain incomplete.
+export and the end-to-end coordinator are also implemented: destination/device
+context is pinned again, every sender credential and signature key must match
+exactly one retained YUID-authorized MLS credential, edit/delete ownership is
+rechecked, conflicting overlap and transfer-id replay fail closed, and the
+encrypted store commits events plus the manifest receipt in one restart-safe
+write before relay consumption. Recovery UI, the remaining adversarial/scale
+matrix, real-device evidence, and a release claim remain incomplete.
 
 Verified plaintext reconnect increment, 2026-07-28:
 

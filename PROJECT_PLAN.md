@@ -1343,17 +1343,23 @@ Current implementation slice:
   with declared hash verification, resumes through exact chunk replay,
   downloads only manifest-declared sizes/digests, and deliberately separates
   download from server consumption until after durable merge. Canonical event
-  export, restart-safe staged merge, recovery UI, the remaining
-  negative/scale/real-device matrix, production deployment, and an
-  authenticated post-restore client download remain open.
-  Flutter analysis and all 68 client tests pass with this transport increment.
+  export now requires an exact contiguous channel range. The destination
+  coordinator pins transfer context, authenticates and decrypts all chunks,
+  requires every recovered sender to match exactly one retained
+  YUID-authorized MLS credential, rechecks mutation ownership, rejects
+  conflicting sequence/event overlap and transfer-id replay, and atomically
+  persists the merged events and recovery receipt before consuming the relay
+  copy. Recovery UI, the remaining negative/scale/real-device matrix,
+  production deployment, and an authenticated post-restore client download
+  remain open. Flutter analysis and all 71 client tests pass with the complete
+  source-to-destination coordinator increment.
   Threads are not implemented.
 
 Next work, in order:
 
-1. Continue `PERSISTENT_CHAT.md` by implementing canonical encrypted-history
-   event export, restart-safe authenticated staged merge, and recovery UI on
-   the now-wired schema-6 client transport, then complete authenticated
+1. Continue `PERSISTENT_CHAT.md` by integrating approval/progress/failure and
+   completion UI with the now-wired encrypted-history coordinator, then
+   complete authenticated
    restored-download evidence,
    real constrained-filesystem/concurrency capacity evidence, scale, and
    restore gates. Deploy and verify these history changes on Unraid when
