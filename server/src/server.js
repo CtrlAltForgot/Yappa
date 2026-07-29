@@ -3882,6 +3882,10 @@ app.delete(
     db.prepare(
       'UPDATE media_devices SET revoked_at = ? WHERE id = ?',
     ).run(revokedAt, deviceId);
+    cancelActiveHistoryRecoveryTransfers({
+      deviceId,
+      canceledAt: revokedAt,
+    });
     db.prepare('DELETE FROM sessions WHERE media_device_id = ?').run(deviceId);
   });
   revoke();
@@ -4115,6 +4119,42 @@ function compactExpiredHistoryRecoveryTransfers(at = nowIso()) {
   });
   remove();
   return expired.length;
+}
+
+function cancelActiveHistoryRecoveryTransfers({
+  deviceId = null,
+  userId = null,
+  canceledAt = nowIso(),
+} = {}) {
+  if ((deviceId === null) === (userId === null)) {
+    throw new Error('history_recovery_cleanup_scope');
+  }
+  const rows = deviceId !== null
+    ? db.prepare(`
+        SELECT id
+        FROM history_recovery_transfers
+        WHERE state IN ('uploading', 'ready')
+          AND (source_device_id = ? OR destination_device_id = ?)
+      `).all(deviceId, deviceId)
+    : db.prepare(`
+        SELECT id
+        FROM history_recovery_transfers
+        WHERE state IN ('uploading', 'ready') AND user_id = ?
+      `).all(Number(userId));
+  const deleteChunks = db.prepare(`
+    DELETE FROM history_recovery_transfer_chunks
+    WHERE transfer_id = ?
+  `);
+  const cancelTransfer = db.prepare(`
+    UPDATE history_recovery_transfers
+    SET state = 'canceled', canceled_at = ?
+    WHERE id = ? AND state IN ('uploading', 'ready')
+  `);
+  for (const row of rows) {
+    deleteChunks.run(row.id);
+    cancelTransfer.run(canceledAt, row.id);
+  }
+  return rows.length;
 }
 
 function serializeHistoryRecoveryTransfer(row, { includeManifest = true } = {}) {
@@ -7372,6 +7412,12 @@ app.post(
     createdByUserId: req.auth.user.id,
   });
 
+  db.transaction(() => {
+    cancelActiveHistoryRecoveryTransfers({
+      userId: targetUser.id,
+      canceledAt: ban.created_at,
+    });
+  })();
   clearSessionsForUser(targetUser.id);
   disconnectUserSockets(targetUser.id);
   emitPresence();

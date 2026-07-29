@@ -765,6 +765,108 @@ async function run() {
   assert.equal(encryptedChannelCreateBody.channel.encryptionMode, 'e2ee');
   assert.equal(encryptedChannelCreateBody.channel.encryptionVersion, 1);
   const encryptedChannelId = encryptedChannelCreateBody.channel.id;
+
+  async function registerRecoveryKey(account) {
+    const response = await request('/api/mls/history-recovery/keys', {
+      method: 'POST',
+      token: account.token,
+      body: buildHistoryRecoveryKey(account),
+    });
+    assert.equal(response.status, 201);
+  }
+
+  async function createLifecycleRecoveryTransfer({
+    source,
+    destination,
+    ready = false,
+  }) {
+    const transferId = `recovery_${crypto
+      .randomBytes(16)
+      .toString('base64url')}`;
+    const chunk = crypto.randomBytes(48);
+    const manifest = Buffer.from(
+      JSON.stringify({
+        protocol: 'yappa-history-recovery-v1',
+        transferId,
+        serverId: owner.server.id,
+        channelId: encryptedChannelId,
+        accountYuid: source.user.yuid,
+        sourceDeviceId: source.mediaDeviceId,
+        destinationDeviceId: destination.mediaDeviceId,
+        firstServerSequence: 1,
+        lastServerSequence: 1,
+        eventCount: 1,
+        chunkCount: 1,
+        totalBytes: chunk.length,
+      }),
+    );
+    const manifestSha256 = crypto
+      .createHash('sha256')
+      .update(manifest)
+      .digest('hex');
+    const yuidSignature = Buffer.from(
+      nacl.sign.detached(
+        new Uint8Array(Buffer.from(manifestSha256, 'hex')),
+        source.yuidKeyPair.secretKey,
+      ),
+    ).toString('base64url');
+    const created = await request(
+      `/api/channels/${encryptedChannelId}/mls/history-recovery/transfers`,
+      {
+        method: 'POST',
+        token: source.token,
+        body: {
+          id: transferId,
+          destinationDeviceId: destination.mediaDeviceId,
+          firstServerSequence: 1,
+          lastServerSequence: 1,
+          eventCount: 1,
+          chunkCount: 1,
+          totalBytes: chunk.length,
+          manifest: manifest.toString('base64url'),
+          manifestSha256,
+          yuidSignature,
+        },
+      },
+    );
+    assert.equal(created.status, 201);
+    const uploaded = await requestBytes(
+      `/api/mls/history-recovery/transfers/${transferId}/chunks/0`,
+      {
+        token: source.token,
+        bytes: chunk,
+        digest: crypto.createHash('sha256').update(chunk).digest('hex'),
+      },
+    );
+    assert.equal(uploaded.status, 201);
+    if (ready) {
+      await expectStatus(
+        `/api/mls/history-recovery/transfers/${transferId}/finalize`,
+        200,
+        {method: 'POST', token: source.token},
+      );
+    }
+    return transferId;
+  }
+
+  function assertRecoveryTransferCanceled(transferId) {
+    const testDb = new Database(dbPath, {readonly: true});
+    const transfer = testDb.prepare(`
+      SELECT state, canceled_at
+      FROM history_recovery_transfers
+      WHERE id = ?
+    `).get(transferId);
+    const chunks = testDb.prepare(`
+      SELECT COUNT(*) AS count
+      FROM history_recovery_transfer_chunks
+      WHERE transfer_id = ?
+    `).get(transferId);
+    testDb.close();
+    assert.equal(transfer.state, 'canceled');
+    assert.equal(typeof transfer.canceled_at, 'string');
+    assert.equal(chunks.count, 0);
+  }
+
   const plaintextIntoEncryptedChannel = await request(
     `/api/channels/${encryptedChannelId}/messages`,
     {
@@ -1172,6 +1274,41 @@ async function run() {
     {token: ownerRecoveryDestination.token},
   );
 
+  const revokedSourceDestination = await createAdditionalDevice(
+    revocationTarget,
+  );
+  await registerRecoveryKey(revocationTarget);
+  await registerRecoveryKey(revokedSourceDestination);
+  const revokedSourceTransferId = await createLifecycleRecoveryTransfer({
+    source: revocationTarget,
+    destination: revokedSourceDestination,
+  });
+
+  const revokedDestination = await createAdditionalDevice(owner);
+  await registerRecoveryKey(revokedDestination);
+  const revokedDestinationTransferId = await createLifecycleRecoveryTransfer({
+    source: owner,
+    destination: revokedDestination,
+    ready: true,
+  });
+  await expectStatus(
+    `/api/media/devices/${revokedDestination.mediaDeviceId}`,
+    200,
+    {method: 'DELETE', token: owner.token},
+  );
+  await expectStatus('/api/auth/me', 401, {
+    token: revokedDestination.token,
+  });
+  assertRecoveryTransferCanceled(revokedDestinationTransferId);
+
+  const bannedDestination = await createAdditionalDevice(member);
+  await registerRecoveryKey(member);
+  await registerRecoveryKey(bannedDestination);
+  const bannedTransferId = await createLifecycleRecoveryTransfer({
+    source: member,
+    destination: bannedDestination,
+  });
+
   const legacyToken = crypto.randomBytes(32).toString('hex');
   const legacyNow = new Date();
   const legacyDb = new Database(dbPath);
@@ -1326,6 +1463,7 @@ async function run() {
   await expectStatus('/api/auth/me', 401, {
     token: revocationTarget.token,
   });
+  assertRecoveryTransferCanceled(revokedSourceTransferId);
   const afterRevocation = await (
     await request('/api/media/devices', { token: owner.token })
   ).json();
@@ -2183,6 +2321,8 @@ async function run() {
   });
   assert.equal(banResponse.status, 201);
   await expectStatus('/api/auth/me', 401, { token: member.token });
+  await expectStatus('/api/auth/me', 401, {token: bannedDestination.token});
+  assertRecoveryTransferCanceled(bannedTransferId);
   const rotatedRoomState = await ownerRealtime.nextEvent('media:e2ee:state');
   assert.equal(rotatedRoomState.epoch, sharedEpoch + 1);
   assert.deepEqual(

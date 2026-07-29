@@ -1094,6 +1094,15 @@ Restart-durable recovery upload increment, 2026-07-28:
   storage fails closed. Flutter analysis, all 80 routine client tests, and the
   opt-in scale gate pass. The backend correction is not yet deployed to Unraid
   because approved deployment access remains unavailable.
+- Revoking either the source or destination device now cancels every active
+  recovery transfer involving that device and removes its opaque chunks in the
+  same database transaction as revocation. Banning an account likewise
+  cancels all of its uploading or ready transfers before its sessions are
+  cleared. Integration tests cover uploading-source revocation,
+  ready-destination revocation, and an uploading banned account; all three
+  invalidate access, mark the transfer canceled, and leave zero chunk rows.
+  The complete backend suite passes. This cleanup is awaiting Unraid
+  deployment because approved access remains unavailable.
 
 Sparse MLS-sequence correction, 2026-07-28:
 

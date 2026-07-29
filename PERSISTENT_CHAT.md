@@ -205,6 +205,11 @@ contract.
   authenticated binary outbox storage uses 62,952,989 bytes and 769,464 KiB
   peak test-process RSS, down from 83,935,683 bytes and 1,874,452 KiB for the
   superseded JSON/base64 form. Protected v1 outboxes remain readable.
+- Device revocation and account bans now remove authorization and opaque
+  recovery data together: active uploading or ready transfers are marked
+  canceled and their chunks deleted. Integration coverage includes both
+  source/destination device roles and a banned account, with zero leftover
+  chunk rows.
 - Transfers bind account/YUID, destination device key, server, channel, source
   device, history range, and version; use chunk integrity and resumable
   cursors; and reject replay, rollback, substitution, and removed devices.

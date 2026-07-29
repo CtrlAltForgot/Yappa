@@ -68,6 +68,14 @@ The repeatable opt-in command is
 test/history_recovery_capacity_test.dart`; routine runs skip the high-memory
 case. Flutter analysis and all 80 routine client tests pass.
 
+Authorization-lifecycle evidence now covers active recovery data directly.
+Revoking an uploading source or ready destination atomically cancels every
+transfer involving that device and removes its chunks. Banning an account
+does the same for all of its uploading and ready transfers before sessions are
+cleared. Integration assertions verify rejected sessions, canceled state, and
+zero remaining chunk rows. The complete backend suite passes; deployment of
+this cleanup remains pending because approved Unraid access is unavailable.
+
 Yappa will use explicit, same-account, device-assisted recovery. An existing
 authorized device decrypts its authenticated local event history and
 re-encrypts it directly to a separately authorized recovery key belonging to

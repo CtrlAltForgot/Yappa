@@ -1413,6 +1413,15 @@ Current implementation slice:
   test/history_recovery_capacity_test.dart`. This backend limit correction is
   not yet deployed to Unraid because approved deployment access remains
   unavailable.
+  Authorization teardown now atomically cancels active recovery transfers and
+  removes their opaque chunks when either endpoint device is revoked or the
+  owning account is banned. Integration evidence covers an uploading revoked
+  source, a ready revoked destination, and an uploading banned account, and
+  verifies both session rejection and zero remaining chunk rows. The complete
+  backend security/storage/backup/deployment/recovery suite passes. This
+  cleanup change is also awaiting Unraid deployment because approved access
+  remains unavailable. The remaining recovery gates require real two-device
+  and restored-server exercises rather than more local authorization wiring.
   Threads are not implemented.
 
 Next work, in order:
