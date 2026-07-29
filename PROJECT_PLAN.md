@@ -1174,14 +1174,16 @@ Current implementation slice:
   enablement, and stores authoritative ownership in root-only host state that
   portable backup/restore excludes. Focused plan/negative tests and a complete
   namespace-isolated root UFW apply/remove cycle pass together with the
-  complete local backend/security suite; fresh CI and real-distribution
-  UFW/firewalld matrices are still required.
+  complete local backend/security suite. Exact-head run `30411276865` passed
+  the portable hosted fallback plus all backend/client jobs for firewall and
+  recovery commit `bb632fa`; real-distribution UFW/firewalld matrices are still
+  required.
 - Firewall run `30410797088` passed the entire Flutter/native job and every
   backend test before the root-mutation fixture, then failed because GitHub's
   hosted kernel rejects unprivileged `/proc/self/uid_map`. The fixture now
   skips only for that exact kernel policy while plan/negative/static gates
-  remain mandatory; local namespace-root mutation still passes. A fresh
-  exact-head run is required.
+  remain mandatory; local namespace-root mutation still passes. Follow-up
+  exact-head run `30411276865` passed.
 - Bounded Linux recovery is implemented locally. Lifecycle start/stop records
   private host-local desired state, so intentional stop is never treated as a
   fault. Recovery is single-instance, performs at most one Compose repair,
@@ -1189,8 +1191,17 @@ Current implementation slice:
   minutes after three failures. The explicit user service installs a hardened
   one-minute recovery timer and removes it atomically with autostart. Focused
   healthy/stopped/recovered/cooldown tests and the complete local
-  backend/security suite pass; fresh CI and real sleep/network/systemd matrices
-  remain required.
+  backend/security suite pass. Exact-head run `30411276865` passed all jobs;
+  real sleep/network/systemd matrices remain required.
+- A hosted Tier-1 Linux host-contract workflow is implemented locally with
+  digest-pinned Ubuntu 24.04, Debian 13, Fedora 44, and Rocky Linux 10 x86-64
+  containers. Every non-optional job binds OS identity to the matching
+  unpublished manifest target and exercises shell portability, preflight,
+  deterministic bundle creation, checksum-pinned fresh installation, private
+  modes, firewall planning, intentional-stop recovery, and privileged service
+  refusal. It explicitly does not claim Docker/LiveKit/systemd/firewall/media
+  runtime conformance. Local Fedora-derived execution passes; hosted evidence
+  is pending.
 
 Next work, in order:
 

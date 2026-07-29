@@ -242,6 +242,18 @@ ARM64 Linux is a release target after every pinned image and native dependency
 is verified for that architecture. Other OCI-capable Linux distributions can
 be documented as best-effort only until their matrix passes.
 
+The first hosted Tier-1 Linux host-contract matrix now targets exact
+digest-pinned x86-64 images for Ubuntu `24.04`, Debian `13`, Fedora `44`, and
+Rocky Linux `10`. Each job installs native distribution tools, binds its
+`/etc/os-release` to the matching manifest target, syntax-checks every server
+shell entry point, runs preflight with bounded Docker/age shims, builds the
+deterministic bundle, performs a checksum-pinned fresh install, verifies
+private runtime modes, checks firewall planning and intentional-stop recovery,
+and proves privileged user-service registration fails closed in a container.
+No matrix target is optional. This is packaging/lifecycle evidence only: it
+deliberately does not claim Docker daemon, LiveKit/media, real systemd, or
+host-firewall runtime conformance.
+
 ### Canonical architecture
 
 - Keep one versioned configuration schema and one set of container images,

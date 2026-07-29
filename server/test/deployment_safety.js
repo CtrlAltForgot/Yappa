@@ -15,6 +15,10 @@ const desktopWorkflows = desktopWorkflowPaths.map((workflowPath) =>
   fs.readFileSync(workflowPath, 'utf8'),
 );
 const desktopWorkflow = desktopWorkflows.join('\n');
+const serverHostWorkflow = fs.readFileSync(
+  path.join(workflowRoot, 'server_linux_conformance.yml'),
+  'utf8',
+);
 const releaseVersions = fs.readFileSync(
   path.join(repositoryRoot, '.github', 'release-versions.json'),
   'utf8',
@@ -46,6 +50,10 @@ const macosSodiumInstall = fs.readFileSync(
 );
 const serverBundleBuild = fs.readFileSync(
   path.join(releaseScriptRoot, 'build-server-bundle.sh'),
+  'utf8',
+);
+const serverHostContract = fs.readFileSync(
+  path.join(releaseScriptRoot, 'test-server-host-contract.sh'),
   'utf8',
 );
 const startup = fs.readFileSync(path.join(serverRoot, 'start-yappa.sh'), 'utf8');
@@ -553,6 +561,42 @@ for (const workflow of desktopWorkflows) {
   assert.match(workflow, /permissions:\s*\n\s+contents: read/);
   assert.match(workflow, /if: \$\{\{ always\(\) \}\}/);
 }
+for (const image of [
+  'ubuntu@sha256:',
+  'debian@sha256:',
+  'fedora@sha256:',
+  'rockylinux/rockylinux@sha256:',
+]) {
+  assert.ok(
+    serverHostWorkflow.includes(image),
+    `Server host matrix must digest-pin ${image}`,
+  );
+}
+assert.match(
+  serverHostWorkflow,
+  /actions\/checkout@[a-f0-9]{40}/,
+  'Server host matrix checkout action must be commit-pinned.',
+);
+assert.match(serverHostWorkflow, /test-server-host-contract\.sh/);
+for (const target of [
+  'ubuntu-lts-x64',
+  'debian-stable-x64',
+  'fedora-current-x64',
+  'rhel-compatible-current-x64',
+]) {
+  assert.match(serverHostWorkflow, new RegExp(target));
+}
+assert.match(serverHostContract, /publiclySupported/);
+assert.match(serverHostContract, /installCommandAvailable/);
+assert.match(
+  serverHostContract,
+  /does not claim Docker, media, systemd, or firewall runtime conformance/,
+);
+assert.doesNotMatch(
+  serverHostWorkflow,
+  /continue-on-error:\s*true/,
+  'No Tier-1 host may be optional in the matrix.',
+);
 const securityWorkflow = fs.readFileSync(
   path.join(workflowRoot, 'security.yml'),
   'utf8',

@@ -971,6 +971,15 @@ suite. This checksum is not presented as authenticity: detached signing, SBOM,
 trusted provenance, tagged publication, and manifest activation remain release
 gates.
 
+The hosted Linux host-contract workflow uses exact digest-pinned x86-64
+containers for Ubuntu 24.04, Debian 13, Fedora 44, and Rocky Linux 10. It binds
+each observed OS identity to the matching unpublished manifest target and
+requires shell/preflight/bundle/checksum/fresh-install/private-mode/firewall
+plan/stopped-recovery behavior on all four. The contract explicitly rejects
+promotion of public support or install-command flags and labels the result as
+packaging/lifecycle evidence, not Docker, systemd, firewall, TLS, TURN, or
+media conformance.
+
 Local development bundle installation now requires a caller-supplied full
 lowercase SHA-256, one versioned archive root matching embedded metadata, a
 brand-new absolute destination, and a private installed root. Extraction occurs
