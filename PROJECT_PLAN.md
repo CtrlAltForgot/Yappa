@@ -1273,19 +1273,37 @@ Current implementation slice:
   signing, notarization, detached installer/server signatures, binary/license
   SBOM review, final-asset verification, and explicit publication remain open
   as detailed in `RELEASE_ENGINEERING.md`.
+- Durable chat is the active implementation phase. The verified plaintext
+  foundation stores messages indefinitely until an authorized deletion, but
+  the client can currently retrieve only the newest bounded window because
+  `/api/channels/:channelId/messages` has no history cursor. The table also
+  lacks the required composite channel/message history index, client history
+  caching is not yet proven bounded and recoverable, and ordinary attachment
+  expiry still conflicts with the indefinite-retention contract. Threads are
+  not implemented. The first bounded slice is cursor-integrity-protected,
+  authorization-checked backward pagination with an indexed query, followed
+  by client load-older support and bounded cache behavior. Completion still
+  requires the storage-full, attachment, E2EE new-device history, scale, and
+  destructive restore evidence listed in `PERSISTENT_CHAT.md`.
 
 Next work, in order:
 
-1. Add bare-metal/reboot and sleep/network-transition evidence; validate the
+1. Implement and verify the first durable-history slice: authenticated stable
+   cursor pagination, the composite history index, client load-older behavior,
+   bounded recoverable local caching, and negative authorization/cursor tests.
+   Then continue the remaining `PERSISTENT_CHAT.md` storage, attachment,
+   encrypted-history continuity, capacity, scale, and restore gates.
+2. Add bare-metal/reboot and sleep/network-transition evidence; validate the
    Windows bridge on real WSL2; then implement and test Windows Firewall and
    background-supervision parity.
-2. Obtain hosted Linux desktop evidence and finish signed release engineering:
+3. Obtain hosted Linux desktop evidence and finish signed release engineering:
    production versions, platform/detached signing, binary/license SBOM review,
    final provenance verification, tagged publication,
    supported-version/vulnerability policy, and update/distribution behavior.
-3. Complete durable chat/history, threads, unspoofable cross-server
-   YUID/multi-device DMs, calendar, and the provider-neutral shared music room.
-4. Complete native networking/media E2EE, Windows/KDE screen-sharing soak,
+4. Complete threads, unspoofable cross-server YUID/multi-device DMs, calendar,
+   and the provider-neutral shared music room after their detailed security
+   and product contracts are approved.
+5. Complete native networking/media E2EE, Windows/KDE screen-sharing soak,
    cross-feature product readiness, exact-tag matrix, production deployment,
    and all user/security/handoff documentation.
 
