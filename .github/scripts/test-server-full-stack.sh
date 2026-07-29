@@ -11,6 +11,14 @@ INSTALL_ROOT="$TEMPORARY_ROOT/Yappa Server"
 cleanup() {
   local status=$?
   trap - EXIT INT TERM
+  if [[ "$status" -ne 0 ]]; then
+    docker ps --all >&2 || true
+    for container_name in \
+      newchat-node yappa-discovery yappa-livekit yappa-proxy; do
+      echo "Diagnostics for $container_name:" >&2
+      docker logs "$container_name" >&2 2>&1 || true
+    done
+  fi
   if [[ -f "$INSTALL_ROOT/docker-compose.yml" ]]; then
     docker compose \
       --project-directory "$INSTALL_ROOT" \
