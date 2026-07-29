@@ -18,9 +18,16 @@ RUN set -eux; \
         dnf clean all; \
         ;; \
       microdnf) \
-        microdnf install -y \
-          bash ca-certificates dbus firewalld iproute iptables-nft procps-ng \
-          shadow-utils systemd util-linux; \
+        for attempt in 1 2 3; do \
+          microdnf clean all; \
+          if microdnf install -y \
+            bash ca-certificates dbus firewalld iproute iptables-nft procps-ng \
+            shadow-utils systemd util-linux; then \
+            break; \
+          fi; \
+          test "$attempt" -lt 3; \
+          sleep "$((attempt * 2))"; \
+        done; \
         microdnf clean all; \
         ;; \
       *) exit 64 ;; \

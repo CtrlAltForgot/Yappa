@@ -60,7 +60,23 @@ loginctl enable-linger "$TEST_USER"
 if ! systemctl start "user@$TEST_UID.service"; then
   systemctl status "user@$TEST_UID.service" --no-pager || true
   journalctl -u "user@$TEST_UID.service" --no-pager -n 80 || true
-  exit 1
+  MANAGER_STATUS="$(
+    systemctl show "user@$TEST_UID.service" \
+      --property=ExecMainStatus --value
+  )"
+  if [[ "$MANAGER_STATUS" != 224 ]]; then
+    exit 1
+  fi
+  echo "Distro PAM wrapper is blocked by the hosted container boundary."
+  echo "Starting the same real unprivileged systemd user manager directly."
+  systemctl reset-failed "user@$TEST_UID.service"
+  install -d -m 700 -o "$TEST_UID" -g "$TEST_UID" "/run/user/$TEST_UID"
+  runuser -u "$TEST_USER" -- env \
+    HOME="$TEST_HOME" \
+    XDG_RUNTIME_DIR="/run/user/$TEST_UID" \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$TEST_UID/bus" \
+    "$(command -v systemd)" --user &
+  DIRECT_MANAGER_PID=$!
 fi
 RUNTIME_DIRECTORY="/run/user/$TEST_UID"
 for _ in {1..20}; do
@@ -69,6 +85,11 @@ for _ in {1..20}; do
 done
 [[ -S "$RUNTIME_DIRECTORY/bus" ]] ||
   { echo "Per-user systemd bus did not start." >&2; exit 1; }
+if [[ -n "${DIRECT_MANAGER_PID:-}" ]] &&
+  ! kill -0 "$DIRECT_MANAGER_PID" 2>/dev/null; then
+  echo "Direct unprivileged systemd user manager exited." >&2
+  exit 1
+fi
 
 run_as_test_user() {
   runuser -u "$TEST_USER" -- env \
