@@ -13,7 +13,8 @@ if ((EUID == 0)); then
   echo "Yappa user-service registration must not run as root." >&2
   exit 1
 fi
-for command_name in systemctl sha256sum sed mkdir chmod mv rm dirname; do
+for command_name in \
+  systemctl sha256sum sed stat mkdir chmod mv rm rmdir dirname; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     echo "Yappa service registration requires $command_name." >&2
     exit 1
@@ -22,6 +23,10 @@ done
 if [[ ! -f "$SCRIPT_ROOT/.env" || ! -d "$SCRIPT_ROOT/data" ||
   -L "$SCRIPT_ROOT/.env" || -L "$SCRIPT_ROOT/data" ]]; then
   echo "Yappa service registration requires a safe initialized installation." >&2
+  exit 1
+fi
+if [[ "$(stat -c '%u' "$SCRIPT_ROOT")" != "$EUID" ]]; then
+  echo "Yappa user-service registration requires installation ownership." >&2
   exit 1
 fi
 if [[ "$SCRIPT_ROOT" == *$'\n'* || "$SCRIPT_ROOT" == *$'\r'* ||
@@ -35,7 +40,8 @@ UNIT_DIRECTORY="$CONFIG_ROOT/systemd/user"
 PATH_DIGEST="$(printf '%s' "$SCRIPT_ROOT" | sha256sum | sed 's/[[:space:]].*$//')"
 UNIT_NAME="yappa-server-${PATH_DIGEST:0:16}.service"
 UNIT_PATH="$UNIT_DIRECTORY/$UNIT_NAME"
-REGISTRATION_PATH="$SCRIPT_ROOT/data/service-registration"
+HOST_STATE_ROOT="$SCRIPT_ROOT/.yappa-host-state"
+REGISTRATION_PATH="$HOST_STATE_ROOT/service-registration"
 
 systemd_quote() {
   local value="$1"
@@ -51,11 +57,18 @@ case "$ACTION" in
       echo "This Yappa installation already has service registration state." >&2
       exit 1
     fi
+    if [[ -e "$HOST_STATE_ROOT" ]] &&
+      { [[ ! -d "$HOST_STATE_ROOT" || -L "$HOST_STATE_ROOT" ]] ||
+        [[ "$(stat -c '%u:%a' "$HOST_STATE_ROOT")" != "$EUID:700" ]]; }; then
+      echo "Yappa host-state path is unsafe." >&2
+      exit 1
+    fi
     if ! systemctl --user show-environment >/dev/null 2>&1; then
       echo "No usable per-user systemd manager is available." >&2
       exit 1
     fi
     mkdir -p -m 700 "$UNIT_DIRECTORY"
+    mkdir -p -m 700 "$HOST_STATE_ROOT"
     TEMPORARY_UNIT="$UNIT_PATH.partial"
     trap 'rm -f -- "$TEMPORARY_UNIT"' EXIT INT TERM
     cat > "$TEMPORARY_UNIT" <<EOF
@@ -89,6 +102,7 @@ EOF
       ! systemctl --user enable --now "$UNIT_NAME"; then
       systemctl --user disable --now "$UNIT_NAME" >/dev/null 2>&1 || true
       rm -f -- "$UNIT_PATH" "$REGISTRATION_PATH"
+      rmdir --ignore-fail-on-non-empty "$HOST_STATE_ROOT" 2>/dev/null || true
       systemctl --user daemon-reload >/dev/null 2>&1 || true
       echo "Yappa service registration failed and was removed." >&2
       exit 1
@@ -112,6 +126,7 @@ EOF
     fi
     systemctl --user disable --now "$UNIT_NAME"
     rm -f -- "$UNIT_PATH" "$REGISTRATION_PATH"
+    rmdir --ignore-fail-on-non-empty "$HOST_STATE_ROOT" 2>/dev/null || true
     systemctl --user daemon-reload
     systemctl --user reset-failed "$UNIT_NAME" >/dev/null 2>&1 || true
     echo "Yappa sign-in autostart registration removed."

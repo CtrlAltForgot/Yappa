@@ -18,6 +18,11 @@ function makeInstallation(name) {
   const root = path.join(tempRoot, name);
   const bin = path.join(root, 'test-bin');
   fs.mkdirSync(path.join(root, 'data', 'attachments'), { recursive: true });
+  fs.mkdirSync(path.join(root, '.yappa-host-state'));
+  fs.writeFileSync(
+    path.join(root, '.yappa-host-state', 'service-registration'),
+    'host-only.service\n',
+  );
   fs.mkdirSync(bin);
   fs.copyFileSync(sourceScript, path.join(root, 'backup-yappa.sh'));
   fs.chmodSync(path.join(root, 'backup-yappa.sh'), 0o700);
@@ -138,6 +143,7 @@ try {
   assert.match(listing.stdout, /^data\/yappa\.db$/m);
   assert.match(listing.stdout, /^data\/attachments\/example\.bin$/m);
   assert.match(listing.stdout, /server-identity\.json$/m);
+  assert.doesNotMatch(listing.stdout, /\.yappa-host-state|service-registration/);
 
   const restoreTemp = path.join(successful.root, 'restore-temp');
   fs.mkdirSync(restoreTemp);

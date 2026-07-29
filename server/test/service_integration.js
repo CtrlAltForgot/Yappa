@@ -71,7 +71,7 @@ fi
   assert.match(installed.stdout, /sign-in autostart enabled/);
   const registration = path.join(
     installation,
-    'data',
+    '.yappa-host-state',
     'service-registration',
   );
   const unitName = fs.readFileSync(registration, 'utf8').trim();
@@ -109,6 +109,10 @@ fi
   assert.match(removed.stdout, /registration removed/);
   assert.equal(fs.existsSync(unitPath), false);
   assert.equal(fs.existsSync(registration), false);
+  assert.equal(
+    fs.existsSync(path.join(installation, '.yappa-host-state')),
+    false,
+  );
   assert.match(
     fs.readFileSync(systemctlLog, 'utf8'),
     /--user enable --now yappa-server-/,

@@ -81,6 +81,10 @@ const serviceInstaller = fs.readFileSync(
   path.join(serverRoot, 'service-yappa.sh'),
   'utf8',
 );
+const firewallInstaller = fs.readFileSync(
+  path.join(serverRoot, 'firewall-yappa.sh'),
+  'utf8',
+);
 const installManifest = JSON.parse(
   fs.readFileSync(path.join(serverRoot, 'install-manifest.json'), 'utf8'),
 );
@@ -162,6 +166,7 @@ for (const [name, script] of [
   ['rollback-yappa.sh', rollbackInstaller],
   ['uninstall-yappa.sh', uninstallInstaller],
   ['service-yappa.sh', serviceInstaller],
+  ['firewall-yappa.sh', firewallInstaller],
   ['verify-yappa-backup.sh', restoreVerifier],
 ]) {
   assert.match(script, /^umask 077$/m, `${name} must create private files`);
@@ -234,6 +239,29 @@ assert.doesNotMatch(
   serviceInstaller,
   /loginctl|enable-linger|sudo|pkexec/,
   'User autostart must not silently request persistence or privilege.',
+);
+assert.match(firewallInstaller, /if \(\(EUID != 0\)\)/);
+assert.match(firewallInstaller, /\/var\/lib\/yappa/);
+assert.match(firewallInstaller, /stat -c '%u:%a'/);
+assert.match(firewallInstaller, /A requested firewall rule already exists/);
+assert.match(firewallInstaller, /rollback_partial_apply/);
+assert.match(firewallInstaller, /ufw must already be active/);
+assert.match(firewallInstaller, /firewalld must already be running/);
+assert.match(firewallInstaller, /This script never invokes sudo/);
+assert.doesNotMatch(
+  firewallInstaller,
+  /\bsudo\b[^\n]*\b(ufw|firewall-cmd)\b|\bpkexec\b/,
+  'Firewall lifecycle must not invoke privilege escalation.',
+);
+assert.doesNotMatch(
+  firewallInstaller,
+  /\bufw\s+(--force\s+)?enable\b|systemctl[^\\n]*firewalld/,
+  'Yappa must not enable or start the host firewall implicitly.',
+);
+assert.match(
+  serverBundleBuild,
+  /-name '\.yappa-host-state'/,
+  'Host-local registration state must never enter a release bundle.',
 );
 assert.match(startup, /Public join address: \$\{YAPPA_ADVERTISED_ADDRESS\}/);
 assert.match(

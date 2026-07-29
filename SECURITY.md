@@ -1095,6 +1095,20 @@ Before public DMs, Yappa must additionally define and verify:
   and Docker-daemon recovery. Unattended boot, unhealthy-but-running recovery,
   sleep/network transitions, systemd distribution matrices, Unraid, and
   Windows service parity remain unproven.
+- Linux firewall lifecycle now separates unprivileged preview from explicit
+  root apply/remove and never runs `sudo`, `pkexec`, firewall enablement, or
+  default-policy changes. Configured ports and IPv4 CIDRs are strictly
+  validated; LAN rules are source-scoped, public rules omit raw backend,
+  raw LiveKit, LAN-proxy, and loopback-relay ports, and pre-existing rules are
+  refused rather than claimed. Partial application rolls back. Exact rule
+  ownership is stored only in root-owned mode-`0700` `/var/lib/yappa` with a
+  mode-`0600` registration; the user-writable install contains only a
+  non-authoritative removal marker. Host-local registration is excluded from
+  bundles and encrypted portable backups and carried only across same-host
+  upgrades. Tests cover plan shape, invalid ports/CIDRs/modes, privilege
+  refusal, forbidden exposure, state boundaries, uninstall refusal, and a
+  complete namespace-isolated root UFW apply/remove cycle. Real distribution
+  UFW/firewalld mutation/removal matrices remain required.
 - Ensure production secrets never live in the repository or images.
 - Add dependency auditing, secret scanning, static analysis, and reproducible
   release provenance to CI.

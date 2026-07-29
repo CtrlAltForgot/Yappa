@@ -58,6 +58,17 @@ OLD_STOPPED=true
   --no-start
 cp -a -- "$SCRIPT_ROOT/.env" "$RUNTIME_ROOT/.env"
 cp -a -- "$SCRIPT_ROOT/data" "$RUNTIME_ROOT/data"
+if [[ -e "$SCRIPT_ROOT/.yappa-host-state" ]]; then
+  if [[ ! -d "$SCRIPT_ROOT/.yappa-host-state" ||
+    -L "$SCRIPT_ROOT/.yappa-host-state" ]]; then
+    echo "Upgrade found an unsafe host-state directory." >&2
+    exit 1
+  fi
+  cp -a -- \
+    "$SCRIPT_ROOT/.yappa-host-state" \
+    "$RUNTIME_ROOT/.yappa-host-state"
+  chmod 700 "$RUNTIME_ROOT/.yappa-host-state"
+fi
 chmod 600 "$RUNTIME_ROOT/.env"
 chmod 700 "$RUNTIME_ROOT/data" "$RUNTIME_ROOT"
 

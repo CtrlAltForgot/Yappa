@@ -189,6 +189,9 @@ for (const command of [
   'service-install',
   'service-status',
   'service-remove',
+  'firewall-plan',
+  'firewall-apply',
+  'firewall-remove',
 ]) {
   assert.ok(
     manifest.lifecycleCommands.includes(command),
@@ -210,6 +213,9 @@ assert.deepEqual(manifest.implementedLifecycleCommands.linux, [
   'service-install',
   'service-status',
   'service-remove',
+  'firewall-plan',
+  'firewall-apply',
+  'firewall-remove',
   'verify',
   'verify-backup',
 ]);

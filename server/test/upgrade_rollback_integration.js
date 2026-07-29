@@ -75,6 +75,13 @@ function makeCurrentInstallation(name) {
   );
   fs.writeFileSync(path.join(root, '.env'), 'DB_PATH=./data/yappa.db\n');
   fs.writeFileSync(path.join(root, 'runtime-version'), 'old\n');
+  fs.mkdirSync(path.join(root, '.yappa-host-state'));
+  fs.chmodSync(path.join(root, '.yappa-host-state'), 0o700);
+  fs.writeFileSync(
+    path.join(root, '.yappa-host-state', 'service-registration'),
+    'test.service\n',
+    {mode: 0o600},
+  );
   const database = new Database(path.join(root, 'data', 'yappa.db'));
   database.exec(`
     CREATE TABLE schema_migrations (version INTEGER NOT NULL);
@@ -164,6 +171,17 @@ printf 'docker %s\\n' "$*" >> "$YAPPA_TEST_LOG"
   assert.equal(
     fs.readFileSync(path.join(successfulRoot, 'runtime-version'), 'utf8'),
     'new\n',
+  );
+  assert.equal(
+    fs.readFileSync(
+      path.join(
+        successfulRoot,
+        '.yappa-host-state',
+        'service-registration',
+      ),
+      'utf8',
+    ),
+    'test.service\n',
   );
   assert.equal(
     fs.readFileSync(

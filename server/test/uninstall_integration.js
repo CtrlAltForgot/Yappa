@@ -141,6 +141,25 @@ try {
     'unchanged\n',
   );
 
+  const firewallRoot = makeInstallation('firewall-registered');
+  fs.mkdirSync(path.join(firewallRoot, '.yappa-host-state'));
+  fs.writeFileSync(
+    path.join(
+      firewallRoot,
+      '.yappa-host-state',
+      'firewall-registration',
+    ),
+    'fixture\n',
+  );
+  const firewallRefusal = uninstall(
+    firewallRoot,
+    path.join(temporaryRoot, 'firewall.age'),
+    path.join(temporaryRoot, 'firewall-state'),
+  );
+  assert.notEqual(firewallRefusal.status, 0);
+  assert.match(firewallRefusal.stderr, /Remove Yappa firewall registration/);
+  assert.equal(fs.existsSync(firewallRoot), true);
+
   assert.equal(
     fs
       .readdirSync(temporaryRoot)

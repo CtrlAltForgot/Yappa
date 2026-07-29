@@ -65,6 +65,7 @@ RUNTIME_FILES=(
   "DEPLOYMENT.md"
   "Dockerfile"
   "Install-Yappa.ps1"
+  "firewall-yappa.sh"
   "MIGRATIONS.md"
   "backup-yappa.sh"
   "docker-compose.yml"
@@ -101,6 +102,7 @@ for relative_path in "${RUNTIME_FILES[@]}"; do
 done
 for executable_name in \
   install-yappa.sh \
+  firewall-yappa.sh \
   start-yappa.sh \
   setup-domain.sh \
   backup-yappa.sh \
@@ -127,7 +129,8 @@ chmod 0644 "$STAGING_ROOT/BUILD-METADATA.json"
 
 if find "$STAGING_ROOT" \
   \( -name '.env' -o -name 'livekit.yaml' -o -name 'node_modules' \
-     -o -name 'data' -o -name '*.db' -o -name '*.age' \) \
+     -o -name 'data' -o -name '.yappa-host-state' \
+     -o -name '*.db' -o -name '*.age' \) \
   -print -quit |
   grep -q .; then
   echo "Server bundle contains generated state, secrets, or dependencies." >&2

@@ -197,6 +197,23 @@ opt-in registration/status/removal, duplicate refusal, failed-enable cleanup,
 and uninstall refusal while registered. Unraid, Windows, unattended boot,
 sleep/network recovery, and unhealthy-but-running remediation remain open.
 
+Linux firewall preview/apply/remove is now implemented for active UFW and
+firewalld hosts. Preview is unprivileged; apply/remove require an operator to
+launch the command as root and never invoke privilege escalation themselves.
+Rules are derived from validated configured ports and address mode. LAN mode
+requires an explicit IPv4 CIDR and scopes all access; public mode exposes only
+the manifest's HTTP/HTTPS, authenticated TURN, ICE/TCP, and bounded media UDP,
+with optional CIDR-scoped signed discovery. Existing rules cause refusal
+rather than ambiguous ownership, partial application rolls back, and exact
+owned rules live in root-owned `/var/lib/yappa` state. UFW/firewalld are never
+enabled or started implicitly, default policies and unrelated rules remain
+untouched, and uninstall refuses until owned rules are removed. Host-local
+registration is excluded from portable backups/restores and bundles but
+preserved across same-host upgrades. Plan and privilege-boundary tests pass;
+a user-namespace test also exercises complete root-owned UFW apply/removal and
+exact cleanup without touching the real host. Real UFW/firewalld distribution
+matrices remain required.
+
 ## Supported-Host Target
 
 ### Tier 1: validated public-release hosts

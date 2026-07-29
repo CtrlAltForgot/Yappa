@@ -200,6 +200,41 @@ restart. This does not yet detect a process that remains alive but unhealthy;
 bounded health-based recovery and sleep/network-change tests remain release
 work.
 
+## Explicit host firewall lifecycle
+
+Preview firewall changes as an ordinary user before authorizing anything:
+
+```bash
+./install-yappa.sh firewall-plan --backend ufw
+./install-yappa.sh firewall-plan \
+  --backend firewalld \
+  --lan-cidr 192.168.1.0/24
+```
+
+LAN mode requires an explicit IPv4 CIDR and scopes every rule to it. Public
+mode opens only the configured HTTP/HTTPS, authenticated TURN, ICE/TCP, and
+media UDP range; optional signed LAN discovery is CIDR-scoped. Raw backend
+TCP `4100`, raw LiveKit TCP `7880`, the LAN-only proxy outside LAN mode, and
+loopback discovery UDP `41201` are never opened.
+
+Application/removal are separate explicit root actions:
+
+```bash
+./install-yappa.sh firewall-apply \
+  --backend ufw \
+  --lan-cidr 192.168.1.0/24
+./install-yappa.sh firewall-remove
+```
+
+The script never invokes `sudo`, asks for a password, enables UFW, starts
+firewalld, changes default policy, or touches unrelated rules. It refuses a
+requested rule that already exists because ownership would be ambiguous,
+rolls back partial application, and records exact owned rules in a
+root-owned mode-`0600` file under mode-`0700` `/var/lib/yappa`. A non-secret
+local marker prevents uninstall until rules are removed. Host-local service
+and firewall state is excluded from encrypted portable backups and bundles;
+it is preserved only across same-host upgrades.
+
 ## Start a public server
 
 Run:

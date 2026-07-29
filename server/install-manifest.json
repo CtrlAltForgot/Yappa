@@ -206,7 +206,10 @@
     "uninstall",
     "service-install",
     "service-status",
-    "service-remove"
+    "service-remove",
+    "firewall-plan",
+    "firewall-apply",
+    "firewall-remove"
   ],
   "implementedLifecycleCommands": {
     "linux": [
@@ -224,6 +227,9 @@
       "service-install",
       "service-status",
       "service-remove",
+      "firewall-plan",
+      "firewall-apply",
+      "firewall-remove",
       "verify",
       "verify-backup"
     ],

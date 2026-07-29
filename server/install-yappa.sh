@@ -34,6 +34,11 @@ Usage:
   ./install-yappa.sh service-install
   ./install-yappa.sh service-status
   ./install-yappa.sh service-remove
+  ./install-yappa.sh firewall-plan --backend ufw|firewalld \
+    [--lan-cidr 192.168.1.0/24]
+  ./install-yappa.sh firewall-apply --backend ufw|firewalld \
+    [--lan-cidr 192.168.1.0/24]
+  ./install-yappa.sh firewall-remove
 
 This development installer operates only on the locally present server tree or
 an explicitly supplied local bundle and checksum. Remote installation remains
@@ -529,6 +534,46 @@ case "$COMMAND" in
       exit 1
     fi
     "$SCRIPT_ROOT/service-yappa.sh" "${COMMAND#service-}"
+    ;;
+  firewall-plan | firewall-apply)
+    FIREWALL_BACKEND=""
+    LAN_CIDR=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --backend | --lan-cidr)
+          if [[ $# -lt 2 ]]; then
+            echo "$1 requires a value." >&2
+            exit 1
+          fi
+          case "$1" in
+            --backend) FIREWALL_BACKEND="$2" ;;
+            --lan-cidr) LAN_CIDR="$2" ;;
+          esac
+          shift
+          ;;
+        *)
+          echo "Unknown firewall option: $1" >&2
+          usage
+          exit 1
+          ;;
+      esac
+      shift
+    done
+    require_initialized
+    if [[ ! "$FIREWALL_BACKEND" =~ ^(ufw|firewalld)$ ]]; then
+      echo "Firewall planning/application requires --backend ufw or firewalld." >&2
+      exit 1
+    fi
+    "$SCRIPT_ROOT/firewall-yappa.sh" \
+      "${COMMAND#firewall-}" "$FIREWALL_BACKEND" "$LAN_CIDR"
+    ;;
+  firewall-remove)
+    require_initialized
+    if [[ $# -ne 0 ]]; then
+      usage
+      exit 1
+    fi
+    "$SCRIPT_ROOT/firewall-yappa.sh" remove
     ;;
   uninstall)
     BACKUP_PATH=""

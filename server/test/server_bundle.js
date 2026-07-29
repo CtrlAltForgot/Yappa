@@ -75,6 +75,7 @@ try {
     'yappa-server-0.1.0-dev/upgrade-yappa.sh',
     'yappa-server-0.1.0-dev/uninstall-yappa.sh',
     'yappa-server-0.1.0-dev/service-yappa.sh',
+    'yappa-server-0.1.0-dev/firewall-yappa.sh',
     'yappa-server-0.1.0-dev/verify-yappa-install.sh',
     'yappa-server-0.1.0-dev/docker-compose.yml',
     'yappa-server-0.1.0-dev/src/server.js',
@@ -85,7 +86,7 @@ try {
   for (const entry of listing) {
     assert.doesNotMatch(
       entry,
-      /(^|\/)(\.env|livekit\.yaml|node_modules|data)(\/|$)|\.(db|age)$/,
+      /(^|\/)(\.env|livekit\.yaml|node_modules|data|\.yappa-host-state)(\/|$)|\.(db|age)$/,
       `Bundle contains generated or secret state: ${entry}`,
     );
     assert.equal(

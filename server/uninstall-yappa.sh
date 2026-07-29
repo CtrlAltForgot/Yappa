@@ -21,8 +21,12 @@ if [[ -e "$BACKUP" || -e "$PRESERVE_DIRECTORY" ||
   echo "Uninstall requires fresh backup/preservation paths and writable parents." >&2
   exit 1
 fi
-if [[ -e "$SCRIPT_ROOT/data/service-registration" ]]; then
+if [[ -e "$SCRIPT_ROOT/.yappa-host-state/service-registration" ]]; then
   echo "Remove Yappa service registration before uninstalling." >&2
+  exit 1
+fi
+if [[ -e "$SCRIPT_ROOT/.yappa-host-state/firewall-registration" ]]; then
+  echo "Remove Yappa firewall registration before uninstalling." >&2
   exit 1
 fi
 for retained_suffix in rollback pre-rollback failed-upgrade; do
