@@ -109,10 +109,12 @@ contract.
 - Encrypted client history needs the same explicit bounded-window UX and
   honest older-history/recovery states; its server delivery cursor alone does
   not complete that product behavior.
-- Explicit deletion and authenticated restored-download behavior still need a
-  complete multi-page exercise; linked row/file presence, backup, destructive
-  restore, and full-file digest integrity now have representative-scale
-  evidence.
+- Explicit deletion still needs a complete multi-page exercise.
+  Authenticated restored-download behavior now has representative-scale
+  evidence: after destructive fresh restore, the running backend rejects
+  unauthenticated history, accepts a restored hashed session, issues an
+  account-bound signed grant from restored history, and returns attachment
+  bytes matching their pre-backup digest.
 - MLS gives a newly admitted device access from its admitted epoch forward;
   server-retained ciphertext alone does not give that device authenticated
   access to earlier plaintext. Secure history transfer/recovery semantics are

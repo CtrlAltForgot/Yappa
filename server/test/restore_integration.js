@@ -3,12 +3,13 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const {spawnSync} = require('child_process');
+const {spawn, spawnSync} = require('child_process');
 const Database = require('better-sqlite3');
 const {
   createDb,
   createUserWithRole,
   nowIso,
+  sessionTokenStorageValue,
 } = require('../src/db');
 
 const repositoryRoot = path.resolve(__dirname, '..', '..');
@@ -23,6 +24,7 @@ const temporaryRoot = fs.mkdtempSync(
   path.join(os.tmpdir(), 'yappa-restore-test-'),
 );
 const fakeAge = path.join(temporaryRoot, 'age');
+const scaleSessionToken = 'restore-scale-authenticated-session-token';
 
 function run(command, args, options = {}) {
   return spawnSync(command, args, {
@@ -38,6 +40,50 @@ function digest(filePath) {
     .createHash('sha256')
     .update(fs.readFileSync(filePath))
     .digest('hex');
+}
+
+function wait(milliseconds) {
+  Atomics.wait(
+    new Int32Array(new SharedArrayBuffer(4)),
+    0,
+    0,
+    milliseconds,
+  );
+}
+
+function curlStatus(url, headers = []) {
+  const response = spawnSync(
+    'curl',
+    [
+      '--silent',
+      '--show-error',
+      '--output',
+      '/dev/null',
+      '--write-out',
+      '%{http_code}',
+      ...headers.flatMap((header) => ['--header', header]),
+      url,
+    ],
+    {encoding: 'utf8'},
+  );
+  assert.equal(response.status, 0, response.stderr);
+  return Number(response.stdout);
+}
+
+function curlJson(url, headers = []) {
+  const response = spawnSync(
+    'curl',
+    [
+      '--fail',
+      '--silent',
+      '--show-error',
+      ...headers.flatMap((header) => ['--header', header]),
+      url,
+    ],
+    {encoding: 'utf8'},
+  );
+  assert.equal(response.status, 0, response.stderr);
+  return JSON.parse(response.stdout);
 }
 
 function makeBackup(name, schemaVersion = 3, envDatabase = './data/yappa.db') {
@@ -83,14 +129,12 @@ function makeBackup(name, schemaVersion = 3, envDatabase = './data/yappa.db') {
 function makeScaleBackup() {
   const source = path.join(temporaryRoot, 'scale-source');
   const backup = path.join(temporaryRoot, 'scale.tar.gz.age');
-  const attachmentsRoot = path.join(source, 'data', 'attachments');
   const identityDirectory = path.join(
     source,
     'data',
     'servers',
     'scale-server',
   );
-  fs.mkdirSync(attachmentsRoot, {recursive: true});
   fs.mkdirSync(identityDirectory, {recursive: true});
   fs.writeFileSync(
     path.join(source, '.env'),
@@ -112,10 +156,36 @@ function makeScaleBackup() {
     passwordHash: 'unused-test-hash',
     role: 'owner',
   });
+  const serverId = database
+    .prepare('SELECT server_id FROM server_config WHERE id = 1')
+    .pluck()
+    .get();
+  const attachmentsRoot = path.join(
+    source,
+    'data',
+    'servers',
+    serverId,
+    'attachments',
+  );
+  fs.mkdirSync(attachmentsRoot, {recursive: true});
   const channel = database
     .prepare("SELECT id FROM channels WHERE type = 'text' ORDER BY id LIMIT 1")
     .get();
   const createdAt = nowIso();
+  database.prepare(`
+    INSERT INTO sessions (
+      token, user_id, created_at, last_seen_at, expires_at, idle_expires_at,
+      device_name
+    )
+    VALUES (?, ?, ?, ?, ?, ?, 'Restored download fixture')
+  `).run(
+    sessionTokenStorageValue(scaleSessionToken),
+    owner.id,
+    createdAt,
+    createdAt,
+    new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+  );
   const insertMessage = database.prepare(`
     INSERT INTO messages (channel_id, user_id, content, created_at)
     VALUES (?, ?, ?, ?)
@@ -138,9 +208,9 @@ function makeScaleBackup() {
         `durable scale message ${index.toString().padStart(4, '0')}`,
         createdAt,
       );
-      if (index < 128) {
+      if (index >= 5000 - 128) {
         const storedName = `scale-${index.toString().padStart(3, '0')}.bin`;
-        const relativePath = `attachments/${storedName}`;
+        const relativePath = `${serverId}/attachments/${storedName}`;
         const bytes = Buffer.alloc(64 * 1024);
         bytes.writeUInt32BE(index, 0);
         crypto
@@ -151,7 +221,7 @@ function makeScaleBackup() {
         fs.writeFileSync(path.join(attachmentsRoot, storedName), bytes);
         attachmentDigests.set(storedName, digest(path.join(attachmentsRoot, storedName)));
         insertAttachment.run(
-          'scale-server',
+          serverId,
           channel.id,
           message.lastInsertRowid,
           owner.id,
@@ -201,7 +271,7 @@ fi
   assert.equal(backedUp.status, 0, backedUp.stderr || backedUp.stdout);
   assert.equal(fs.statSync(backup).mode & 0o777, 0o600);
   fs.rmSync(source, {recursive: true, force: true});
-  return {backup, attachmentDigests};
+  return {backup, attachmentDigests, channelId: channel.id, serverId};
 }
 
 function restore(backup, bundle, checksum, destination) {
@@ -355,12 +425,94 @@ cat > "$output"
         path.join(
           scaleDestination,
           'data',
+          'servers',
+          scale.serverId,
           'attachments',
           storedName,
         ),
       ),
       expectedDigest,
     );
+  }
+
+  const runtimePort = 4300 + crypto.randomInt(500);
+  const runtimeBaseUrl = `http://127.0.0.1:${runtimePort}`;
+  const restoredRuntime = spawn(process.execPath, ['src/server.js'], {
+    cwd: serverRoot,
+    env: {
+      ...process.env,
+      PORT: String(runtimePort),
+      DB_PATH: path.join(scaleDestination, 'data', 'yappa.db'),
+      DATA_ROOT: path.join(scaleDestination, 'data', 'servers'),
+      SESSION_SECRET: 'restore-runtime-session-secret',
+      ATTACHMENT_GRANT_SECRET: 'restore-runtime-attachment-grant-secret',
+      BCRYPT_COST: '10',
+      NEW_ACCOUNT_PASSWORD_MIN_LENGTH: '10',
+      CORS_ORIGIN: '',
+    },
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
+  let runtimeErrors = '';
+  restoredRuntime.stderr.on('data', (chunk) => {
+    runtimeErrors += chunk.toString();
+  });
+  try {
+    let healthy = false;
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      const probe = spawnSync(
+        'curl',
+        ['--fail', '--silent', `${runtimeBaseUrl}/health`],
+        {encoding: 'utf8'},
+      );
+      if (probe.status === 0) {
+        healthy = true;
+        break;
+      }
+      wait(100);
+    }
+    assert.equal(healthy, true, runtimeErrors || 'Restored server did not start.');
+    const historyUrl =
+      `${runtimeBaseUrl}/api/channels/${scale.channelId}/messages?limit=100`;
+    assert.equal(curlStatus(historyUrl), 401);
+    const authorization = `Authorization: Bearer ${scaleSessionToken}`;
+    const history = curlJson(historyUrl, [authorization]);
+    assert.equal(history.messages.length, 100);
+    const restoredAttachment = history.messages
+      .flatMap((message) => message.attachments)
+      .at(0);
+    assert.ok(restoredAttachment);
+    assert.match(
+      restoredAttachment.url,
+      /^\/api\/attachments\/[0-9]+\/content\?/,
+    );
+    const downloaded = path.join(temporaryRoot, 'restored-download.bin');
+    const download = spawnSync(
+      'curl',
+      [
+        '--silent',
+        '--show-error',
+        '--output',
+        downloaded,
+        '--write-out',
+        '%{http_code}',
+        `${runtimeBaseUrl}${restoredAttachment.url}`,
+      ],
+      {encoding: 'utf8'},
+    );
+    assert.equal(download.status, 0, download.stderr);
+    assert.equal(
+      Number(download.stdout),
+      200,
+      fs.readFileSync(downloaded, 'utf8'),
+    );
+    assert.equal(fs.statSync(downloaded).size, restoredAttachment.sizeBytes);
+    assert.equal(
+      digest(downloaded),
+      scale.attachmentDigests.get(restoredAttachment.storedName),
+    );
+  } finally {
+    restoredRuntime.kill('SIGTERM');
+    wait(300);
   }
 
   const wrongDigestDestination = path.join(temporaryRoot, 'wrong-digest');

@@ -979,8 +979,14 @@ Verified destructive durable-chat restore increment, 2026-07-28:
   exact first/last message sentinels and all active links, and all 128 files
   reproduce their independently recorded SHA-256 digests.
 
-This is deterministic destructive-restore evidence, not a substitute for a
-production backup drill or authenticated post-restore client download test.
+The destructive-restore test now also starts the restored backend and exercises
+the live authorization path. Unauthenticated history is rejected; a restored
+hashed session retrieves message history, receives an account-bound signed
+attachment grant, and downloads bytes matching the independently recorded
+pre-backup digest. The fixture uses the production server-scoped attachment
+directory and server-root-relative metadata. The complete backend suite
+passes. This remains deterministic local evidence, not a substitute for a
+production backup drill.
 
 Encrypted-history recovery design decision, 2026-07-28:
 

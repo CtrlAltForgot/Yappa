@@ -1292,8 +1292,9 @@ Current implementation slice:
   suite, and the complete backend/security/deployment-policy suite pass
   locally. Production deployment verification is unavailable because approved
   Unraid SSH access is still unavailable. Forward reconnect catch-up,
-  authenticated post-restore download validation, encrypted new-device
-  history, and broader scale evidence remain open. Durable writes now reserve
+  encrypted new-device history, and broader scale evidence remained open at
+  this increment; authenticated post-restore download validation is now
+  complete below. Durable writes now reserve
   validated filesystem headroom (512 MiB
   critical, 2 GiB warning by default), fail with retryable HTTP 507 when
   capacity is critical/unavailable, and translate real SQLite/filesystem-full
@@ -1319,7 +1320,14 @@ Current implementation slice:
   runs the production encrypted backup script, deletes the source installation,
   fresh-restores it, passes SQLite integrity/foreign-key checks, and verifies
   every restored file against its pre-backup SHA-256 digest. Production backup
-  drill and authenticated post-restore download evidence remain.
+  drill remains. Authenticated post-restore download evidence now passes:
+  after destructive fresh restore, the test starts the restored backend,
+  rejects unauthenticated history, accepts a restored hashed session, obtains
+  an account-bound signed attachment grant through restored message history,
+  and downloads bytes matching the independently recorded pre-backup SHA-256
+  digest. Building this evidence corrected the scale fixture from a legacy
+  flat attachment path to the production server-scoped storage layout and
+  server-root-relative database metadata.
   Encrypted history recovery now has a selected architecture in
   `ENCRYPTED_HISTORY_RECOVERY.md`: explicit same-account transfer from an
   existing device to a dedicated YUID-bound destination X25519 key, using a
@@ -1349,9 +1357,10 @@ Current implementation slice:
   YUID-authorized MLS credential, rechecks mutation ownership, rejects
   conflicting sequence/event overlap and transfer-id replay, and atomically
   persists the merged events and recovery receipt before consuming the relay
-  copy. Recovery UI, the remaining negative/scale/real-device matrix,
-  production deployment, and an authenticated post-restore client download
-  remain open. Flutter analysis and all 71 client tests pass with the complete
+  copy. Recovery UI, the remaining negative/scale/real-device matrix, and
+  production deployment remained open at this increment; authenticated
+  post-restore download evidence is now complete below. Flutter analysis and
+  all 71 client tests pass with the complete
   source-to-destination coordinator increment.
   A real-channel contract defect found during UI wiring is corrected:
   application history may be sparse in MLS delivery sequence because commits
@@ -1426,9 +1435,8 @@ Current implementation slice:
 
 Next work, in order:
 
-1. Continue `PERSISTENT_CHAT.md` with the remaining encrypted-history
-   adversarial/scale matrix and real two-device evidence, then complete authenticated
-   restored-download evidence,
+1. Continue `PERSISTENT_CHAT.md` with real two-device encrypted-history
+   evidence and a production backup/restore drill,
    real constrained-filesystem/concurrency capacity evidence, scale, and
    restore gates. Deploy and verify these history changes on Unraid when
    approved access becomes available.
