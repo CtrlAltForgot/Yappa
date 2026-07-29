@@ -11,6 +11,7 @@ import '../data/api_client.dart';
 import '../data/audio_preferences.dart';
 import '../data/encrypted_attachment_failure.dart';
 import '../data/history_recovery_identity.dart';
+import '../data/history_recovery_channel_controller.dart';
 import '../data/history_recovery_key_service.dart';
 import '../data/mic_input_service.dart';
 import '../data/media_device_identity_service.dart';
@@ -30,6 +31,7 @@ import '../models/message_model.dart';
 import '../models/server_model.dart';
 import '../models/server_permissions.dart';
 import '../models/voice_models.dart';
+import '../features/chat/history_recovery_notice.dart';
 
 class AppState extends ChangeNotifier {
   static const _serversKey = 'yappa_servers';
@@ -80,6 +82,8 @@ class AppState extends ChangeNotifier {
   final Map<String, Future<MlsServerRuntime>> _mlsRuntimeFuturesByServerId = {};
   final Map<String, MlsChannelRuntime> _mlsChannelsByChannelId = {};
   final Map<String, MlsChannelStartup> _mlsStartupByChannelId = {};
+  final Map<String, HistoryRecoveryChannelController>
+  _historyRecoveryByChannelId = {};
 
   final List<ChatServer> _servers;
   final List<ChatChannel> _channels;
@@ -2858,6 +2862,34 @@ class AppState extends ChangeNotifier {
   MlsChannelStartup? encryptedChannelStartup(String channelId) =>
       _mlsStartupByChannelId[channelId];
 
+  HistoryRecoveryUiState? encryptedHistoryRecoveryState(String channelId) =>
+      _historyRecoveryByChannelId[channelId]?.state;
+
+  Future<void> performEncryptedHistoryRecoveryAction(
+    String channelId,
+    String? destinationDeviceId,
+  ) async {
+    final controller = _historyRecoveryByChannelId[channelId];
+    final runtime = _mlsChannelsByChannelId[channelId];
+    if (controller == null || runtime == null) {
+      throw StateError('Encrypted-history recovery is not ready.');
+    }
+    try {
+      final operation = controller.perform(destinationDeviceId);
+      notifyListeners();
+      await operation;
+      _messagesByChannel[channelId] = await runtime.projectedMessages();
+      _lastError = null;
+      await _persist();
+    } catch (_) {
+      _lastError =
+          'Encrypted history recovery failed. Existing history was preserved.';
+      rethrow;
+    } finally {
+      notifyListeners();
+    }
+  }
+
   MlsChannelRuntime _requireReadyEncryptedChannel(String channelId) {
     final runtime = _mlsChannelsByChannelId[channelId];
     final startup = _mlsStartupByChannelId[channelId];
@@ -2895,8 +2927,43 @@ class AppState extends ChangeNotifier {
     if (startup.readiness == MlsChannelReadiness.ready) {
       _messagesByChannel[channel.id] = await encrypted.projectedMessages();
       _refreshedMessageChannelIds.add(channel.id);
+      final recovery =
+          _historyRecoveryByChannelId[channel.id] ??
+          HistoryRecoveryChannelController(
+            serverId: server.id,
+            channelId: channel.id,
+            baseUrl: server.address,
+            token: token,
+            localDeviceId: runtime.localDevice.deviceId,
+            api: _api,
+            eventStore: encrypted.eventStore,
+            recoveryIdentity: _historyRecoveryIdentity,
+            yuidIdentity: _yuidIdentity,
+            historicalCredentials:
+                runtime.keyPackages.fetchVerifiedHistoricalDirectory,
+            verifiedRecoveryKeys: () => HistoryRecoveryKeyService(
+              api: _api,
+              recoveryIdentity: _historyRecoveryIdentity,
+              yuidIdentity: _yuidIdentity,
+              baseUrl: server.address,
+              token: token,
+              serverId: server.id,
+              deviceId: runtime.localDevice.deviceId,
+            ).registerAndVerify(),
+          );
+      _historyRecoveryByChannelId[channel.id] = recovery;
+      try {
+        await recovery.refresh();
+      } catch (_) {
+        recovery.state = const HistoryRecoveryUiState(
+          phase: HistoryRecoveryUiPhase.failed,
+          safeError:
+              'Yappa could not check encrypted-history recovery. Your existing history is unchanged.',
+        );
+      }
     } else {
       _refreshedMessageChannelIds.remove(channel.id);
+      _historyRecoveryByChannelId.remove(channel.id);
     }
     notifyListeners();
   }
@@ -2946,6 +3013,9 @@ class AppState extends ChangeNotifier {
       (_, channel) => channel.server.serverId == serverId,
     );
     _mlsStartupByChannelId.removeWhere(
+      (channelId, _) => _channelById(channelId)?.serverId == serverId,
+    );
+    _historyRecoveryByChannelId.removeWhere(
       (channelId, _) => _channelById(channelId)?.serverId == serverId,
     );
   }
@@ -3037,6 +3107,16 @@ class AppState extends ChangeNotifier {
             token: currentToken,
             channel: channel,
           ).catchError((_) {}),
+        );
+      },
+      onHistoryRecoveryReady: (channelId, _) {
+        final controller = _historyRecoveryByChannelId[channelId];
+        if (controller == null) return;
+        unawaited(
+          controller
+              .refresh()
+              .then((_) => notifyListeners())
+              .catchError((_) {}),
         );
       },
       onConnected: () {

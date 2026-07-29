@@ -404,6 +404,11 @@ Recovery `eventCount` is intentionally distinct from MLS delivery-range width.
 Commits, Welcomes, and other non-application deliveries create authenticated
 sequence gaps and are not fabricated as application history records.
 
+The live chat surface now connects recovery discovery, exact destination
+selection, explicit source/destination confirmation, authenticated merge, and
+safe status reporting. A destination-ready realtime signal is scoped to the
+exact device and is only a prompt to re-fetch authoritative data.
+
 This limitation must be visible before a user removes their last functioning
 device. Account recovery restores account access, not old E2EE content. If no
 authorized device or encrypted client export retains the old epochs, the

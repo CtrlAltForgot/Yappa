@@ -480,6 +480,16 @@ class _ShellScreenState extends State<ShellScreen> {
                                   : null,
                               textE2eeStartup: widget.appState
                                   .encryptedChannelStartup(selectedChannel.id),
+                              historyRecovery: widget.appState
+                                  .encryptedHistoryRecoveryState(
+                                    selectedChannel.id,
+                                  ),
+                              onHistoryRecoveryAction: (destinationDeviceId) =>
+                                  widget.appState
+                                      .performEncryptedHistoryRecoveryAction(
+                                        selectedChannel.id,
+                                        destinationDeviceId,
+                                      ),
                               members: widget.appState.selectedMembers,
                               voiceMembers: isVoiceDeck
                                   ? widget.appState.membersForVoiceDeck(

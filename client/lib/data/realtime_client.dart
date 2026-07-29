@@ -62,6 +62,8 @@ typedef RealtimeMediaRoomStateCallback = void Function(MediaRoomState state);
 typedef RealtimeMediaEnvelopeCallback =
     void Function(MediaKeyEnvelope envelope);
 typedef RealtimeMlsDeliveryCallback = void Function(MlsDeliveryMessage message);
+typedef RealtimeHistoryRecoveryReadyCallback =
+    void Function(String channelId, String transferId);
 
 class VoiceJoinResult {
   final String channelId;
@@ -92,6 +94,7 @@ class RealtimeClient {
   final RealtimeMediaRoomStateCallback? onMediaRoomState;
   final RealtimeMediaEnvelopeCallback? onMediaEnvelope;
   final RealtimeMlsDeliveryCallback? onMlsDelivery;
+  final RealtimeHistoryRecoveryReadyCallback? onHistoryRecoveryReady;
 
   io.Socket? _socket;
   Timer? _presencePingTimer;
@@ -114,6 +117,7 @@ class RealtimeClient {
     this.onMediaRoomState,
     this.onMediaEnvelope,
     this.onMlsDelivery,
+    this.onHistoryRecoveryReady,
   });
 
   bool get isConnected => _socket?.connected == true;
@@ -335,6 +339,19 @@ class RealtimeClient {
         onMlsDelivery!(MlsDeliveryMessage.fromJson(_asMap(map['message'])));
       } catch (error) {
         onError('Failed to parse encrypted message delivery: $error');
+      }
+    });
+
+    socket.on('history-recovery:ready', (payload) {
+      try {
+        if (onHistoryRecoveryReady == null) return;
+        final map = _asMap(payload);
+        onHistoryRecoveryReady!(
+          _readString(map['channelId']),
+          _readString(map['transferId']),
+        );
+      } catch (error) {
+        onError('Failed to parse encrypted-history recovery update: $error');
       }
     });
 

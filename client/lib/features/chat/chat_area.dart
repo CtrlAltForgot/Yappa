@@ -50,7 +50,8 @@ class ChatArea extends StatefulWidget {
   final bool canDeleteAnyMessage;
   final MlsChannelStartup? textE2eeStartup;
   final HistoryRecoveryUiState? historyRecovery;
-  final Future<void> Function()? onHistoryRecoveryAction;
+  final Future<void> Function(String? destinationDeviceId)?
+  onHistoryRecoveryAction;
 
   final List<Member> members;
   final List<Member> voiceMembers;

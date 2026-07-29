@@ -973,6 +973,9 @@ async function run() {
     ).status,
     201,
   );
+  const recoveryDestinationRealtime = await connectRealtime(
+    ownerRecoveryDestination.token,
+  );
   const recoveryTransferId = `recovery_${crypto
     .randomBytes(16)
     .toString('base64url')}`;
@@ -1103,6 +1106,14 @@ async function run() {
   );
   assert.equal(finalizedTransferResponse.status, 200);
   assert.equal((await finalizedTransferResponse.json()).finalized, true);
+  assert.deepEqual(
+    await recoveryDestinationRealtime.nextEvent('history-recovery:ready'),
+    {
+      channelId: encryptedChannelId,
+      transferId: recoveryTransferId,
+    },
+  );
+  recoveryDestinationRealtime.close();
   await expectStatus(
     `/api/mls/history-recovery/transfers/${recoveryTransferId}/chunks/0`,
     404,

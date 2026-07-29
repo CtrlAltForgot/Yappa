@@ -185,6 +185,11 @@ contract.
   signed range width and application-event count are distinct, while exported
   application sequences must remain strictly increasing and within the exact
   authenticated boundaries.
+- Ready encrypted channels now expose live recovery discovery and explicit
+  source/destination confirmation. A finalized relay wakes only the exact
+  destination device, which re-fetches authoritative metadata before merge.
+  Existing projected history changes only after the encrypted store commits.
+  Restart-durable source upload state and real two-device evidence remain.
 - Transfers bind account/YUID, destination device key, server, channel, source
   device, history range, and version; use chunk integrity and resumable
   cursors; and reject replay, rollback, substitution, and removed devices.

@@ -1035,6 +1035,22 @@ encrypted store commits events plus the manifest receipt in one restart-safe
 write before relay consumption. Recovery UI, the remaining adversarial/scale
 matrix, real-device evidence, and a release claim remain incomplete.
 
+Live recovery UI increment, 2026-07-28:
+
+- AppState creates a recovery controller only for a ready E2EE channel and
+  obtains candidate keys through the fully verified same-account directory.
+- Sharing requires explicit selection and confirmation of the exact
+  destination device and signed application-event range. Receiving requires a
+  second explicit confirmation.
+- Finalization emits only routing identifiers to sockets belonging to the
+  exact authenticated destination device. The client refreshes authoritative
+  transfer data rather than trusting the notification as recovery authority.
+- UI failures use bounded text and preserve existing history. Restart-durable
+  source ciphertext/outbox state and the remaining adversarial/real-device
+  evidence are still required.
+- Flutter analysis, all 74 client tests, and the complete backend
+  security/storage/backup/deployment/recovery suite pass with this increment.
+
 Sparse MLS-sequence correction, 2026-07-28:
 
 - Recovery ranges no longer incorrectly require one application event for

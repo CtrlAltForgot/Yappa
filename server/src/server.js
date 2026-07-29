@@ -2567,6 +2567,25 @@ function getSocketsForUser(userId) {
   return matches;
 }
 
+function emitHistoryRecoveryReady({
+  userId,
+  destinationDeviceId,
+  channelId,
+  transferId,
+}) {
+  for (const [socketId, presence] of socketPresence.entries()) {
+    if (
+      Number(presence.userId) === Number(userId) &&
+      presence.mediaDeviceId === destinationDeviceId
+    ) {
+      io.to(socketId).emit('history-recovery:ready', {
+        channelId: toId(channelId),
+        transferId,
+      });
+    }
+  }
+}
+
 function getVoicePresenceForUser(userId) {
   const matches = getSocketsForUser(userId).filter(
     (value) => Number.isInteger(value.voiceChannelId),
@@ -4563,6 +4582,12 @@ app.post(
       FROM history_recovery_transfers
       WHERE id = ?
     `).get(transfer.id);
+    emitHistoryRecoveryReady({
+      userId: transfer.user_id,
+      destinationDeviceId: transfer.destination_device_id,
+      channelId: transfer.channel_id,
+      transferId: transfer.id,
+    });
     return res.json({
       ok: true,
       finalized: true,

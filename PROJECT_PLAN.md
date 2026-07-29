@@ -1360,13 +1360,18 @@ Current implementation slice:
   merge require exact count, increasing in-range sequences, and matching
   first/last application boundaries. Focused client coverage and the backend
   authorization integration pass with a sparse range.
-  A recovery notice component now has explicit confirmation for sharing or
-  accepting history and honest waiting, bounded progress, completed-through,
-  and safe failure states. Live AppState discovery/action wiring and an
-  end-to-end widget integration remain open, so this is not yet a user-visible
-  completed feature.
-  Flutter analysis and all 73 client tests pass after the sparse-range and UI
-  component increments.
+  The recovery notice is now wired through AppState and the selected chat.
+  Ready E2EE channels verify the same-account key directory, expose every
+  destination for explicit selection, require confirmation before sharing or
+  accepting, display bounded transfer/failure/completion states, and refresh
+  messages only after durable merge. Backend finalization notifies only
+  realtime sockets for the exact destination device; that notification carries
+  routing ids only and triggers an authoritative refresh. Restart-durable
+  source ciphertext/outbox state, broader negative/widget coverage, and real
+  two-device validation remain open.
+  Flutter analysis and all 74 client tests pass. The complete backend
+  security/storage/backup/deployment/recovery suite also passes with
+  exact-destination realtime notification coverage.
   Threads are not implemented.
 
 Next work, in order:

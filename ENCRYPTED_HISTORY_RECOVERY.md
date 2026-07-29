@@ -23,10 +23,14 @@ mutations, and atomically persists the merged projection plus a replay receipt
 before acknowledging consumption. Recovery UI and the full
 negative/scale/real-device matrix remain incomplete.
 
-The recovery notice UI component implements the required honest states and
-explicit confirmation before either sharing or accepting history. It is not
-yet connected to live AppState discovery/actions, so the user-facing feature
-remains incomplete.
+The recovery notice is connected to live encrypted-channel state. Existing
+devices discover every active same-account recovery destination and require the
+user to select and confirm the exact device and range. Destinations receive an
+exact-device realtime ready notification, independently refresh and verify the
+directory/manifest context, and require confirmation before merge. The UI
+reports honest local-start, sharing, receiving, safe failure, and
+recovered-through states. Restart-durable source upload state, the remaining
+negative/scale/real-device matrix, and product polish remain incomplete.
 
 Yappa will use explicit, same-account, device-assisted recovery. An existing
 authorized device decrypts its authenticated local event history and

@@ -6,8 +6,19 @@ enum HistoryRecoveryUiPhase {
   approvalRequired,
   transferring,
   readyToRecover,
+  shared,
   recovered,
   failed,
+}
+
+class HistoryRecoveryDestination {
+  final String deviceId;
+  final String label;
+
+  const HistoryRecoveryDestination({
+    required this.deviceId,
+    required this.label,
+  });
 }
 
 class HistoryRecoveryUiState {
@@ -17,6 +28,7 @@ class HistoryRecoveryUiState {
   final int? lastServerSequence;
   final double? progress;
   final String? safeError;
+  final List<HistoryRecoveryDestination> destinations;
 
   const HistoryRecoveryUiState({
     required this.phase,
@@ -25,6 +37,7 @@ class HistoryRecoveryUiState {
     this.lastServerSequence,
     this.progress,
     this.safeError,
+    this.destinations = const [],
   });
 
   String get message => switch (phase) {
@@ -33,11 +46,15 @@ class HistoryRecoveryUiState {
     HistoryRecoveryUiPhase.waitingForExistingDevice =>
       'Waiting for one of your existing devices to approve history recovery.',
     HistoryRecoveryUiPhase.approvalRequired =>
-      'Share encrypted history with ${deviceLabel ?? 'another device'}?',
+      destinations.length > 1
+          ? 'Share encrypted history with another enrolled device?'
+          : 'Share encrypted history with ${deviceLabel ?? destinations.firstOrNull?.label ?? 'another device'}?',
     HistoryRecoveryUiPhase.transferring =>
       'Recovering encrypted history${_progressSuffix(progress)}',
     HistoryRecoveryUiPhase.readyToRecover =>
       'Encrypted history from ${deviceLabel ?? 'an existing device'} is ready.',
+    HistoryRecoveryUiPhase.shared =>
+      'Encrypted history through sequence ${lastServerSequence ?? '—'} is ready for ${deviceLabel ?? 'the selected device'}.',
     HistoryRecoveryUiPhase.recovered =>
       'Recovered through sequence ${lastServerSequence ?? '—'}.',
     HistoryRecoveryUiPhase.failed =>
@@ -62,7 +79,7 @@ class HistoryRecoveryUiState {
 
 class HistoryRecoveryNotice extends StatelessWidget {
   final HistoryRecoveryUiState state;
-  final Future<void> Function()? onAction;
+  final Future<void> Function(String? destinationDeviceId)? onAction;
 
   const HistoryRecoveryNotice({super.key, required this.state, this.onAction});
 
@@ -129,7 +146,7 @@ class HistoryRecoveryNotice extends StatelessWidget {
 
   Future<void> _confirmAndRun(BuildContext context) async {
     if (state.phase == HistoryRecoveryUiPhase.failed) {
-      await onAction?.call();
+      await onAction?.call(null);
       return;
     }
     final approving = state.phase == HistoryRecoveryUiPhase.approvalRequired;
@@ -138,32 +155,68 @@ class HistoryRecoveryNotice extends StatelessWidget {
     final range = first == null || last == null
         ? 'the available encrypted history'
         : 'messages $first through $last';
+    String? selectedDestination = state.destinations.length == 1
+        ? state.destinations.single.deviceId
+        : null;
     final accepted = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(
-          approving ? 'Share encrypted history?' : 'Recover encrypted history?',
-        ),
-        content: Text(
-          approving
-              ? 'Send $range directly to ${state.deviceLabel ?? 'the selected device'}? '
-                    'The server relays encrypted data and cannot read it.'
-              : 'Verify and merge $range from '
-                    '${state.deviceLabel ?? 'your existing device'}? '
-                    'Nothing is shown until the complete transfer is authenticated.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text(
+            approving
+                ? 'Share encrypted history?'
+                : 'Recover encrypted history?',
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: Text(approving ? 'Share history' : 'Recover history'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                approving
+                    ? 'Send $range directly to the selected device? '
+                          'The server relays encrypted data and cannot read it.'
+                    : 'Verify and merge $range from '
+                          '${state.deviceLabel ?? 'your existing device'}? '
+                          'Nothing is shown until the complete transfer is authenticated.',
+              ),
+              if (approving && state.destinations.length > 1) ...[
+                const SizedBox(height: 14),
+                for (final destination in state.destinations)
+                  ListTile(
+                    leading: Icon(
+                      selectedDestination == destination.deviceId
+                          ? Icons.radio_button_checked_rounded
+                          : Icons.radio_button_off_rounded,
+                    ),
+                    title: Text(destination.label),
+                    selected: selectedDestination == destination.deviceId,
+                    onTap: () {
+                      setDialogState(
+                        () => selectedDestination = destination.deviceId,
+                      );
+                    },
+                  ),
+              ],
+            ],
           ),
-        ],
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed:
+                  approving &&
+                      state.destinations.isNotEmpty &&
+                      selectedDestination == null
+                  ? null
+                  : () => Navigator.pop(dialogContext, true),
+              child: Text(approving ? 'Share history' : 'Recover history'),
+            ),
+          ],
+        ),
       ),
     );
-    if (accepted == true) await onAction?.call();
+    if (accepted == true) await onAction?.call(selectedDestination);
   }
 }

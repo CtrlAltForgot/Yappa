@@ -17,7 +17,7 @@ void main() {
               firstServerSequence: 1,
               lastServerSequence: 5000,
             ),
-            onAction: () async {
+            onAction: (_) async {
               approvals += 1;
             },
           ),

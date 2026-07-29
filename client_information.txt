@@ -36,6 +36,11 @@ independent review justify that claim.
 - New and upgraded servers now keep chat attachments indefinitely unless an
   authorized person explicitly deletes them. Yappa no longer schedules
   ordinary or encrypted chat files to disappear after 30 days.
+- Encrypted feeds can now offer older history directly from one of your
+  existing Yappa devices to another. You choose the exact destination and
+  confirm before sharing; the receiving device verifies the complete encrypted
+  transfer before changing the conversation. The server relays encrypted data
+  and cannot read the recovered messages.
 - Servers now reserve emergency disk headroom before accepting another durable
   message or attachment. If safe storage is unavailable, Yappa reports a
   retryable storage problem instead of pretending the message was saved.

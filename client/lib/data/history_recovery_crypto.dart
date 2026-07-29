@@ -32,6 +32,45 @@ class HistoryRecoveryContext {
     required this.eventCount,
   });
 
+  factory HistoryRecoveryContext.fromManifest(Uint8List manifestBytes) {
+    try {
+      final decoded = Map<String, dynamic>.from(
+        jsonDecode(utf8.decode(manifestBytes)) as Map,
+      );
+      final header = Map<String, dynamic>.from(decoded['header'] as Map);
+      if (header['protocol'] != historyRecoveryProtocol) {
+        throw const FormatException();
+      }
+      final context = HistoryRecoveryContext(
+        transferId: header['transferId']?.toString() ?? '',
+        serverId: header['serverId']?.toString() ?? '',
+        channelId: header['channelId']?.toString() ?? '',
+        accountYuid: header['accountYuid']?.toString() ?? '',
+        sourceDeviceId: header['sourceDeviceId']?.toString() ?? '',
+        destinationDeviceId: header['destinationDeviceId']?.toString() ?? '',
+        sourceRecoveryPublicKey:
+            header['sourceRecoveryPublicKey']?.toString() ?? '',
+        destinationRecoveryPublicKey:
+            header['destinationRecoveryPublicKey']?.toString() ?? '',
+        firstServerSequence: header['firstServerSequence'] is int
+            ? header['firstServerSequence'] as int
+            : -1,
+        lastServerSequence: header['lastServerSequence'] is int
+            ? header['lastServerSequence'] as int
+            : -1,
+        eventCount: header['eventCount'] is int
+            ? header['eventCount'] as int
+            : -1,
+      );
+      context.validate();
+      return context;
+    } catch (_) {
+      throw const FormatException(
+        'Invalid encrypted-history manifest context.',
+      );
+    }
+  }
+
   void validate() {
     if (!RegExp(r'^recovery_[A-Za-z0-9_-]{22}$').hasMatch(transferId) ||
         serverId.trim().isEmpty ||
