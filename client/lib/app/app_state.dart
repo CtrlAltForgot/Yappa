@@ -13,6 +13,7 @@ import '../data/encrypted_attachment_failure.dart';
 import '../data/history_recovery_identity.dart';
 import '../data/history_recovery_channel_controller.dart';
 import '../data/history_recovery_key_service.dart';
+import '../data/history_recovery_outbox.dart';
 import '../data/mic_input_service.dart';
 import '../data/media_device_identity_service.dart';
 import '../data/media_e2ee_coordinator.dart';
@@ -2927,30 +2928,35 @@ class AppState extends ChangeNotifier {
     if (startup.readiness == MlsChannelReadiness.ready) {
       _messagesByChannel[channel.id] = await encrypted.projectedMessages();
       _refreshedMessageChannelIds.add(channel.id);
-      final recovery =
-          _historyRecoveryByChannelId[channel.id] ??
-          HistoryRecoveryChannelController(
-            serverId: server.id,
-            channelId: channel.id,
-            baseUrl: server.address,
-            token: token,
-            localDeviceId: runtime.localDevice.deviceId,
-            api: _api,
-            eventStore: encrypted.eventStore,
-            recoveryIdentity: _historyRecoveryIdentity,
-            yuidIdentity: _yuidIdentity,
-            historicalCredentials:
-                runtime.keyPackages.fetchVerifiedHistoricalDirectory,
-            verifiedRecoveryKeys: () => HistoryRecoveryKeyService(
-              api: _api,
-              recoveryIdentity: _historyRecoveryIdentity,
-              yuidIdentity: _yuidIdentity,
-              baseUrl: server.address,
-              token: token,
-              serverId: server.id,
-              deviceId: runtime.localDevice.deviceId,
-            ).registerAndVerify(),
-          );
+      var recovery = _historyRecoveryByChannelId[channel.id];
+      recovery ??= HistoryRecoveryChannelController(
+        serverId: server.id,
+        channelId: channel.id,
+        baseUrl: server.address,
+        token: token,
+        localDeviceId: runtime.localDevice.deviceId,
+        api: _api,
+        eventStore: encrypted.eventStore,
+        recoveryIdentity: _historyRecoveryIdentity,
+        yuidIdentity: _yuidIdentity,
+        outbox: await HistoryRecoveryOutbox.open(
+          serverId: server.id,
+          deviceId: runtime.localDevice.deviceId,
+          channelId: channel.id,
+          secretStorage: _secretStorage,
+        ),
+        historicalCredentials:
+            runtime.keyPackages.fetchVerifiedHistoricalDirectory,
+        verifiedRecoveryKeys: () => HistoryRecoveryKeyService(
+          api: _api,
+          recoveryIdentity: _historyRecoveryIdentity,
+          yuidIdentity: _yuidIdentity,
+          baseUrl: server.address,
+          token: token,
+          serverId: server.id,
+          deviceId: runtime.localDevice.deviceId,
+        ).registerAndVerify(),
+      );
       _historyRecoveryByChannelId[channel.id] = recovery;
       try {
         await recovery.refresh();
@@ -2963,7 +2969,7 @@ class AppState extends ChangeNotifier {
       }
     } else {
       _refreshedMessageChannelIds.remove(channel.id);
-      _historyRecoveryByChannelId.remove(channel.id);
+      await _historyRecoveryByChannelId.remove(channel.id)?.close();
     }
     notifyListeners();
   }
@@ -3007,6 +3013,13 @@ class AppState extends ChangeNotifier {
       try {
         runtime = await opening;
       } catch (_) {}
+    }
+    final recoveryControllers = _historyRecoveryByChannelId.entries
+        .where((entry) => _channelById(entry.key)?.serverId == serverId)
+        .map((entry) => entry.value)
+        .toList(growable: false);
+    for (final controller in recoveryControllers) {
+      await controller.close();
     }
     if (runtime != null) await runtime.close();
     _mlsChannelsByChannelId.removeWhere(

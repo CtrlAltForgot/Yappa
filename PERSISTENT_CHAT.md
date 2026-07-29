@@ -189,7 +189,10 @@ contract.
   source/destination confirmation. A finalized relay wakes only the exact
   destination device, which re-fetches authoritative metadata before merge.
   Existing projected history changes only after the encrypted store commits.
-  Restart-durable source upload state and real two-device evidence remain.
+  Source upload state is now separately encrypted and restart-durable before
+  network mutation; exact lost-response replay clears it only after ready
+  confirmation. Stopped-upload cancellation and real two-device evidence
+  remain.
 - Transfers bind account/YUID, destination device key, server, channel, source
   device, history range, and version; use chunk integrity and resumable
   cursors; and reject replay, rollback, substitution, and removed devices.

@@ -1051,6 +1051,21 @@ Live recovery UI increment, 2026-07-28:
 - Flutter analysis, all 74 client tests, and the complete backend
   security/storage/backup/deployment/recovery suite pass with this increment.
 
+Restart-durable recovery upload increment, 2026-07-28:
+
+- The source persists the exact context, YUID-signed manifest, and ciphertext
+  chunks in an independently keyed AES-256-GCM outbox before contacting the
+  relay. Its key is held through protected storage and is scoped to the exact
+  server, source device, and channel.
+- Pending-file promotion is authenticated and restart-safe. Resume rechecks
+  the current account, source recovery key, and active destination directory
+  binding before replaying the original transfer id and bytes.
+- The outbox remains after a failed/lost upload response and is removed only
+  after the relay confirms ready. Tampering and missing-key states fail closed.
+  Focused crash/restart evidence and the full 76-test client suite pass.
+- Explicit cancellation/cleanup UX for a permanently stopped upload and the
+  remaining adversarial/real-device matrix remain open.
+
 Sparse MLS-sequence correction, 2026-07-28:
 
 - Recovery ranges no longer incorrectly require one application event for

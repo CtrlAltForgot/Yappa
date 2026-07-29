@@ -11,6 +11,7 @@ import 'package:yappa/data/history_recovery_coordinator.dart';
 import 'package:yappa/data/history_recovery_crypto.dart';
 import 'package:yappa/data/history_recovery_identity.dart';
 import 'package:yappa/data/history_recovery_key_service.dart';
+import 'package:yappa/data/history_recovery_outbox.dart';
 import 'package:yappa/data/history_recovery_transfer_service.dart';
 import 'package:yappa/data/mls_delivery_models.dart';
 import 'package:yappa/data/mls_event_store.dart';
@@ -50,18 +51,39 @@ class _EmptyTransport extends HistoryRecoveryTransferService {
 
 class _CapturingCoordinator extends HistoryRecoveryCoordinator {
   HistoryRecoveryContext? approvedContext;
+  HistoryRecoveryContext? uploadedContext;
+  final bool failUploads;
 
-  _CapturingCoordinator(HistoryRecoveryTransferService transport)
-    : super(cryptor: HistoryRecoveryCryptor(), transport: transport);
+  _CapturingCoordinator(
+    HistoryRecoveryTransferService transport, {
+    this.failUploads = false,
+  }) : super(cryptor: HistoryRecoveryCryptor(), transport: transport);
 
   @override
-  Future<HistoryRecoveryTransfer> approveAndUpload({
+  Future<SealedHistoryRecoveryTransfer> prepareUpload({
     required HistoryRecoveryContext context,
     required MlsEventStore eventStore,
     required SimplePublicKey destinationRecoveryPublicKey,
     required KeyPair sourceYuidKeyPair,
   }) async {
     approvedContext = context;
+    return SealedHistoryRecoveryTransfer(
+      manifest: Uint8List.fromList([1]),
+      manifestSha256: '0' * 64,
+      yuidSignature: 'a' * 86,
+      chunks: [
+        Uint8List.fromList([1]),
+      ],
+    );
+  }
+
+  @override
+  Future<HistoryRecoveryTransfer> uploadPrepared({
+    required HistoryRecoveryContext context,
+    required SealedHistoryRecoveryTransfer sealed,
+  }) async {
+    uploadedContext = context;
+    if (failUploads) throw ApiException('Simulated lost upload response.');
     return HistoryRecoveryTransfer(
       id: context.transferId,
       channelId: context.channelId,
@@ -144,7 +166,26 @@ void main() {
       final yuid = YuidIdentityService(secretStorage: secrets);
       final account = await yuid.getOrCreateIdentity();
       final transport = _EmptyTransport();
-      final coordinator = _CapturingCoordinator(transport);
+      final coordinator = _CapturingCoordinator(transport, failUploads: true);
+      final firstOutbox = await HistoryRecoveryOutbox.open(
+        serverId: 'server-id',
+        deviceId: localDeviceId,
+        channelId: '1',
+        secretStorage: secrets,
+        supportDirectory: () async => root,
+      );
+      Future<List<VerifiedHistoryRecoveryDeviceKey>> keys() async => [
+        VerifiedHistoryRecoveryDeviceKey(
+          accountYuid: account.yuid,
+          deviceId: localDeviceId,
+          publicKey: localPublic,
+        ),
+        VerifiedHistoryRecoveryDeviceKey(
+          accountYuid: account.yuid,
+          deviceId: destinationDeviceId,
+          publicKey: destinationPublic,
+        ),
+      ];
       final controller = HistoryRecoveryChannelController(
         serverId: 'server-id',
         channelId: '1',
@@ -155,19 +196,9 @@ void main() {
         eventStore: store,
         recoveryIdentity: recoveryIdentity,
         yuidIdentity: yuid,
+        outbox: firstOutbox,
         historicalCredentials: () async => const [],
-        verifiedRecoveryKeys: () async => [
-          VerifiedHistoryRecoveryDeviceKey(
-            accountYuid: account.yuid,
-            deviceId: localDeviceId,
-            publicKey: localPublic,
-          ),
-          VerifiedHistoryRecoveryDeviceKey(
-            accountYuid: account.yuid,
-            deviceId: destinationDeviceId,
-            publicKey: destinationPublic,
-          ),
-        ],
+        verifiedRecoveryKeys: keys,
         transport: transport,
         coordinator: coordinator,
       );
@@ -175,8 +206,11 @@ void main() {
       final discovered = await controller.refresh();
       expect(discovered.phase, HistoryRecoveryUiPhase.approvalRequired);
       expect(discovered.destinations.single.deviceId, destinationDeviceId);
-      expect(await controller.perform(destinationDeviceId), isTrue);
-      expect(controller.state.phase, HistoryRecoveryUiPhase.shared);
+      await expectLater(
+        controller.perform(destinationDeviceId),
+        throwsA(isA<ApiException>()),
+      );
+      expect(controller.state.phase, HistoryRecoveryUiPhase.failed);
       expect(coordinator.approvedContext?.firstServerSequence, 1);
       expect(coordinator.approvedContext?.lastServerSequence, 3);
       expect(coordinator.approvedContext?.eventCount, 2);
@@ -184,6 +218,38 @@ void main() {
         coordinator.approvedContext?.destinationDeviceId,
         destinationDeviceId,
       );
+      final pendingTransferId = coordinator.approvedContext!.transferId;
+      expect((await firstOutbox.read())?.context.transferId, pendingTransferId);
+      await controller.close();
+
+      final resumedOutbox = await HistoryRecoveryOutbox.open(
+        serverId: 'server-id',
+        deviceId: localDeviceId,
+        channelId: '1',
+        secretStorage: secrets,
+        supportDirectory: () async => root,
+      );
+      final resumedCoordinator = _CapturingCoordinator(transport);
+      final resumed = HistoryRecoveryChannelController(
+        serverId: 'server-id',
+        channelId: '1',
+        baseUrl: 'http://127.0.0.1:4100',
+        token: 'token',
+        localDeviceId: localDeviceId,
+        api: ApiClient(),
+        eventStore: store,
+        recoveryIdentity: recoveryIdentity,
+        yuidIdentity: yuid,
+        outbox: resumedOutbox,
+        historicalCredentials: () async => const [],
+        verifiedRecoveryKeys: keys,
+        transport: transport,
+        coordinator: resumedCoordinator,
+      );
+      expect((await resumed.refresh()).phase, HistoryRecoveryUiPhase.shared);
+      expect(resumedCoordinator.uploadedContext?.transferId, pendingTransferId);
+      expect(await resumedOutbox.read(), isNull);
+      await resumed.close();
       await store.close();
     },
   );

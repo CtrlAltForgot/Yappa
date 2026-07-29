@@ -29,8 +29,17 @@ user to select and confirm the exact device and range. Destinations receive an
 exact-device realtime ready notification, independently refresh and verify the
 directory/manifest context, and require confirmation before merge. The UI
 reports honest local-start, sharing, receiving, safe failure, and
-recovered-through states. Restart-durable source upload state, the remaining
-negative/scale/real-device matrix, and product polish remain incomplete.
+recovered-through states.
+
+Before its first network mutation, the source now writes the exact signed
+manifest, context, and ciphertext chunks to a separately keyed AES-256-GCM
+outbox whose key is held in protected storage. Pending-file promotion is
+restart-safe. A fresh controller re-verifies the current account and both
+device-key bindings, then replays the exact transfer/chunks through the
+idempotent relay contract. The outbox is erased only after ready confirmation.
+Tampering or a missing protected key fails closed. User cancellation of a
+stopped pending upload, the remaining negative/scale/real-device matrix, and
+product polish remain incomplete.
 
 Yappa will use explicit, same-account, device-assisted recovery. An existing
 authorized device decrypts its authenticated local event history and

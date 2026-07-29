@@ -24,22 +24,41 @@ class HistoryRecoveryCoordinator {
     required SimplePublicKey destinationRecoveryPublicKey,
     required KeyPair sourceYuidKeyPair,
   }) async {
+    final sealed = await prepareUpload(
+      context: context,
+      eventStore: eventStore,
+      destinationRecoveryPublicKey: destinationRecoveryPublicKey,
+      sourceYuidKeyPair: sourceYuidKeyPair,
+    );
+    return uploadPrepared(context: context, sealed: sealed);
+  }
+
+  Future<SealedHistoryRecoveryTransfer> prepareUpload({
+    required HistoryRecoveryContext context,
+    required MlsEventStore eventStore,
+    required SimplePublicKey destinationRecoveryPublicKey,
+    required KeyPair sourceYuidKeyPair,
+  }) async {
     final records = eventStore.exportRecoveryRecords(
       firstServerSequence: context.firstServerSequence,
       lastServerSequence: context.lastServerSequence,
     );
     try {
-      final sealed = await cryptor.seal(
+      return await cryptor.seal(
         context: context,
         canonicalRecords: records,
         destinationRecoveryPublicKey: destinationRecoveryPublicKey,
         sourceYuidKeyPair: sourceYuidKeyPair,
       );
-      return await transport.upload(context: context, sealed: sealed);
     } finally {
       records.fillRange(0, records.length, 0);
     }
   }
+
+  Future<HistoryRecoveryTransfer> uploadPrepared({
+    required HistoryRecoveryContext context,
+    required SealedHistoryRecoveryTransfer sealed,
+  }) => transport.upload(context: context, sealed: sealed);
 
   Future<bool> downloadVerifyMergeAndConsume({
     required HistoryRecoveryContext expectedContext,

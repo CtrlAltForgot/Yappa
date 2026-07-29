@@ -1372,13 +1372,21 @@ Current implementation slice:
   Flutter analysis and all 74 client tests pass. The complete backend
   security/storage/backup/deployment/recovery suite also passes with
   exact-destination realtime notification coverage.
+  Source uploads are now restart-durable: before network mutation, Yappa
+  atomically stores the exact context, signed manifest, and ciphertext chunks
+  in a separately keyed authenticated outbox. A new controller re-verifies
+  account/source/destination bindings and resumes the same transfer id and
+  bytes; lost-response evidence proves the outbox survives and clears only
+  after ready confirmation. Tampering fails closed. Flutter analysis and all
+  76 client tests pass. Explicit stopped-upload cancellation, broader
+  adversarial/scale coverage, and real two-device validation remain open.
   Threads are not implemented.
 
 Next work, in order:
 
-1. Continue `PERSISTENT_CHAT.md` by integrating approval/progress/failure and
-   completion UI with the now-wired encrypted-history coordinator, then
-   complete authenticated
+1. Continue `PERSISTENT_CHAT.md` with stopped-transfer cancellation, the
+   remaining encrypted-history adversarial/scale matrix, and real two-device
+   evidence, then complete authenticated
    restored-download evidence,
    real constrained-filesystem/concurrency capacity evidence, scale, and
    restore gates. Deploy and verify these history changes on Unraid when

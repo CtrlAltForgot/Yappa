@@ -10,6 +10,7 @@ import 'history_recovery_coordinator.dart';
 import 'history_recovery_crypto.dart';
 import 'history_recovery_identity.dart';
 import 'history_recovery_key_service.dart';
+import 'history_recovery_outbox.dart';
 import 'history_recovery_transfer_service.dart';
 import 'mls_event_store.dart';
 import 'yuid_identity_service.dart';
@@ -24,6 +25,7 @@ class HistoryRecoveryChannelController {
   final MlsEventStore eventStore;
   final HistoryRecoveryIdentityService recoveryIdentity;
   final YuidIdentityService yuidIdentity;
+  final HistoryRecoveryOutbox outbox;
   final HistoricalMlsCredentialDirectory historicalCredentials;
   final Future<List<VerifiedHistoryRecoveryDeviceKey>> Function()
   verifiedRecoveryKeys;
@@ -50,6 +52,7 @@ class HistoryRecoveryChannelController {
     required this.eventStore,
     required this.recoveryIdentity,
     required this.yuidIdentity,
+    required this.outbox,
     required this.historicalCredentials,
     required this.verifiedRecoveryKeys,
     HistoryRecoveryTransferService? transport,
@@ -79,6 +82,7 @@ class HistoryRecoveryChannelController {
         'The local encrypted-history recovery key is unavailable.',
       );
     }
+    if (await _resumePendingUpload(localKey)) return state;
     final ready = await _transport.available(
       channelId: channelId,
       destinationDeviceId: localDeviceId,
@@ -191,12 +195,17 @@ class HistoryRecoveryChannelController {
         lastServerSequence: events.last.serverSequence,
         eventCount: events.length,
       );
-      await _coordinator.approveAndUpload(
+      final sealed = await _coordinator.prepareUpload(
         context: context,
         eventStore: eventStore,
         destinationRecoveryPublicKey: destination.publicKey,
         sourceYuidKeyPair: await yuidIdentity.keyPair(),
       );
+      await outbox.write(
+        HistoryRecoveryOutboxEntry(context: context, sealed: sealed),
+      );
+      await _coordinator.uploadPrepared(context: context, sealed: sealed);
+      await outbox.clear();
       _sharedDestinationId = destination.deviceId;
       _sharedLastSequence = events.last.serverSequence;
       state = HistoryRecoveryUiState(
@@ -260,6 +269,56 @@ class HistoryRecoveryChannelController {
       rethrow;
     }
   }
+
+  Future<bool> _resumePendingUpload(
+    VerifiedHistoryRecoveryDeviceKey localKey,
+  ) async {
+    final pending = await outbox.read();
+    if (pending == null) return false;
+    final context = pending.context;
+    final destination = _keys[context.destinationDeviceId];
+    final localIdentity = await recoveryIdentity.getOrCreate(
+      serverId: serverId,
+      deviceId: localDeviceId,
+    );
+    final account = await yuidIdentity.getOrCreateIdentity();
+    if (context.serverId != serverId ||
+        context.channelId != channelId ||
+        context.sourceDeviceId != localDeviceId ||
+        context.accountYuid != account.yuid ||
+        destination == null ||
+        !_sameBytes(
+          localKey.publicKey.bytes,
+          _decode(localIdentity.publicKeyBase64Url),
+        ) ||
+        !_sameBytes(
+          destination.publicKey.bytes,
+          _decode(context.destinationRecoveryPublicKey),
+        ) ||
+        context.sourceRecoveryPublicKey != localIdentity.publicKeyBase64Url) {
+      throw const FormatException(
+        'Pending encrypted-history upload context is no longer authorized.',
+      );
+    }
+    state = HistoryRecoveryUiState(
+      phase: HistoryRecoveryUiPhase.transferring,
+      deviceLabel: _deviceLabel(destination.deviceId),
+      firstServerSequence: context.firstServerSequence,
+      lastServerSequence: context.lastServerSequence,
+    );
+    await _coordinator.uploadPrepared(context: context, sealed: pending.sealed);
+    await outbox.clear();
+    _sharedDestinationId = destination.deviceId;
+    _sharedLastSequence = context.lastServerSequence;
+    state = HistoryRecoveryUiState(
+      phase: HistoryRecoveryUiPhase.shared,
+      deviceLabel: _deviceLabel(destination.deviceId),
+      lastServerSequence: context.lastServerSequence,
+    );
+    return true;
+  }
+
+  Future<void> close() => outbox.close();
 
   void _pinDirectoryContext(
     HistoryRecoveryContext context,

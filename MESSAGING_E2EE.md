@@ -409,6 +409,10 @@ selection, explicit source/destination confirmation, authenticated merge, and
 safe status reporting. A destination-ready realtime signal is scoped to the
 exact device and is only a prompt to re-fetch authoritative data.
 
+Source recovery uploads persist their exact signed manifest and ciphertext in
+a protected, authenticated, restart-safe outbox before any relay mutation.
+Resume revalidates current device bindings and replays identical bytes.
+
 This limitation must be visible before a user removes their last functioning
 device. Account recovery restores account access, not old E2EE content. If no
 authorized device or encrypted client export retains the old epochs, the
