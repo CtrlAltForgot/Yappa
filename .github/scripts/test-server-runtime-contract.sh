@@ -68,13 +68,13 @@ if ! systemctl start "user@$TEST_UID.service"; then
     exit 1
   fi
   echo "Distro PAM wrapper is blocked by the hosted container boundary."
-  echo "Removing only its disposable account-policy check and retrying."
-  VENDOR_SYSTEMD_PAM=/usr/lib/pam.d/systemd-user
-  [[ -f "$VENDOR_SYSTEMD_PAM" ]] ||
-    { echo "No vendor systemd-user PAM policy is available." >&2; exit 1; }
+  echo "Installing a disposable pam_permit policy and retrying."
   install -d -m 755 /etc/pam.d
-  grep -Ev '^-?account[[:space:]]' "$VENDOR_SYSTEMD_PAM" \
-    > /etc/pam.d/systemd-user
+  {
+    echo "auth required pam_permit.so"
+    echo "account required pam_permit.so"
+    echo "session required pam_permit.so"
+  } > /etc/pam.d/systemd-user
   chmod 644 /etc/pam.d/systemd-user
   systemctl reset-failed "user@$TEST_UID.service"
   systemctl start "user@$TEST_UID.service"
