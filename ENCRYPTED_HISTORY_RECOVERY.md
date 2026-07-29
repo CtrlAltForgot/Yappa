@@ -4,11 +4,17 @@
 
 This document defines the first-public-release design for recovering encrypted
 channel history on a new or reinstalled device. The schema-5 recovery-key
-directory and authenticated registration/read APIs are implemented. The client
+directory and authenticated registration/read APIs are implemented. Schema 6
+adds the bounded opaque transfer/chunk relay. The client
 creates a separate per-server/device X25519 key in OS-protected storage, signs
 its canonical binding with YUID, pins registration responses, independently
 verifies the same-account directory, and registers during encrypted-server
-session setup. Opaque transfer storage and history transfer remain incomplete.
+session setup. Its transfer cryptor now derives a per-transfer X25519/HKDF key,
+encrypts bounded chunks with AES-256-GCM, binds them to an immutable canonical
+header, and verifies the final YUID-signed manifest before decryption.
+Client/server transport orchestration, canonical event export, restart-safe
+destination merge, recovery UI, and the full negative/real-device matrix
+remain incomplete.
 
 Yappa will use explicit, same-account, device-assisted recovery. An existing
 authorized device decrypts its authenticated local event history and
@@ -79,10 +85,14 @@ destination requires that signature and both verified recovery-key bindings.
 Server metadata is routing and quota input only; it is never sufficient to
 authenticate transferred history.
 
-The manifest binds the exact source/destination devices, account, server,
-channel, sequence range, chunk order, sizes, and ciphertext digests. Changing
-or transplanting any field invalidates the signature or authenticated
-encryption context.
+An immutable canonical header binds the exact source/destination devices,
+account, server, channel, sequence range, protocol, transfer id, key material,
+and chunk count. Its SHA-256 digest is the chunk-encryption associated-data
+root. The final manifest contains that header, its digest, and the ordered
+ciphertext sizes/digests, then receives the YUID signature. This avoids a
+circular dependency between ciphertext digests and their own authenticated
+data. Changing or transplanting any field invalidates authenticated encryption,
+the final signature, or both.
 
 ## Encryption and Chunking
 
@@ -95,8 +105,9 @@ the resumable upload is complete.
 History is encoded as canonical, length-delimited records and split into
 bounded chunks no larger than 256 KiB before encryption. Each chunk uses
 AES-256-GCM with a fresh random 96-bit nonce and associated data binding the
-manifest hash, transfer id, chunk index, and total chunk count. The manifest
-contains the SHA-256 digest of every complete ciphertext chunk. A destination
+immutable header hash, transfer id, chunk index, and total chunk count. The
+final manifest contains the SHA-256 digest of every complete ciphertext chunk.
+A destination
 authenticates the manifest and all chunk digests before committing any
 recovered range.
 

@@ -1004,8 +1004,28 @@ fails closed, and directory reads expose only active devices belonging to the
 same account. The client stores a separate per-server/device X25519 private key
 through OS-protected storage, pins registration, verifies every directory
 signature with the local YUID key, rejects duplicate/substituted entries, and
-requires its own exact key. Transfer storage/history recovery and a release
-claim remain incomplete.
+requires its own exact key.
+
+Schema 6 implements the opaque transfer relay. Only an authenticated active
+same-account source device can create, upload, finalize, or cancel its
+unfinished transfer; only the exact active destination can list, download, or
+consume a ready transfer. Creation and chunk writes have exact idempotent
+retries and reject conflicting reuse. Finalization verifies declared chunk
+count, byte total, ordered hashes, the final manifest hash, and its YUID
+signature before publication. Transfer/chunk/manifest sizes, active-transfer
+cardinality, and unfinished/ready lifetimes are bounded; expiry, cancellation,
+and consumption remove stored chunks. The schema contains routing metadata and
+opaque bytes, never recovered plaintext or recovery private keys.
+
+The client transfer cryptor uses a fresh ephemeral X25519 key, HKDF-SHA-256,
+and independently nonced AES-256-GCM chunks. Its canonical immutable header
+hash is the chunk associated-data root; the final YUID-signed manifest binds
+that header and every ordered ciphertext size and SHA-256 digest without a
+circular hash dependency. Automated round trips cover multi-chunk data, size
+limits, ciphertext tampering, and channel substitution. Client API
+orchestration, canonical event export, restart-safe authenticated merge,
+recovery UI, the remaining adversarial matrix, and a release claim remain
+incomplete.
 
 Verified plaintext reconnect increment, 2026-07-28:
 

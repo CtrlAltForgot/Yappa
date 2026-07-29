@@ -392,6 +392,11 @@ before it joined. Yappa preserves that property:
   protocol in `ENCRYPTED_HISTORY_RECOVERY.md`; it is separate from MLS and must
   not be disguised as ordinary MLS behavior.
 
+The dedicated recovery-key directory, bounded opaque schema-6 transfer relay,
+and client chunk cryptography are implemented. Client transport orchestration,
+canonical historical-event export, restart-safe destination merge, and
+recovery UI remain incomplete.
+
 This limitation must be visible before a user removes their last functioning
 device. Account recovery restores account access, not old E2EE content. If no
 authorized device or encrypted client export retains the old epochs, the

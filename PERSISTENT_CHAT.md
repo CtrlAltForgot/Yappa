@@ -172,6 +172,11 @@ contract.
   device-assisted protocol, its dedicated YUID-bound X25519 recovery keys,
   signed manifests, resumable encrypted chunks, destination merge rules,
   fail-closed states, limits, and required evidence.
+- Schema 6 implements the bounded opaque server relay, and the client transfer
+  cryptor implements canonical-header-bound X25519/HKDF/AES-256-GCM chunks plus
+  final signed-manifest verification. Transport orchestration, canonical event
+  export, atomic destination merge, and user-facing recovery states remain
+  incomplete.
 - Transfers bind account/YUID, destination device key, server, channel, source
   device, history range, and version; use chunk integrity and resumable
   cursors; and reject replay, rollback, substitution, and removed devices.

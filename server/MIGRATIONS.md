@@ -131,9 +131,18 @@ the migrated database with a schema-3 binary is forbidden.
 Schema 5 adds `history_recovery_device_keys`, a dedicated, YUID-authorized
 X25519 public-key directory for explicit same-account encrypted-history
 recovery. It contains no recovery private keys, transferred history, or
-plaintext. The distributable install manifest must equal the backend's current
-schema. Upgrade, fresh-restore, and install verification fail closed for the
-next unknown schema until a matching backend migration is shipped.
+plaintext.
+
+Schema 6 adds `history_recovery_transfers` and
+`history_recovery_transfer_chunks` for bounded opaque same-account
+device-assisted recovery delivery. The backend stores routing/range metadata,
+the signed manifest, hashes, and ciphertext chunks only. Source and destination
+authorization, exact-retry conflict detection, finalization, expiry,
+cancellation, and consumption are enforced by the API.
+
+The distributable install manifest must equal the backend's current schema.
+Upgrade, fresh-restore, and install verification fail closed for the next
+unknown schema until a matching backend migration is shipped.
 
 The production Unraid database migrated from version 1 to version 2 on
 2026-07-24 after its encrypted pre-upgrade archive checksum was verified.

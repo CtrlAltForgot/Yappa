@@ -1331,15 +1331,26 @@ Current implementation slice:
   other's keys. The client creates a separate per-server/device X25519 key in
   OS-protected storage, signs it with YUID, pins registration, independently
   verifies the full directory, and registers during encrypted-server session
-  setup. Flutter analysis and all 64 tests pass. Backend transfer storage,
-  chunk cryptography, staged merge, UI, and the full negative/real-device
-  matrix remain to be implemented.
+  setup. Schema 6 now provides a bounded opaque transfer relay with exact
+  retry/conflict semantics, source/destination authorization, final
+  count/byte/hash/signature verification, expiration, cancellation, and
+  consume-time chunk removal. The client has bounded multi-chunk
+  X25519/HKDF/AES-256-GCM sealing and opening; its immutable canonical header
+  prevents server/channel/device substitution, and its final YUID-signed
+  manifest binds the ordered ciphertext digests without circular associated
+  data. The complete backend/security/deployment-policy suite, Flutter
+  analysis, and all 65 client tests pass. Client API transport orchestration,
+  canonical event export, restart-safe staged merge, recovery UI, the
+  remaining negative/scale/real-device matrix, production deployment, and an
+  authenticated post-restore client download remain open.
   Threads are not implemented.
 
 Next work, in order:
 
-1. Continue `PERSISTENT_CHAT.md` authenticated restored-download evidence,
-   encrypted-history continuity,
+1. Continue `PERSISTENT_CHAT.md` by wiring the encrypted-history client
+   transport/export path to the schema-6 relay, implementing restart-safe
+   authenticated staged merge and recovery UI, then complete authenticated
+   restored-download evidence,
    real constrained-filesystem/concurrency capacity evidence, scale, and
    restore gates. Deploy and verify these history changes on Unraid when
    approved access becomes available.

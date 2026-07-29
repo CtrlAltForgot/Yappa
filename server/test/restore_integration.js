@@ -170,7 +170,7 @@ function makeScaleBackup() {
       .prepare('SELECT COALESCE(MAX(version), 0) FROM schema_migrations')
       .pluck()
       .get(),
-    5,
+    6,
   );
   database.close();
 
@@ -384,7 +384,7 @@ cat > "$output"
   );
 
   for (const [name, invalidBackup, expectedError] of [
-    ['future-schema', makeBackup('future-schema', 6), /schema is not supported/],
+    ['future-schema', makeBackup('future-schema', 7), /schema is not supported/],
     [
       'escaped-database',
       makeBackup('escaped-database', 3, '../outside.db'),

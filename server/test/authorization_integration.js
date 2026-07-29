@@ -116,6 +116,73 @@ async function createAccount(username) {
   };
 }
 
+async function createAdditionalDevice(account) {
+  const username = account.user.username;
+  const mediaKeyPair = crypto.generateKeyPairSync('x25519');
+  const mediaPublicKey = mediaKeyPair.publicKey.export({ format: 'jwk' }).x;
+  const mediaDeviceId = `device_${crypto
+    .randomBytes(18)
+    .toString('base64url')}`;
+  const challenge = (
+    await (await request('/api/auth/yuid/challenge')).json()
+  ).challenge;
+  const authSignature = nacl.sign.detached(
+    new Uint8Array(
+      Buffer.from(
+        `yappa-auth-v1|${challenge.serverId}|${username}|${challenge.nonce}`,
+        'utf8',
+      ),
+    ),
+    account.yuidKeyPair.secretKey,
+  );
+  const mediaSignature = nacl.sign.detached(
+    new Uint8Array(
+      Buffer.from(
+        `yappa-media-device-v1|${challenge.serverId}|${username}|` +
+          `${challenge.nonce}|${mediaPublicKey}|${mediaDeviceId}`,
+        'utf8',
+      ),
+    ),
+    account.yuidKeyPair.secretKey,
+  );
+  const response = await request('/api/auth/session', {
+    method: 'POST',
+    body: {
+      username,
+      password: 'authorization-test-password',
+      yuidPublicKey: Buffer.from(account.yuidKeyPair.publicKey).toString(
+        'base64url',
+      ),
+      yuidSignature: Buffer.from(authSignature).toString('base64url'),
+      yuidNonce: challenge.nonce,
+      mediaDeviceId,
+      mediaPublicKey,
+      mediaDeviceSignature: Buffer.from(mediaSignature).toString('base64url'),
+      deviceName: 'Additional authorization test device',
+    },
+  });
+  assert.equal(response.status, 201);
+  return {
+    ...(await response.json()),
+    mediaDeviceId,
+    mediaPublicKey,
+    yuidKeyPair: account.yuidKeyPair,
+  };
+}
+
+async function requestBytes(route, {token, bytes, digest}) {
+  return fetch(`${baseUrl}${route}`, {
+    method: 'PUT',
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/octet-stream',
+      'X-Yappa-Content-SHA256': digest,
+    },
+    body: bytes,
+  });
+}
+
 async function expectStatus(route, status, options) {
   const response = await request(route, options);
   assert.equal(response.status, status, `${options?.method || 'GET'} ${route}`);
@@ -891,6 +958,187 @@ async function run() {
   assert.equal(typeof ownerMediaDevice.authorizationNonce, 'string');
   assert.equal('privateKey' in ownerMediaDevice, false);
   assert.equal('passwordHash' in ownerMediaDevice, false);
+
+  const ownerRecoveryDestination = await createAdditionalDevice(owner);
+  const destinationRecoveryKey = buildHistoryRecoveryKey(
+    ownerRecoveryDestination,
+  );
+  assert.equal(
+    (
+      await request('/api/mls/history-recovery/keys', {
+        method: 'POST',
+        token: ownerRecoveryDestination.token,
+        body: destinationRecoveryKey,
+      })
+    ).status,
+    201,
+  );
+  const recoveryTransferId = `recovery_${crypto
+    .randomBytes(16)
+    .toString('base64url')}`;
+  const transferChunks = [
+    Buffer.from('opaque encrypted history chunk zero'),
+    Buffer.from('opaque encrypted history chunk one'),
+  ];
+  const transferManifest = Buffer.from(
+    JSON.stringify({
+      protocol: 'yappa-history-recovery-v1',
+      transferId: recoveryTransferId,
+      serverId: owner.server.id,
+      channelId: encryptedChannelId,
+      accountYuid: owner.user.yuid,
+      sourceDeviceId: owner.mediaDeviceId,
+      destinationDeviceId: ownerRecoveryDestination.mediaDeviceId,
+      firstServerSequence: 1,
+      lastServerSequence: 2,
+      eventCount: 2,
+      chunkCount: transferChunks.length,
+      totalBytes: transferChunks.reduce(
+        (total, chunk) => total + chunk.length,
+        0,
+      ),
+    }),
+  );
+  const transferManifestHash = crypto
+    .createHash('sha256')
+    .update(transferManifest)
+    .digest('hex');
+  const transferSignature = Buffer.from(
+    nacl.sign.detached(
+      new Uint8Array(Buffer.from(transferManifestHash, 'hex')),
+      owner.yuidKeyPair.secretKey,
+    ),
+  ).toString('base64url');
+  const transferCreateBody = {
+    id: recoveryTransferId,
+    destinationDeviceId: ownerRecoveryDestination.mediaDeviceId,
+    firstServerSequence: 1,
+    lastServerSequence: 2,
+    eventCount: 2,
+    chunkCount: transferChunks.length,
+    totalBytes: transferChunks.reduce(
+      (total, chunk) => total + chunk.length,
+      0,
+    ),
+    manifest: transferManifest.toString('base64url'),
+    manifestSha256: transferManifestHash,
+    yuidSignature: transferSignature,
+  };
+  const transferCreateResponse = await request(
+    `/api/channels/${encryptedChannelId}/mls/history-recovery/transfers`,
+    {
+      method: 'POST',
+      token: owner.token,
+      body: transferCreateBody,
+    },
+  );
+  assert.equal(transferCreateResponse.status, 201);
+  const createdTransfer = await transferCreateResponse.json();
+  assert.equal(createdTransfer.created, true);
+  assert.equal(createdTransfer.transfer.state, 'uploading');
+  assert.equal(createdTransfer.transfer.uploadedChunks, 0);
+  const transferRetry = await request(
+    `/api/channels/${encryptedChannelId}/mls/history-recovery/transfers`,
+    {
+      method: 'POST',
+      token: owner.token,
+      body: transferCreateBody,
+    },
+  );
+  assert.equal(transferRetry.status, 200);
+  assert.equal((await transferRetry.json()).created, false);
+  const conflictingTransfer = await request(
+    `/api/channels/${encryptedChannelId}/mls/history-recovery/transfers`,
+    {
+      method: 'POST',
+      token: owner.token,
+      body: {...transferCreateBody, totalBytes: transferCreateBody.totalBytes + 1},
+    },
+  );
+  assert.equal(conflictingTransfer.status, 409);
+  await expectStatus(
+    `/api/mls/history-recovery/transfers/${recoveryTransferId}/finalize`,
+    409,
+    {method: 'POST', token: owner.token},
+  );
+  await expectStatus(
+    `/api/mls/history-recovery/transfers/${recoveryTransferId}/chunks/0`,
+    404,
+    {token: ownerRecoveryDestination.token},
+  );
+  for (let index = 0; index < transferChunks.length; index += 1) {
+    const chunk = transferChunks[index];
+    const chunkHash = crypto.createHash('sha256').update(chunk).digest('hex');
+    const uploaded = await requestBytes(
+      `/api/mls/history-recovery/transfers/${recoveryTransferId}/chunks/${index}`,
+      {token: owner.token, bytes: chunk, digest: chunkHash},
+    );
+    assert.equal(uploaded.status, 201);
+    const retried = await requestBytes(
+      `/api/mls/history-recovery/transfers/${recoveryTransferId}/chunks/${index}`,
+      {token: owner.token, bytes: chunk, digest: chunkHash},
+    );
+    assert.equal(retried.status, 200);
+  }
+  const conflictingChunk = Buffer.from('different encrypted chunk');
+  assert.equal(
+    (
+      await requestBytes(
+        `/api/mls/history-recovery/transfers/${recoveryTransferId}/chunks/0`,
+        {
+          token: owner.token,
+          bytes: conflictingChunk,
+          digest: crypto
+            .createHash('sha256')
+            .update(conflictingChunk)
+            .digest('hex'),
+        },
+      )
+    ).status,
+    409,
+  );
+  const finalizedTransferResponse = await request(
+    `/api/mls/history-recovery/transfers/${recoveryTransferId}/finalize`,
+    {method: 'POST', token: owner.token},
+  );
+  assert.equal(finalizedTransferResponse.status, 200);
+  assert.equal((await finalizedTransferResponse.json()).finalized, true);
+  await expectStatus(
+    `/api/mls/history-recovery/transfers/${recoveryTransferId}/chunks/0`,
+    404,
+    {token: member.token},
+  );
+  const destinationTransfers = await (
+    await request(
+      `/api/channels/${encryptedChannelId}/mls/history-recovery/transfers`,
+      {token: ownerRecoveryDestination.token},
+    )
+  ).json();
+  assert.equal(destinationTransfers.transfers.length, 1);
+  assert.equal(destinationTransfers.transfers[0].id, recoveryTransferId);
+  for (let index = 0; index < transferChunks.length; index += 1) {
+    const response = await request(
+      `/api/mls/history-recovery/transfers/${recoveryTransferId}/chunks/${index}`,
+      {token: ownerRecoveryDestination.token},
+    );
+    assert.equal(response.status, 200);
+    const downloaded = await response.json();
+    assert.deepEqual(
+      Buffer.from(downloaded.ciphertext, 'base64url'),
+      transferChunks[index],
+    );
+  }
+  const consumedTransferResponse = await request(
+    `/api/mls/history-recovery/transfers/${recoveryTransferId}/consume`,
+    {method: 'POST', token: ownerRecoveryDestination.token},
+  );
+  assert.equal(consumedTransferResponse.status, 200);
+  assert.equal((await consumedTransferResponse.json()).consumed, true);
+  await expectStatus(
+    `/api/mls/history-recovery/transfers/${recoveryTransferId}/chunks/0`,
+    404,
+    {token: ownerRecoveryDestination.token},
+  );
 
   const legacyToken = crypto.randomBytes(32).toString('hex');
   const legacyNow = new Date();

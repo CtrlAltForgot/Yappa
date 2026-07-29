@@ -65,6 +65,8 @@ try {
   const requiredTables = [
     'schema_migrations',
     'history_recovery_device_keys',
+    'history_recovery_transfers',
+    'history_recovery_transfer_chunks',
     'mls_key_packages',
     'mls_channel_state',
     'mls_delivery_messages',
@@ -90,6 +92,11 @@ try {
 
   const eventColumns = columns(db, 'encrypted_message_events');
   const attachmentColumns = columns(db, 'encrypted_attachments');
+  const recoveryTransferColumns = columns(db, 'history_recovery_transfers');
+  const recoveryChunkColumns = columns(
+    db,
+    'history_recovery_transfer_chunks',
+  );
   for (const forbidden of [
     'content',
     'body',
@@ -107,6 +114,16 @@ try {
       attachmentColumns.includes(forbidden),
       false,
       `Encrypted attachments must not store ${forbidden}`,
+    );
+    assert.equal(
+      recoveryTransferColumns.includes(forbidden),
+      false,
+      `History recovery transfers must not store ${forbidden}`,
+    );
+    assert.equal(
+      recoveryChunkColumns.includes(forbidden),
+      false,
+      `History recovery chunks must not store ${forbidden}`,
     );
   }
   assert.equal(eventColumns.includes('delivery_message_id'), true);
