@@ -370,6 +370,11 @@ assert.match(
   compose,
   /user:\s*["']\$\{YAPPA_RUNTIME_UID:-1000\}:\$\{YAPPA_RUNTIME_GID:-1000\}["']/,
 );
+assert.match(
+  compose,
+  /yappa-livekit:[\s\S]*?user:\s*["']0:0["'][\s\S]*?cap_add:\s*\n\s+- NET_BIND_SERVICE/,
+  'LiveKit low-port root exception must remain explicit and capability-bounded.',
+);
 assert.equal(
   (compose.match(/read_only:\s*true/g) || []).length,
   4,

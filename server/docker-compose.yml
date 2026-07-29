@@ -36,7 +36,10 @@ services:
     container_name: yappa-livekit
     network_mode: host
     command: --config /etc/livekit/livekit.yaml
-    user: "${YAPPA_RUNTIME_UID:-1000}:${YAPPA_RUNTIME_GID:-1000}"
+    # LiveKit needs one low host-network socket for authenticated TURN/UDP 443.
+    # Root is explicit and bounded by read-only/no-new-privileges plus the
+    # single NET_BIND_SERVICE capability; it has no writable host-data mount.
+    user: "0:0"
     volumes:
       - ./livekit.yaml:/etc/livekit/livekit.yaml:ro
     read_only: true
