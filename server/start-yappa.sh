@@ -252,7 +252,7 @@ turn:
 keys:
   ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
 EOF2
-chmod 600 livekit.yaml
+chmod 640 livekit.yaml
 
 echo "Wrote livekit.yaml from .env."
 docker compose up -d --build

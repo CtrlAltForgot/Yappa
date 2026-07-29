@@ -203,7 +203,7 @@ for (const [name, script] of [
   assert.match(script, /chmod 600 \.env/, `${name} must protect existing .env`);
 }
 
-assert.match(startup, /chmod 600 livekit\.yaml/);
+assert.match(startup, /chmod 640 livekit\.yaml/);
 assert.match(startup, /RUNTIME_UID="\$\(id -u\)"/);
 assert.match(startup, /startup must run as an unprivileged installation owner/);
 assert.match(startup, /YAPPA_RUNTIME_UID=\$\{RUNTIME_UID\}/);
@@ -372,7 +372,7 @@ assert.match(
 );
 assert.match(
   compose,
-  /yappa-livekit:[\s\S]*?user:\s*["']0:0["'][\s\S]*?cap_add:\s*\n\s+- NET_BIND_SERVICE/,
+  /yappa-livekit:[\s\S]*?user:\s*["']0:0["'][\s\S]*?group_add:\s*\n\s+- ["']\$\{YAPPA_RUNTIME_GID:-1000\}["'][\s\S]*?cap_add:\s*\n\s+- NET_BIND_SERVICE/,
   'LiveKit low-port root exception must remain explicit and capability-bounded.',
 );
 assert.equal(

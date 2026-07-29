@@ -274,7 +274,9 @@ that literal IP; no DNS name or DNS account is required. API, Socket.IO, and
 LiveKit signaling share TCP `443`.
 
 The startup and custom-domain scripts use a private process umask and enforce
-mode `0600` on `.env` and the generated `livekit.yaml`. The repository does not
+mode `0600` on `.env`. The generated `livekit.yaml` is mode `0640` beneath the
+mode-`0700` installation root so only the installation owner and the explicitly
+supplemented LiveKit runtime group can read it. The repository does not
 ship a runnable LiveKit configuration with shared development credentials;
 `livekit.yaml` is created only from the installation's generated `.env`.
 
