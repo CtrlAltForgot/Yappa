@@ -44,6 +44,14 @@ reached the relay. An uncertain or conflicting server response preserves the
 retry. The remaining negative/scale/real-device matrix and product polish
 remain incomplete.
 
+Automated adversarial client evidence rejects wrong destination recovery keys,
+wrong authorized YUID signing keys, reordered or truncated ciphertext chunks,
+altered manifest signatures, conflicting transfer-id replay, and
+non-identical overlap with already durable local history. Rejected merge
+attempts leave the existing event set and recovery receipts unchanged.
+Revocation/ban lifecycle expansion, representative behavior at the storage
+ceiling, and real-device evidence remain outstanding.
+
 Yappa will use explicit, same-account, device-assisted recovery. An existing
 authorized device decrypts its authenticated local event history and
 re-encrypts it directly to a separately authorized recovery key belonging to

@@ -7,6 +7,12 @@ import 'package:yappa/data/history_recovery_crypto.dart';
 
 String _encode(List<int> bytes) => base64Url.encode(bytes).replaceAll('=', '');
 
+Uint8List _decode(String value) => Uint8List.fromList(
+  base64Url.decode(
+    value.padRight(value.length + ((4 - value.length % 4) % 4), '='),
+  ),
+);
+
 void main() {
   test(
     'round trips bounded signed recovery chunks and rejects tampering',
@@ -113,6 +119,81 @@ void main() {
           authorizedSourceYuidPublicKey: await yuidKeys.extractPublicKey(),
         ),
         throwsA(isA<FormatException>()),
+      );
+
+      final wrongDestination = await x25519.newKeyPair();
+      await expectLater(
+        cryptor.open(
+          expectedContext: boundContext,
+          transfer: sealed,
+          destinationRecoveryKeyPair: wrongDestination,
+          authorizedSourceYuidPublicKey: await yuidKeys.extractPublicKey(),
+        ),
+        throwsA(isA<SecretBoxAuthenticationError>()),
+      );
+
+      final wrongYuid = await ed25519.newKeyPair();
+      await expectLater(
+        cryptor.open(
+          expectedContext: boundContext,
+          transfer: sealed,
+          destinationRecoveryKeyPair: destinationRecovery,
+          authorizedSourceYuidPublicKey: await wrongYuid.extractPublicKey(),
+        ),
+        throwsA(isA<SecretBoxAuthenticationError>()),
+      );
+
+      await expectLater(
+        cryptor.open(
+          expectedContext: boundContext,
+          transfer: SealedHistoryRecoveryTransfer(
+            manifest: sealed.manifest,
+            manifestSha256: sealed.manifestSha256,
+            yuidSignature: sealed.yuidSignature,
+            chunks: [sealed.chunks.last, sealed.chunks.first],
+          ),
+          destinationRecoveryKeyPair: destinationRecovery,
+          authorizedSourceYuidPublicKey: await yuidKeys.extractPublicKey(),
+        ),
+        throwsA(isA<SecretBoxAuthenticationError>()),
+      );
+
+      await expectLater(
+        cryptor.open(
+          expectedContext: boundContext,
+          transfer: SealedHistoryRecoveryTransfer(
+            manifest: sealed.manifest,
+            manifestSha256: sealed.manifestSha256,
+            yuidSignature: sealed.yuidSignature,
+            chunks: [
+              Uint8List.sublistView(
+                sealed.chunks.first,
+                0,
+                sealed.chunks.first.length - 1,
+              ),
+              sealed.chunks.last,
+            ],
+          ),
+          destinationRecoveryKeyPair: destinationRecovery,
+          authorizedSourceYuidPublicKey: await yuidKeys.extractPublicKey(),
+        ),
+        throwsA(isA<SecretBoxAuthenticationError>()),
+      );
+
+      final alteredSignature = _decode(sealed.yuidSignature)..[0] ^= 1;
+      await expectLater(
+        cryptor.open(
+          expectedContext: boundContext,
+          transfer: SealedHistoryRecoveryTransfer(
+            manifest: sealed.manifest,
+            manifestSha256: sealed.manifestSha256,
+            yuidSignature: _encode(alteredSignature),
+            chunks: sealed.chunks,
+          ),
+          destinationRecoveryKeyPair: destinationRecovery,
+          authorizedSourceYuidPublicKey: await yuidKeys.extractPublicKey(),
+        ),
+        throwsA(isA<SecretBoxAuthenticationError>()),
       );
     },
   );

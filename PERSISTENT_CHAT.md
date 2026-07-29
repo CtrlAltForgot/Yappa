@@ -193,7 +193,10 @@ contract.
   network mutation; exact lost-response replay clears it only after ready
   confirmation. A confirmed stop removes both relay material and the local
   retry, but ambiguous cancellation responses retain the retry so ciphertext
-  is never silently abandoned. Real two-device evidence remains.
+  is never silently abandoned. Wrong keys/signers, reordered/truncated chunks,
+  conflicting transfer replay, and conflicting overlap are now rejected
+  without partially changing durable history. Revocation/ban expansion,
+  ceiling-scale behavior, and real two-device evidence remain.
 - Transfers bind account/YUID, destination device key, server, channel, source
   device, history range, and version; use chunk integrity and resumable
   cursors; and reject replay, rollback, substitution, and removed devices.

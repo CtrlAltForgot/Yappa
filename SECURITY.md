@@ -1070,6 +1070,13 @@ Restart-durable recovery upload increment, 2026-07-28:
   Flutter analysis and all 77 client tests pass, including controller and
   confirmation-widget evidence. The remaining adversarial/real-device matrix
   remains open.
+- Recovery adversarial coverage now also rejects a wrong destination private
+  key, wrong authorized YUID signing key, reordered or truncated chunks,
+  altered manifest signatures, conflicting transfer-id replay, and
+  non-identical overlap with already durable local history. Rejected overlap
+  and replay attempts leave events and receipts unchanged. Flutter analysis
+  and all 78 client tests pass. Revocation/ban lifecycle, representative
+  ceiling-scale behavior, and real-device evidence remain open.
 
 Sparse MLS-sequence correction, 2026-07-28:
 

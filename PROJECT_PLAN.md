@@ -1385,6 +1385,13 @@ Current implementation slice:
   exact retry. Flutter analysis and all 77 client tests pass, including
   controller and confirmation-widget evidence. Broader adversarial/scale
   coverage and real two-device validation remain open.
+  The next adversarial increment rejects wrong destination recovery keys,
+  wrong YUID signing identities, reordered or truncated ciphertext chunks,
+  altered manifest signatures, conflicting transfer-id replay, and
+  non-identical overlap with local history. Failed overlap/replay checks leave
+  both the projected event set and recovery receipts unchanged. Flutter
+  analysis and all 78 client tests pass. Revocation/ban lifecycle expansion,
+  representative ceiling-scale behavior, and real-device validation remain.
   Threads are not implemented.
 
 Next work, in order:
