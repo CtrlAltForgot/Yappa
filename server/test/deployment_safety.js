@@ -694,6 +694,10 @@ const releaseRefGuard = fs.readFileSync(
   ),
   'utf8',
 );
+const releaseGateWorkflow = fs.readFileSync(
+  path.join(workflowRoot, 'release_gate.yml'),
+  'utf8',
+);
 assert.match(
   serverFullStackWorkflow,
   /actions\/checkout@[a-f0-9]{40}/,
@@ -726,6 +730,18 @@ assert.match(releaseEvidenceGenerator, /Refusing to overwrite release evidence/)
 assert.match(releaseRefGuard, /refName !== `v\$\{version\}`/);
 assert.match(releaseRefGuard, /installManifest\.release\.channel !== 'stable'/);
 assert.match(releaseRefGuard, /installManifest\.release\.published !== true/);
+assert.match(releaseGateWorkflow, /tags:\s*\n\s+- ["']v\*["']/);
+assert.match(
+  releaseGateWorkflow,
+  /actions\/checkout@[a-f0-9]{40}/,
+  'Public release gate checkout must be commit-pinned.',
+);
+assert.match(releaseGateWorkflow, /validate-release-ref\.js/);
+assert.doesNotMatch(releaseGateWorkflow, /contents:\s*write/);
+assert.match(
+  releaseGateWorkflow,
+  /requires[\s\S]*platform signing identities[\s\S]*explicit production authorization/,
+);
 for (const workflow of desktopWorkflows) {
   assert.match(workflow, /generate-release-evidence\.js/);
   assert.match(workflow, /actions\/attest-build-provenance@[a-f0-9]{40}/);
