@@ -1571,6 +1571,22 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  Future<ServerStorageStatus> fetchSelectedServerStorage() async {
+    final server = _serverById(selectedServerId);
+    final token = _tokensByServerId[selectedServerId];
+    if (server == null || token == null || !isSelectedServerOwner) {
+      throw Exception('Only the node owner can inspect server storage.');
+    }
+    try {
+      return await _api.fetchServerStorage(
+        baseUrl: server.address,
+        token: token,
+      );
+    } on ApiException catch (error) {
+      throw Exception(error.message);
+    }
+  }
+
   Future<ChatServer> updateSelectedServerProfile({
     required String name,
     required String description,

@@ -15,6 +15,7 @@ const multer = require('multer');
 const mime = require('mime-types');
 const { Server } = require('socket.io');
 const { createPinnedLookup } = require('./safe-preview-lookup');
+const { readStorageCapacity } = require('./storage-capacity');
 const nacl = require('tweetnacl');
 const { AccessToken } = require('livekit-server-sdk');
 const {
@@ -193,6 +194,24 @@ const ATTACHMENT_URL_TTL_SECONDS = integerEnvironmentValue(
   15 * 60,
   { min: 60, max: 3600 },
 );
+const DURABLE_STORAGE_CRITICAL_FREE_BYTES = integerEnvironmentValue(
+  'DURABLE_STORAGE_CRITICAL_FREE_BYTES',
+  512 * 1024 * 1024,
+  { min: 16 * 1024 * 1024 },
+);
+const DURABLE_STORAGE_WARNING_FREE_BYTES = integerEnvironmentValue(
+  'DURABLE_STORAGE_WARNING_FREE_BYTES',
+  2 * 1024 * 1024 * 1024,
+  { min: 16 * 1024 * 1024 },
+);
+if (
+  DURABLE_STORAGE_WARNING_FREE_BYTES <=
+  DURABLE_STORAGE_CRITICAL_FREE_BYTES
+) {
+  console.error('[server] startup refused (code=invalid_configuration).');
+  process.exit(1);
+}
+const BACKUP_ROOT = String(process.env.YAPPA_BACKUP_ROOT || '').trim();
 const configuredAttachmentSigningSecret = optionalSecretEnvironmentValue(
   'ATTACHMENT_SIGNING_SECRET',
 );
@@ -1030,6 +1049,68 @@ ensureDir(encryptedAttachmentsRoot);
 ensureDir(sharedStorageRoot);
 ensureDir(brandingIconRoot);
 ensureDir(brandingBannerRoot);
+
+function currentStorageCapacity({
+  incomingBytes = 0,
+  includeBackupSize = false,
+} = {}) {
+  return readStorageCapacity({
+    db,
+    dbPath: path.resolve(DB_PATH),
+    dataRoot: path.resolve(DATA_ROOT),
+    backupRoot: BACKUP_ROOT ? path.resolve(BACKUP_ROOT) : '',
+    warningFreeBytes: DURABLE_STORAGE_WARNING_FREE_BYTES,
+    criticalFreeBytes: DURABLE_STORAGE_CRITICAL_FREE_BYTES,
+    incomingBytes,
+    includeBackupSize,
+  });
+}
+
+function expectedRequestBytes(req) {
+  const raw = String(req.headers['content-length'] || '');
+  if (!/^[0-9]+$/.test(raw)) return 0;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) ? value : Number.MAX_SAFE_INTEGER;
+}
+
+function requireDurableStorage(
+  req,
+  res,
+  { uploadedFile, incomingBytes: incomingBytesOverride } = {},
+) {
+  const incomingBytes = incomingBytesOverride == null
+    ? Math.max(
+        expectedRequestBytes(req),
+        Number(uploadedFile?.size || 0),
+      )
+    : incomingBytesOverride;
+  const capacity = currentStorageCapacity({ incomingBytes });
+  if (capacity.acceptsDurableWrites) {
+    return true;
+  }
+  if (uploadedFile?.path) {
+    fs.unlink(uploadedFile.path, () => {});
+  }
+  res.setHeader('Retry-After', '60');
+  apiError(
+    res,
+    507,
+    'durable_storage_unavailable',
+    'The server cannot safely store another durable message right now.',
+    {
+      retryable: true,
+      storageStatus: capacity.status,
+    },
+  );
+  return false;
+}
+
+function durableStorageRequired(req, res, next) {
+  if (!requireDurableStorage(req, res)) {
+    return;
+  }
+  next();
+}
 
 const serverIdentityPath = path.join(serverRoot, 'server-identity.json');
 
@@ -3112,6 +3193,20 @@ app.get('/api/server/settings', authRequired, (req, res) => {
   res.json({ ok: true, settings: currentSettings() });
 });
 
+app.get('/api/server/storage', authRequired, ownerOnly, (_req, res) => {
+  const storage = currentStorageCapacity({ includeBackupSize: true });
+  if (!storage.available) {
+    return apiError(
+      res,
+      503,
+      'storage_status_unavailable',
+      'Storage capacity could not be inspected safely.',
+      { retryable: true },
+    );
+  }
+  return res.json({ ok: true, storage });
+});
+
 app.patch(
   '/api/server/settings',
   authRequired,
@@ -4150,8 +4245,9 @@ app.post(
   '/api/channels/:channelId/encrypted-attachments',
   authRequired,
   uploadRateLimit,
+  durableStorageRequired,
   uploadSingleEncryptedAttachment,
-  async (req, res) => {
+  async (req, res, next) => {
     const uploadedFile = req.file;
     const channelId = Number(req.params.channelId);
     const uploaderDeviceId = req.auth.session.mediaDeviceId;
@@ -4167,6 +4263,9 @@ app.post(
         'missing_encrypted_attachment',
         'No encrypted attachment object was uploaded.',
       );
+    }
+    if (!requireDurableStorage(req, res, { uploadedFile, incomingBytes: 0 })) {
+      return;
     }
     if (!Number.isInteger(channelId) || !uploaderDeviceId) {
       discardUpload();
@@ -4361,7 +4460,7 @@ app.post(
           'That encrypted attachment id is already reserved.',
         );
       }
-      throw error;
+      return next(error);
     }
     return res.status(201).json({
       ok: true,
@@ -4560,6 +4659,7 @@ app.post(
   '/api/channels/:channelId/mls/messages',
   authRequired,
   contentMutationRateLimit,
+  durableStorageRequired,
   (req, res) => {
     const channelId = Number(req.params.channelId);
     const uploaderDeviceId = req.auth.session.mediaDeviceId;
@@ -5465,6 +5565,7 @@ app.post(
   '/api/uploads/attachments',
   authRequired,
   uploadRateLimit,
+  durableStorageRequired,
   uploadSingleAttachment,
          (req, res) => {
            const uploadedFile = req.file;
@@ -5472,6 +5573,12 @@ app.post(
 
            if (!uploadedFile) {
              return apiError(res, 400, 'missing_file', 'No file was uploaded.');
+           }
+           if (!requireDurableStorage(req, res, {
+             uploadedFile,
+             incomingBytes: 0,
+           })) {
+             return;
            }
 
            if (!Number.isInteger(channelId)) {
@@ -5538,19 +5645,27 @@ app.post(
            }
 
            const relativePath = path.relative(DATA_ROOT, uploadedFile.path);
-           const attachment = createAttachment(db, {
-             serverId,
-             channelId,
-             uploaderUserId: req.auth.user.id,
-             kind: classifyAttachmentKind(mimeType),
-                                               originalName: uploadedFile.originalname,
-                                               storedName: uploadedFile.filename,
-                                               relativePath,
-                                               mimeType,
-                                               sizeBytes: uploadedFile.size,
-                                               createdAt: nowIso(),
-                                               expiresAt: computeExpiresAt(settings.attachment_retention_days),
-           });
+           let attachment;
+           try {
+             attachment = createAttachment(db, {
+               serverId,
+               channelId,
+               uploaderUserId: req.auth.user.id,
+               kind: classifyAttachmentKind(mimeType),
+               originalName: uploadedFile.originalname,
+               storedName: uploadedFile.filename,
+               relativePath,
+               mimeType,
+               sizeBytes: uploadedFile.size,
+               createdAt: nowIso(),
+               expiresAt: computeExpiresAt(
+                 settings.attachment_retention_days,
+               ),
+             });
+           } catch (error) {
+             fs.unlink(uploadedFile.path, () => {});
+             throw error;
+           }
 
            res.status(201).json({
              ok: true,
@@ -5563,6 +5678,7 @@ app.post(
   '/api/channels/:channelId/messages',
   authRequired,
   contentMutationRateLimit,
+  durableStorageRequired,
   (req, res) => {
   const channelId = Number(req.params.channelId);
   if (!Number.isInteger(channelId)) {
@@ -6845,6 +6961,25 @@ app.use((error, _req, res, next) => {
       400,
       'upload_error',
       'The multipart upload could not be processed.',
+    );
+  }
+
+  if (
+    error?.code === 'SQLITE_FULL' ||
+    error?.code === 'SQLITE_IOERR_WRITE' ||
+    error?.code === 'ENOSPC'
+  ) {
+    logOperationalFailure('durable storage write', error);
+    res.setHeader('Retry-After', '60');
+    return apiError(
+      res,
+      507,
+      'durable_storage_unavailable',
+      'The server cannot safely store another durable message right now.',
+      {
+        retryable: true,
+        storageStatus: 'critical',
+      },
     );
   }
 

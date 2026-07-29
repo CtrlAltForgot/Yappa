@@ -331,6 +331,13 @@ evidence.
   synchronization, required ports, firewall reachability, virtualization/
   container support, DNS or direct-IP certificate prerequisites, filesystem
   semantics, and backup destination.
+- The canonical backend reserves durable-storage headroom before accepting chat
+  writes. Generated installs set a 512 MiB critical reserve and 2 GiB warning;
+  both Linux and Windows wrappers must preserve the same validated values.
+  Owner status reports filesystem/database/attachment byte counts without
+  paths or content, and Server Admin presents the same portable categories.
+  Real constrained-disk and recovery parity remains required on every
+  supported host family.
 - Make install/start/stop/status/logs/backup/restore/verify/upgrade/rollback
   commands behave consistently on both operating systems.
 - Installation is not successful until the backend, TLS route, WebSocket

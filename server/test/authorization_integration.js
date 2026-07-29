@@ -549,6 +549,7 @@ async function run() {
 
   for (const [route, options] of [
     ['/api/server/settings'],
+    ['/api/server/storage'],
     ['/api/admin/bans'],
     ['/api/admin/server', { method: 'PATCH', body: {} }],
     ['/api/admin/channels', {
@@ -580,6 +581,28 @@ async function run() {
   assert.equal(
     (await expiringRetentionResponse.json()).error?.code,
     'invalid_attachment_retention_days',
+  );
+  const storageResponse = await request('/api/server/storage', {
+    token: owner.token,
+  });
+  assert.equal(storageResponse.status, 200);
+  const storage = (await storageResponse.json()).storage;
+  assert.equal(storage.available, true);
+  assert.equal(storage.acceptsDurableWrites, true);
+  assert.equal(
+    storage.thresholds.warningFreeBytes >
+      storage.thresholds.criticalFreeBytes,
+    true,
+  );
+  assert.equal(Number.isSafeInteger(storage.filesystem.availableBytes), true);
+  assert.equal(Number.isSafeInteger(storage.usage.databaseBytes), true);
+  assert.equal(
+    Number.isSafeInteger(storage.usage.ordinaryAttachmentBytes),
+    true,
+  );
+  assert.equal(
+    Number.isSafeInteger(storage.usage.encryptedAttachmentBytes),
+    true,
   );
 
   const encryptedChannelCreateResponse = await request(

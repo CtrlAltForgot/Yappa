@@ -1287,20 +1287,30 @@ Current implementation slice:
   validates page metadata, deduplicates chronological pages, offers a
   load-older action, persists only the newest 200 plaintext messages per
   channel, and honestly reports its 1,000-message active-window limit. Focused
-  backend and client tests, Flutter analysis, the complete 60-test Flutter
+  backend and client tests, Flutter analysis, the complete 61-test Flutter
   suite, and the complete backend/security/deployment-policy suite pass
   locally. Production deployment verification is unavailable because approved
   Unraid SSH access is still unavailable. Forward reconnect catch-up,
   sliding-window navigation, attachment scale/restore validation,
-  storage-full behavior, encrypted new-device history, scale, and destructive
-  restore evidence remain open. Threads are not implemented.
+  encrypted new-device history, scale, and destructive restore evidence remain
+  open. Durable writes now reserve validated filesystem headroom (512 MiB
+  critical, 2 GiB warning by default), fail with retryable HTTP 507 when
+  capacity is critical/unavailable, and translate real SQLite/filesystem-full
+  write errors to the same contract. Owner-only status reports filesystem,
+  database, and ordinary/encrypted attachment sizes without content or paths.
+  Server Admin presents that status, reserve thresholds, usage categories, and
+  backup-monitoring state with manual refresh. Deterministic threshold, HTTP
+  rejection, authorization, client parsing, and analysis tests pass;
+  constrained real filesystem recovery, configured backup-size monitoring,
+  and threshold-concurrency evidence remain. Threads are not implemented.
 
 Next work, in order:
 
 1. Continue the remaining `PERSISTENT_CHAT.md` forward-catch-up,
    sliding-window, attachment scale/restore, encrypted-history continuity,
-   capacity, scale, and restore gates. Deploy and verify this first history
-   slice on Unraid when approved access becomes available.
+   real constrained-filesystem/concurrency capacity evidence, scale, and
+   restore gates. Deploy and verify these history changes on Unraid when
+   approved access becomes available.
 2. Add bare-metal/reboot and sleep/network-transition evidence; validate the
    Windows bridge on real WSL2; then implement and test Windows Firewall and
    background-supervision parity.

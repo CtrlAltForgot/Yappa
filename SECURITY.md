@@ -943,6 +943,29 @@ Schema version 4 is not deployed to Unraid because approved SSH access remains
 unavailable. A verified encrypted pre-upgrade backup and post-migration
 attachment/file/integrity checks are mandatory before production activation.
 
+Verified durable-storage headroom increment, 2026-07-28:
+
+- Plaintext messages, MLS deliveries, and ordinary/encrypted uploads pass an
+  immediate filesystem-headroom gate. Validated deployment thresholds default
+  to a 2 GiB warning and a 512 MiB critical reserve; warning must be strictly
+  greater than critical or startup fails closed.
+- Capacity inspection failure and critical headroom return retryable HTTP 507
+  before mutation. The guard reserves declared request bytes, rechecks after
+  multipart persistence, and removes uploaded bytes if metadata cannot commit.
+  SQLite-full, SQLite write-I/O, and filesystem-full races map to the same
+  bounded public error rather than exposing paths or database details.
+- Owner-only status exposes state, byte counts, and thresholds but no content
+  or paths. Other members are forbidden. Unit tests cover size accounting and
+  every state; a disposable real backend proves critical status, HTTP 507,
+  retry guidance, and zero inserted message rows.
+- Server Admin renders the owner-only state, thresholds, database and
+  attachment categories, and explicit backup-monitoring availability without
+  receiving paths or content. Client parsing and Flutter analysis pass.
+
+Actual constrained-filesystem exhaustion/recovery, simultaneous boundary
+writes, portable backup-root monitoring, and production deployment remain
+required before this gate is complete.
+
 ### Cross-Platform Server Deployment Gate
 
 `SERVER_PORTABILITY.md` defines the supported-host and parity contract. Windows

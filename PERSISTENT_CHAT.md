@@ -44,7 +44,7 @@ client must not make the conversation look complete when it is not.
   messages with an honest limit notice; evicted persisted rows remain
   authoritative and recoverable from the server.
 - The complete backend/security/deployment-policy suite, Flutter analysis, and
-  all 60 Flutter tests pass with this increment. Production deployment remains
+  all 61 Flutter tests pass with this increment. Production deployment remains
   unverified because approved Unraid SSH access is unavailable.
 - The client stores its decrypted MLS event view in an authenticated encrypted
   local store protected by an OS-vault key, and fails closed if that key or
@@ -56,6 +56,22 @@ client must not make the conversation look complete when it is not.
   attachment and resets the server policy to indefinite without resurrecting
   explicitly deleted rows. The API rejects timed-retention settings until a
   visible, prospective, authorized policy is designed and tested.
+- The backend measures filesystem headroom before accepting plaintext
+  messages, MLS deliveries, and ordinary/encrypted attachment uploads.
+  Defaults reserve 512 MiB as critical headroom and warn below 2 GiB; both are
+  explicit validated deployment settings. Critical or unavailable inspection
+  returns retryable HTTP 507 before the durable write. Real SQLite-full,
+  write-I/O, and filesystem-full errors use the same public failure contract,
+  and an attachment file is removed if its metadata transaction cannot commit.
+- An owner-only storage endpoint reports healthy/warning/critical state,
+  filesystem free/total bytes, thresholds, database/WAL/SHM bytes, and separate
+  ordinary/encrypted attachment bytes without exposing message content or
+  filesystem paths. Backup bytes are reported only when an explicit protected
+  backup root is mounted and configured.
+- Server Admin now includes a Storage surface with clear healthy/warning/
+  critical state, free space, reserves, database and attachment sizes, backup
+  monitoring state, and manual refresh. It never displays server paths or chat
+  content.
 
 These facts prove a useful persistence foundation, not the complete product
 contract.
@@ -80,6 +96,10 @@ contract.
   not yet recorded.
 - Real multi-device restart, reinstall, device replacement, removal, and
   restored-server exercises remain required.
+- The storage guard has deterministic threshold and real HTTP rejection tests,
+  but still needs an actual constrained-filesystem exhaustion/recovery drill,
+  configured portable-backup size monitoring, and concurrency evidence at the
+  threshold boundary.
 
 ## Required Storage Model
 

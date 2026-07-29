@@ -32,6 +32,12 @@ independent review justify that claim.
 - New and upgraded servers now keep chat attachments indefinitely unless an
   authorized person explicitly deletes them. Yappa no longer schedules
   ordinary or encrypted chat files to disappear after 30 days.
+- Servers now reserve emergency disk headroom before accepting another durable
+  message or attachment. If safe storage is unavailable, Yappa reports a
+  retryable storage problem instead of pretending the message was saved.
+- Server owners can inspect free space, safety reserves, database size, and
+  ordinary or encrypted attachment use from the new Storage page in Server
+  Admin without exposing message contents or server file paths.
 - The current Linux release package was rebuilt and launched after these
   changes. Its native encryption, voice, protected-storage, and media-preview
   libraries all resolved successfully. Linux packages now use portable

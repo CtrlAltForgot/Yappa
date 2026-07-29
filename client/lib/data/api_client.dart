@@ -292,6 +292,57 @@ class ServerSettings {
   }
 }
 
+class ServerStorageStatus {
+  final String status;
+  final bool acceptsDurableWrites;
+  final int availableBytes;
+  final int totalBytes;
+  final int warningFreeBytes;
+  final int criticalFreeBytes;
+  final int databaseBytes;
+  final int ordinaryAttachmentBytes;
+  final int encryptedAttachmentBytes;
+  final int? backupBytes;
+  final bool backupMonitoringEnabled;
+
+  const ServerStorageStatus({
+    required this.status,
+    required this.acceptsDurableWrites,
+    required this.availableBytes,
+    required this.totalBytes,
+    required this.warningFreeBytes,
+    required this.criticalFreeBytes,
+    required this.databaseBytes,
+    required this.ordinaryAttachmentBytes,
+    required this.encryptedAttachmentBytes,
+    required this.backupBytes,
+    required this.backupMonitoringEnabled,
+  });
+
+  factory ServerStorageStatus.fromJson(Map<String, dynamic> json) {
+    final filesystem = Map<String, dynamic>.from(json['filesystem'] as Map);
+    final thresholds = Map<String, dynamic>.from(json['thresholds'] as Map);
+    final usage = Map<String, dynamic>.from(json['usage'] as Map);
+    return ServerStorageStatus(
+      status: json['status']?.toString() ?? 'unavailable',
+      acceptsDurableWrites: json['acceptsDurableWrites'] as bool? ?? false,
+      availableBytes: (filesystem['availableBytes'] as num?)?.toInt() ?? 0,
+      totalBytes: (filesystem['totalBytes'] as num?)?.toInt() ?? 0,
+      warningFreeBytes: (thresholds['warningFreeBytes'] as num?)?.toInt() ?? 0,
+      criticalFreeBytes:
+          (thresholds['criticalFreeBytes'] as num?)?.toInt() ?? 0,
+      databaseBytes: (usage['databaseBytes'] as num?)?.toInt() ?? 0,
+      ordinaryAttachmentBytes:
+          (usage['ordinaryAttachmentBytes'] as num?)?.toInt() ?? 0,
+      encryptedAttachmentBytes:
+          (usage['encryptedAttachmentBytes'] as num?)?.toInt() ?? 0,
+      backupBytes: (usage['backupBytes'] as num?)?.toInt(),
+      backupMonitoringEnabled:
+          usage['backupMonitoringEnabled'] as bool? ?? false,
+    );
+  }
+}
+
 class VoiceConnectionCredentials {
   final String serverUrl;
   final String participantToken;
@@ -858,6 +909,21 @@ class ApiClient {
 
     return ServerSettings.fromJson(
       Map<String, dynamic>.from(json['settings'] as Map),
+    );
+  }
+
+  Future<ServerStorageStatus> fetchServerStorage({
+    required String baseUrl,
+    required String token,
+  }) async {
+    final normalized = normalizeBaseUrl(baseUrl);
+    final json = await _requestJson(
+      'GET',
+      '$normalized/api/server/storage',
+      token: token,
+    );
+    return ServerStorageStatus.fromJson(
+      Map<String, dynamic>.from(json['storage'] as Map),
     );
   }
 
