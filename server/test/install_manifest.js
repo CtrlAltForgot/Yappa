@@ -192,6 +192,7 @@ for (const command of [
   'firewall-plan',
   'firewall-apply',
   'firewall-remove',
+  'recover',
 ]) {
   assert.ok(
     manifest.lifecycleCommands.includes(command),
@@ -216,6 +217,7 @@ assert.deepEqual(manifest.implementedLifecycleCommands.linux, [
   'firewall-plan',
   'firewall-apply',
   'firewall-remove',
+  'recover',
   'verify',
   'verify-backup',
 ]);

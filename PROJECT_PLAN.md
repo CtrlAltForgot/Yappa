@@ -1176,14 +1176,29 @@ Current implementation slice:
   namespace-isolated root UFW apply/remove cycle pass together with the
   complete local backend/security suite; fresh CI and real-distribution
   UFW/firewalld matrices are still required.
+- Firewall run `30410797088` passed the entire Flutter/native job and every
+  backend test before the root-mutation fixture, then failed because GitHub's
+  hosted kernel rejects unprivileged `/proc/self/uid_map`. The fixture now
+  skips only for that exact kernel policy while plan/negative/static gates
+  remain mandatory; local namespace-root mutation still passes. A fresh
+  exact-head run is required.
+- Bounded Linux recovery is implemented locally. Lifecycle start/stop records
+  private host-local desired state, so intentional stop is never treated as a
+  fault. Recovery is single-instance, performs at most one Compose repair,
+  allows twelve bounded health/full-verifier attempts, and cools down for 15
+  minutes after three failures. The explicit user service installs a hardened
+  one-minute recovery timer and removes it atomically with autostart. Focused
+  healthy/stopped/recovered/cooldown tests and the complete local
+  backend/security suite pass; fresh CI and real sleep/network/systemd matrices
+  remain required.
 
 Next work, in order:
 
 1. Finish full validation, commit, and obtain fresh-checkout CI evidence for
    restore, upgrade/rollback, and the operational verifier; exercise them on
    Unraid if deployment access becomes available.
-2. Finish disposable-host firewall matrices, unattended-service, and bounded
-   health/crash-recovery behavior; run the identical conformance
+2. Finish real-host firewall, unattended-service, sleep/network, and recovery
+   matrices; run the identical conformance
    contract across every Tier-1 Linux/Windows target.
 3. Finish hosted Linux desktop evidence and signed release engineering:
    production versions, signing, SBOMs, provenance, tagged publication,

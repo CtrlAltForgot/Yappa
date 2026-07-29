@@ -39,6 +39,7 @@ Usage:
   ./install-yappa.sh firewall-apply --backend ufw|firewalld \
     [--lan-cidr 192.168.1.0/24]
   ./install-yappa.sh firewall-remove
+  ./install-yappa.sh recover
 
 This development installer operates only on the locally present server tree or
 an explicitly supplied local bundle and checksum. Remote installation remains
@@ -124,6 +125,28 @@ require_initialized() {
     echo "Run ./install-yappa.sh install --local-source first." >&2
     exit 1
   fi
+}
+
+record_desired_state() {
+  local desired_state="$1"
+  local host_state_root="$SCRIPT_ROOT/.yappa-host-state"
+  local installation_owner
+  installation_owner="$(stat -c '%u' "$SCRIPT_ROOT")"
+  if [[ "$installation_owner" != "$EUID" ]]; then
+    echo "Yappa lifecycle must run as the installation owner." >&2
+    return 1
+  fi
+  if [[ -e "$host_state_root" ]] &&
+    { [[ ! -d "$host_state_root" || -L "$host_state_root" ]] ||
+      [[ "$(stat -c '%u:%a' "$host_state_root")" != "$EUID:700" ]]; }; then
+    echo "Yappa host-state path is unsafe." >&2
+    return 1
+  fi
+  mkdir -p -m 700 "$host_state_root"
+  local temporary_state="$host_state_root/desired-state.partial"
+  printf '%s\n' "$desired_state" > "$temporary_state"
+  chmod 600 "$temporary_state"
+  mv -- "$temporary_state" "$host_state_root/desired-state"
 }
 
 install_local_bundle() {
@@ -359,6 +382,7 @@ case "$COMMAND" in
     else
       "$SCRIPT_ROOT/start-yappa.sh"
     fi
+    record_desired_state running
     ;;
   start)
     require_manifest
@@ -370,6 +394,7 @@ case "$COMMAND" in
       usage
       exit 1
     fi
+    record_desired_state running
     ;;
   stop)
     require_initialized
@@ -377,6 +402,7 @@ case "$COMMAND" in
       usage
       exit 1
     fi
+    record_desired_state stopped
     docker compose --project-directory "$SCRIPT_ROOT" down
     ;;
   status)
@@ -574,6 +600,14 @@ case "$COMMAND" in
       exit 1
     fi
     "$SCRIPT_ROOT/firewall-yappa.sh" remove
+    ;;
+  recover)
+    require_initialized
+    if [[ $# -ne 0 ]]; then
+      usage
+      exit 1
+    fi
+    "$SCRIPT_ROOT/recover-yappa.sh"
     ;;
   uninstall)
     BACKUP_PATH=""

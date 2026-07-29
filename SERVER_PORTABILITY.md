@@ -192,10 +192,18 @@ canonical lifecycle, must pass the operational verifier, stops cleanly when
 disabled, is visible in OS controls, and is completely removable without
 deleting data. Duplicate and failed registration cleanly refuse/remove state.
 All four containers use `restart: unless-stopped` for unexpected process and
-Docker-daemon recovery. Automated tests prove unit hardening, path quoting,
-opt-in registration/status/removal, duplicate refusal, failed-enable cleanup,
-and uninstall refusal while registered. Unraid, Windows, unattended boot,
-sleep/network recovery, and unhealthy-but-running remediation remain open.
+Docker-daemon recovery. A companion hardened user-systemd timer invokes one
+bounded recovery check per minute. Host-local desired state distinguishes an
+intentional stop from a requested-running server; recovery uses a
+single-instance lock, one Compose `up`, twelve bounded health/operational
+verification attempts, and a 15-minute cooldown after three failures. It
+therefore covers exited, missing, and unhealthy containers without an
+unbounded restart loop. Automated tests prove unit/timer hardening, path
+quoting, opt-in registration/status/removal, duplicate refusal, failed-enable
+cleanup, intentional-stop preservation, healthy no-op, successful degraded
+recovery, failure cooldown, and uninstall refusal while registered. Unraid,
+Windows, unattended boot, and real sleep/network transition evidence remain
+open.
 
 Linux firewall preview/apply/remove is now implemented for active UFW and
 firewalld hosts. Preview is unprivileged; apply/remove require an operator to
@@ -211,8 +219,11 @@ untouched, and uninstall refuses until owned rules are removed. Host-local
 registration is excluded from portable backups/restores and bundles but
 preserved across same-host upgrades. Plan and privilege-boundary tests pass;
 a user-namespace test also exercises complete root-owned UFW apply/removal and
-exact cleanup without touching the real host. Real UFW/firewalld distribution
-matrices remain required.
+exact cleanup without touching the real host when the kernel permits
+unprivileged namespace mapping. Hosted CI that forbids `/proc/self/uid_map`
+still runs plan, validation, privilege, ownership, and static rollback gates
+and reports the isolated mutation fixture as unavailable. Real UFW/firewalld
+distribution matrices remain required.
 
 ## Supported-Host Target
 

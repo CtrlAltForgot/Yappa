@@ -1092,8 +1092,14 @@ Before public DMs, Yappa must additionally define and verify:
   refuses active registration. Unit hardening enables `NoNewPrivileges`,
   `PrivateTmp`, and a private umask without embedding configuration or
   credentials. Every container has `restart: unless-stopped` for exited-process
-  and Docker-daemon recovery. Unattended boot, unhealthy-but-running recovery,
-  sleep/network transitions, systemd distribution matrices, Unraid, and
+  and Docker-daemon recovery. The registration also installs a hardened
+  one-minute recovery timer. Recovery reads private desired state and never
+  restarts an intentionally stopped server, takes a nonblocking lock, performs
+  only one Compose recovery, requires bounded service/backend checks plus the
+  full operational verifier, and enters a 15-minute cooldown after three
+  failures. Tests cover healthy no-op, stopped no-op, successful degraded
+  recovery, repeated-failure cooldown, and unit/timer removal. Unattended boot,
+  real sleep/network transitions, systemd distribution matrices, Unraid, and
   Windows service parity remain unproven.
 - Linux firewall lifecycle now separates unprivileged preview from explicit
   root apply/remove and never runs `sudo`, `pkexec`, firewall enablement, or
@@ -1107,8 +1113,10 @@ Before public DMs, Yappa must additionally define and verify:
   bundles and encrypted portable backups and carried only across same-host
   upgrades. Tests cover plan shape, invalid ports/CIDRs/modes, privilege
   refusal, forbidden exposure, state boundaries, uninstall refusal, and a
-  complete namespace-isolated root UFW apply/remove cycle. Real distribution
-  UFW/firewalld mutation/removal matrices remain required.
+  complete namespace-isolated root UFW apply/remove cycle where user namespaces
+  are permitted. Hosted kernels that reject UID mapping skip only that isolated
+  root mutation fixture while retaining plan/negative/static rollback gates.
+  Real distribution UFW/firewalld mutation/removal matrices remain required.
 - Ensure production secrets never live in the repository or images.
 - Add dependency auditing, secret scanning, static analysis, and reproducible
   release provenance to CI.

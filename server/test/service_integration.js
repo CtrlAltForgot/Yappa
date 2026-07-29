@@ -74,8 +74,19 @@ fi
     '.yappa-host-state',
     'service-registration',
   );
-  const unitName = fs.readFileSync(registration, 'utf8').trim();
+  const [unitName, recoveryUnitName, recoveryTimerName] = fs
+    .readFileSync(registration, 'utf8')
+    .trim()
+    .split('\n');
   assert.match(unitName, /^yappa-server-[a-f0-9]{16}\.service$/);
+  assert.match(
+    recoveryUnitName,
+    /^yappa-server-[a-f0-9]{16}-recovery\.service$/,
+  );
+  assert.match(
+    recoveryTimerName,
+    /^yappa-server-[a-f0-9]{16}-recovery\.timer$/,
+  );
   const unitPath = path.join(
     homeRoot,
     '.config',
@@ -84,6 +95,22 @@ fi
     unitName,
   );
   const unit = fs.readFileSync(unitPath, 'utf8');
+  const recoveryUnitPath = path.join(
+    homeRoot,
+    '.config',
+    'systemd',
+    'user',
+    recoveryUnitName,
+  );
+  const recoveryTimerPath = path.join(
+    homeRoot,
+    '.config',
+    'systemd',
+    'user',
+    recoveryTimerName,
+  );
+  const recoveryUnit = fs.readFileSync(recoveryUnitPath, 'utf8');
+  const recoveryTimer = fs.readFileSync(recoveryTimerPath, 'utf8');
   assert.equal(fs.statSync(unitPath).mode & 0o777, 0o600);
   assert.equal(fs.statSync(registration).mode & 0o777, 0o600);
   assert.match(unit, /^Type=oneshot$/m);
@@ -95,6 +122,16 @@ fi
   assert.match(unit, /ExecStartPost=.*install-yappa\.sh" verify$/m);
   assert.match(unit, /ExecStop=.*install-yappa\.sh" stop$/m);
   assert.doesNotMatch(unit, /\.env|password|secret|token/i);
+  assert.match(recoveryUnit, /ExecStart=.*install-yappa\.sh" recover$/m);
+  assert.match(recoveryUnit, /^TimeoutStartSec=180$/m);
+  assert.match(recoveryUnit, /^NoNewPrivileges=yes$/m);
+  assert.match(recoveryTimer, /^OnBootSec=2min$/m);
+  assert.match(recoveryTimer, /^OnUnitActiveSec=1min$/m);
+  assert.match(recoveryTimer, /^AccuracySec=15s$/m);
+  assert.match(
+    recoveryTimer,
+    new RegExp(`^Unit=${recoveryUnitName.replace('.', '\\.')}$`, 'm'),
+  );
 
   const duplicate = run('install');
   assert.notEqual(duplicate.status, 0);
@@ -108,6 +145,8 @@ fi
   assert.equal(removed.status, 0, removed.stderr || removed.stdout);
   assert.match(removed.stdout, /registration removed/);
   assert.equal(fs.existsSync(unitPath), false);
+  assert.equal(fs.existsSync(recoveryUnitPath), false);
+  assert.equal(fs.existsSync(recoveryTimerPath), false);
   assert.equal(fs.existsSync(registration), false);
   assert.equal(
     fs.existsSync(path.join(installation, '.yappa-host-state')),
@@ -115,11 +154,11 @@ fi
   );
   assert.match(
     fs.readFileSync(systemctlLog, 'utf8'),
-    /--user enable --now yappa-server-/,
+    /--user enable --now yappa-server-.*\.service yappa-server-.*-recovery\.timer/,
   );
   assert.match(
     fs.readFileSync(systemctlLog, 'utf8'),
-    /--user disable --now yappa-server-/,
+    /--user disable --now yappa-server-.*-recovery\.timer yappa-server-.*\.service/,
   );
 
   const failed = run('install', {SYSTEMCTL_FAIL_ENABLE: 'true'});

@@ -75,6 +75,7 @@ RUNTIME_FILES=(
   "package-lock.json"
   "package.json"
   "restore-yappa-backup.sh"
+  "recover-yappa.sh"
   "rollback-yappa.sh"
   "service-yappa.sh"
   "setup-domain.sh"
@@ -107,6 +108,7 @@ for executable_name in \
   setup-domain.sh \
   backup-yappa.sh \
   restore-yappa-backup.sh \
+  recover-yappa.sh \
   rollback-yappa.sh \
   service-yappa.sh \
   upgrade-yappa.sh \

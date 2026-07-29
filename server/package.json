@@ -9,7 +9,7 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "test": "npm run test:security",
-    "test:security": "node test/authorization_integration.js && node test/server_identity_integration.js && node test/install_verification.js && node test/lan_discovery_relay_integration.js && node test/safe_preview_lookup.js && node test/password_hardening_integration.js && node test/abuse_protection_integration.js && node test/messaging_e2ee_schema_integration.js && node test/log_safety.js && node test/repository_secret_scan.js && node test/install_manifest.js && node test/deployment_safety.js && node test/server_bundle.js && node test/backup_integration.js && node test/restore_integration.js && node test/upgrade_rollback_integration.js && node test/uninstall_integration.js && node test/service_integration.js && node test/firewall_integration.js"
+    "test:security": "node test/authorization_integration.js && node test/server_identity_integration.js && node test/install_verification.js && node test/lan_discovery_relay_integration.js && node test/safe_preview_lookup.js && node test/password_hardening_integration.js && node test/abuse_protection_integration.js && node test/messaging_e2ee_schema_integration.js && node test/log_safety.js && node test/repository_secret_scan.js && node test/install_manifest.js && node test/deployment_safety.js && node test/server_bundle.js && node test/backup_integration.js && node test/restore_integration.js && node test/upgrade_rollback_integration.js && node test/uninstall_integration.js && node test/service_integration.js && node test/firewall_integration.js && node test/recovery_integration.js"
   },
   "engines": {
     "node": ">=18"

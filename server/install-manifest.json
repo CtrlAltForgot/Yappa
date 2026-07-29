@@ -209,7 +209,8 @@
     "service-remove",
     "firewall-plan",
     "firewall-apply",
-    "firewall-remove"
+    "firewall-remove",
+    "recover"
   ],
   "implementedLifecycleCommands": {
     "linux": [
@@ -230,6 +231,7 @@
       "firewall-plan",
       "firewall-apply",
       "firewall-remove",
+      "recover",
       "verify",
       "verify-backup"
     ],

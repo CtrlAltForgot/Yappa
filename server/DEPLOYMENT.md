@@ -196,9 +196,20 @@ rather than claiming unattended boot support.
 
 Every canonical container has `restart: unless-stopped`, so Docker restarts a
 container whose process exits unexpectedly and restores it after Docker daemon
-restart. This does not yet detect a process that remains alive but unhealthy;
-bounded health-based recovery and sleep/network-change tests remain release
-work.
+restart. Yappa also records whether the last lifecycle request was `running`
+or `stopped` in private host-local state. `install-yappa.sh recover` does
+nothing after an intentional stop. When running was requested, it acquires a
+single-instance lock, checks the canonical services and backend health, makes
+at most one Compose recovery, waits through twelve bounded verification
+attempts, and requires the full operational verifier. Three consecutive
+failures trigger a 15-minute cooldown.
+
+The explicit user-service registration includes a hardened one-minute systemd
+timer for that bounded recovery command. This catches exited, missing, and
+unhealthy services after ordinary crashes or a resumed user session without
+creating an infinite restart loop. Removal deletes the main unit, timer,
+recovery unit, and registration together. Real sleep, network transition, and
+distribution-specific systemd conformance remain release work.
 
 ## Explicit host firewall lifecycle
 

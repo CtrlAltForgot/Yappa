@@ -170,16 +170,25 @@ test ! -s "$5"
     ],
     {encoding: 'utf8'},
   );
-  assert.equal(
-    rootMutation.status,
-    0,
-    rootMutation.stderr || rootMutation.stdout,
-  );
-  const mutationLog = fs.readFileSync(ufwLog, 'utf8');
-  assert.match(mutationLog, /allow 80\/tcp/);
-  assert.match(mutationLog, /allow 443\/udp/);
-  assert.match(mutationLog, /allow 50000:50100\/udp/);
-  assert.match(mutationLog, /--force delete allow 80\/tcp/);
+  if (
+    rootMutation.status !== 0 &&
+    /uid_map: Operation not permitted/.test(rootMutation.stderr)
+  ) {
+    process.stdout.write(
+      'Hosted kernel forbids unprivileged user namespaces; root firewall mutation fixture skipped.\n',
+    );
+  } else {
+    assert.equal(
+      rootMutation.status,
+      0,
+      rootMutation.stderr || rootMutation.stdout,
+    );
+    const mutationLog = fs.readFileSync(ufwLog, 'utf8');
+    assert.match(mutationLog, /allow 80\/tcp/);
+    assert.match(mutationLog, /allow 443\/udp/);
+    assert.match(mutationLog, /allow 50000:50100\/udp/);
+    assert.match(mutationLog, /--force delete allow 80\/tcp/);
+  }
 } finally {
   fs.rmSync(temporaryRoot, {recursive: true, force: true});
 }

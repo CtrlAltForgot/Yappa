@@ -85,6 +85,10 @@ const firewallInstaller = fs.readFileSync(
   path.join(serverRoot, 'firewall-yappa.sh'),
   'utf8',
 );
+const recoveryInstaller = fs.readFileSync(
+  path.join(serverRoot, 'recover-yappa.sh'),
+  'utf8',
+);
 const installManifest = JSON.parse(
   fs.readFileSync(path.join(serverRoot, 'install-manifest.json'), 'utf8'),
 );
@@ -167,6 +171,7 @@ for (const [name, script] of [
   ['uninstall-yappa.sh', uninstallInstaller],
   ['service-yappa.sh', serviceInstaller],
   ['firewall-yappa.sh', firewallInstaller],
+  ['recover-yappa.sh', recoveryInstaller],
   ['verify-yappa-backup.sh', restoreVerifier],
 ]) {
   assert.match(script, /^umask 077$/m, `${name} must create private files`);
@@ -235,6 +240,8 @@ assert.match(serviceInstaller, /ExecStop=.*install-yappa\.sh.*stop/);
 assert.match(serviceInstaller, /NoNewPrivileges=yes/);
 assert.match(serviceInstaller, /PrivateTmp=yes/);
 assert.match(serviceInstaller, /UMask=0077/);
+assert.match(serviceInstaller, /OnUnitActiveSec=1min/);
+assert.match(serviceInstaller, /install-yappa\.sh.*recover/);
 assert.doesNotMatch(
   serviceInstaller,
   /loginctl|enable-linger|sudo|pkexec/,
@@ -257,6 +264,19 @@ assert.doesNotMatch(
   firewallInstaller,
   /\bufw\s+(--force\s+)?enable\b|systemctl[^\\n]*firewalld/,
   'Yappa must not enable or start the host firewall implicitly.',
+);
+assert.match(recoveryInstaller, /desired-state/);
+assert.match(recoveryInstaller, /flock -n 9/);
+assert.match(recoveryInstaller, /MAX_FAILURES=3/);
+assert.match(recoveryInstaller, /COOLDOWN_SECONDS=900/);
+assert.match(recoveryInstaller, /VERIFY_ATTEMPTS=12/);
+assert.match(recoveryInstaller, /docker compose.*up -d/);
+assert.match(recoveryInstaller, /verify-yappa-install\.sh/);
+assert.match(recoveryInstaller, /intentionally stopped/);
+assert.doesNotMatch(
+  recoveryInstaller,
+  /docker compose[^\n]*down|while true/,
+  'Recovery must be bounded and must not turn a health check into shutdown.',
 );
 assert.match(
   serverBundleBuild,

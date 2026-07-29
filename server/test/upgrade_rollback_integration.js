@@ -215,6 +215,13 @@ printf 'docker %s\\n' "$*" >> "$YAPPA_TEST_LOG"
   );
   assert.equal(
     fs.readFileSync(
+      path.join(successfulRoot, '.yappa-host-state', 'desired-state'),
+      'utf8',
+    ),
+    'running\n',
+  );
+  assert.equal(
+    fs.readFileSync(
       path.join(temporaryRoot, 'successful.pre-rollback', 'runtime-version'),
       'utf8',
     ),
