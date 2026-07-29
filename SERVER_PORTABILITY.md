@@ -285,6 +285,17 @@ operation nor bare-metal boot,
 sleep, network-transition, reboot, firewall-policy, or unattended recovery
 testing.
 
+A third mandatory hosted contract now runs the complete canonical Compose
+workload on Ubuntu 24.04 from a deterministic checksum-installed bundle. It
+verifies all four containers, database schema and integrity, persistent
+storage, signed identity, routed API, WebSocket upgrade, guarded LiveKit
+route, intentional-stop suppression, identity persistence across restart, and
+bounded recovery after a forced backend stop. Exact-head run `30415529328`
+passed on commit `d5d920c`. This is real workload/recovery evidence on one clean hosted
+Linux machine, not bare-metal reboot, sleep/network transition, external
+reachability, forced TURN, real media, or cross-distribution full-stack
+evidence.
+
 ### Canonical architecture
 
 - Keep one versioned configuration schema and one set of container images,

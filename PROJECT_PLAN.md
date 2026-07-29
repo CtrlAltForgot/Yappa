@@ -1242,12 +1242,29 @@ Current implementation slice:
   contracts on commit `dd322a7`. This proves the PowerShell bridge only; real
   WSL2 Docker, restart/network behavior, Windows Firewall, Windows service
   supervision, and Windows Server hardware remain unverified.
+- A mandatory Ubuntu 24.04 full-stack workflow now builds the deterministic
+  release-shaped server bundle, checksum-installs it into a new path containing
+  a space, starts the real Node/Caddy/LiveKit/discovery workload, and runs the
+  operational schema/storage/signed-identity/API/WebSocket/LiveKit-route
+  verifier. It then proves intentional stop suppresses recovery, restarts with
+  the same persistent identity, forcibly stops the backend, and requires
+  bounded recovery plus the full verifier to pass before deleting containers
+  and volumes. Exact-head run `30415529328` passed on commit `d5d920c`. This gate exposed
+  and fixed hard-coded host UID/GID `1000`, secure extraction accidentally
+  making runtime assets unreadable to containers, LiveKit TURN/config
+  isolation incompatibilities, and fresh databases generating a legacy
+  64-bit `node_` ID while the signed verifier required a 128-bit `srv_` ID.
+  Fresh servers now use 128-bit `srv_` IDs; immutable deployed 64-bit `node_`
+  IDs remain verifiable. The complete backend/security suite also passes
+  locally. These backend/deployment
+  changes are not yet deployed to Unraid because approved SSH access remains
+  unavailable.
 
 Next work, in order:
 
-1. Add full Docker workload, bare-metal/reboot, sleep/network, and unattended
-   recovery evidence; validate the Windows bridge on real WSL2; then implement
-   and test Windows Firewall and background-supervision parity.
+1. Add bare-metal/reboot and sleep/network-transition evidence; validate the
+   Windows bridge on real WSL2; then implement and test Windows Firewall and
+   background-supervision parity.
 2. Obtain hosted Linux desktop evidence and finish signed release engineering:
    production versions, signing, SBOMs, provenance, tagged publication,
    supported-version/vulnerability policy, and update/distribution behavior.

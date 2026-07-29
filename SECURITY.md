@@ -1015,6 +1015,24 @@ unclaimed; any other manager failure remains fatal. Local Fedora/Rocky
 execution still passes the complete real user-manager contract.
 The same exact head passed the backend security suite in run `30413430380`.
 
+The canonical full-stack contract now exercises a checksum-installed bundle
+and the actual Node, Caddy, LiveKit, and discovery workload on Ubuntu 24.04.
+It requires operational verification, intentional-stop suppression, identity
+persistence across restart, and successful bounded recovery after forcibly
+stopping the backend. Exact-head run `30415529328` passed on commit `d5d920c`. Real
+execution exposed and corrected four security/reliability defects: a
+hard-coded UID/GID `1000`, owner-only extraction modes on non-secret runtime
+assets, an unusable LiveKit TURN/config permission boundary, and disagreement
+between fresh server-ID generation and the signed verifier. Node and discovery
+now run as the unprivileged installation owner. LiveKit's UDP-443 exception is
+explicit root with all capabilities dropped except `NET_BIND_SERVICE`, a
+read-only root, `no-new-privileges`, no writable host-data mount, and only the
+installation group supplemented to read mode-`0640` `livekit.yaml` beneath the
+mode-`0700` install root. Fresh identities use 128-bit `srv_` IDs; immutable
+legacy 64-bit `node_` identities remain accepted by cryptographic verification.
+This does not prove outside-network reachability, forced TURN media, a real
+call, bare-metal firewall policy, reboot, or sleep/network transitions.
+
 Local development bundle installation now requires a caller-supplied full
 lowercase SHA-256, one versioned archive root matching embedded metadata, a
 brand-new absolute destination, and a private installed root. Extraction occurs
@@ -1297,8 +1315,10 @@ Before public DMs, Yappa must additionally define and verify:
   dependencies. Node, Caddy, and LiveKit use read-only root filesystems,
   bounded `noexec,nosuid,nodev` temporary mounts, dropped default
   capabilities, init reaping, and `no-new-privileges`; only Caddy and LiveKit
-  regain `NET_BIND_SERVICE`. The startup script restricts and assigns the
-  persistent data directory to the backend account. Static deployment tests
+  regain `NET_BIND_SERVICE`. LiveKit's current UDP-443 host-network exception
+  is the explicitly bounded root case described above; Node and discovery use
+  the installation owner's numeric IDs. The startup script restricts the
+  persistent data directory to that owner. Static deployment tests
   and Compose rendering pass. Unraid deployment on 2026-07-24 confirmed the
   locked image build, healthy UID/GID `1000` runtime, read-only roots, dropped
   capabilities, `no-new-privileges`, private secret/data modes, schema `1`,

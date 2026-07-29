@@ -422,11 +422,15 @@ refuses a database created by newer code. Rolling software back requires
 restoring the matching pre-upgrade `.env` and `data/` backup into an empty
 directory; never run an older image against an upgraded database.
 
-The packaged backend runs as unprivileged UID/GID `1000:1000`; the startup
-script creates, owns, and restricts `data/` for that account. All three
+The packaged backend and discovery relay run as the unprivileged numeric
+UID/GID of the installation owner; startup verifies and restricts `data/` for
+that account without requiring a privileged `chown`. All four
 containers use read-only root filesystems, bounded `noexec,nosuid,nodev`
 temporary mounts, dropped Linux capabilities, and `no-new-privileges`.
-Only Caddy and LiveKit regain `NET_BIND_SERVICE` for their intentional
-low-numbered listeners. The backend image contains production dependencies and
+Only Caddy and LiveKit regain `NET_BIND_SERVICE` for intentional low-numbered
+listeners. LiveKit is an explicit root exception for host-network TURN/UDP
+443, but has no writable host-data mount; its root is read-only and its only
+supplementary group can read mode-`0640` `livekit.yaml` beneath the private
+installation root. The backend image contains production dependencies and
 runtime source only, and its build context excludes secrets, data, databases,
 backups, tests, and host `node_modules`.
