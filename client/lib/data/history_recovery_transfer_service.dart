@@ -20,7 +20,8 @@ class HistoryRecoveryTransferService {
     required SealedHistoryRecoveryTransfer sealed,
   }) async {
     context.validate();
-    if (sealed.chunks.isEmpty || sealed.chunks.length > 1024) {
+    if (sealed.chunks.isEmpty ||
+        sealed.chunks.length > HistoryRecoveryCryptor.maxChunkCount) {
       throw const FormatException('Invalid encrypted-history transfer.');
     }
     final totalBytes = sealed.chunks.fold<int>(
@@ -28,7 +29,7 @@ class HistoryRecoveryTransferService {
       (total, chunk) => total + chunk.length,
     );
     if (totalBytes < sealed.chunks.length ||
-        totalBytes > 256 * 1024 * 1024 ||
+        totalBytes > HistoryRecoveryCryptor.maxCiphertextBytes ||
         sealed.chunks.any(
           (chunk) =>
               chunk.isEmpty ||

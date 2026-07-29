@@ -52,6 +52,11 @@ attempts leave the existing event set and recovery receipts unchanged.
 Revocation/ban lifecycle expansion, representative behavior at the storage
 ceiling, and real-device evidence remain outstanding.
 
+The aligned capacity contract passes Flutter analysis, all 79 client tests,
+and the complete backend security/storage/backup/deployment/recovery suite.
+The backend correction remains undeployed because approved Unraid access is
+currently unavailable.
+
 Yappa will use explicit, same-account, device-assisted recovery. An existing
 authorized device decrypts its authenticated local event history and
 re-encrypts it directly to a separately authorized recovery key belonging to
@@ -185,7 +190,8 @@ and byte total transactionally before making the transfer visible.
 Limits for the first release:
 
 - 256 KiB maximum ciphertext chunk;
-- 1,024 chunks and 256 MiB per transfer;
+- 64 MiB of canonical client history, producing at most 257 authenticated
+  chunks and 67,116,060 bytes of relay ciphertext per transfer;
 - one uploading and one ready transfer per destination/channel;
 - seven-day expiry for unfinished transfers and 30-day expiry for ready
   transfers;
@@ -250,7 +256,7 @@ The feature is incomplete until automated and real-device evidence covers:
    banned account, wrong server/channel, replay, rollback, and overlap
    rejection;
 6. ciphertext, manifest, nonce, digest, signature, and truncation tampering;
-7. bounded memory/disk behavior at the 256-MiB transfer ceiling;
+7. bounded memory/disk behavior at the 64-MiB canonical-history ceiling;
 8. database, upload directory, logs, backups, notifications, and diagnostics
    containing no recovered plaintext or recovery private key;
 9. restored-server transfer continuation and authenticated attachment

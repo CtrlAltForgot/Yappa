@@ -206,6 +206,21 @@ void main() {
         token: 'token',
       );
 
+      await expectLater(
+        service.upload(
+          context: context,
+          sealed: SealedHistoryRecoveryTransfer(
+            manifest: manifest,
+            manifestSha256: sha256.convert(manifest).toString(),
+            yuidSignature: _signature,
+            chunks: List.generate(
+              HistoryRecoveryCryptor.maxChunkCount + 1,
+              (_) => Uint8List.fromList([1]),
+            ),
+          ),
+        ),
+        throwsA(isA<FormatException>()),
+      );
       final ready = await service.upload(context: context, sealed: sealed);
       expect(ready.state, HistoryRecoveryTransferState.ready);
       expect(api.uploaded, [0, 1]);

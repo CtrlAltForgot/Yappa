@@ -1392,6 +1392,17 @@ Current implementation slice:
   both the projected event set and recovery receipts unchanged. Flutter
   analysis and all 78 client tests pass. Revocation/ban lifecycle expansion,
   representative ceiling-scale behavior, and real-device validation remain.
+  Scale-limit audit found that the old 256 MiB relay claim could not be
+  produced by the live 64 MiB encrypted event store or retained by the 96 MiB
+  protected outbox. Client cryptography, transfer validation, outbox
+  validation, and the backend relay now share the reachable contract:
+  64 MiB canonical history, at most 257 authenticated chunks, and at most
+  67,116,060 ciphertext bytes. Boundary rejection tests cover both client and
+  server enforcement. Flutter analysis, all 79 client tests, and the complete
+  backend security/storage/backup/deployment/recovery suite pass.
+  Representative near-ceiling runtime measurement remains open. This backend
+  limit correction is not yet deployed to Unraid because approved deployment
+  access remains unavailable.
   Threads are not implemented.
 
 Next work, in order:

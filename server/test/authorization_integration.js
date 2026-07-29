@@ -1027,6 +1027,27 @@ async function run() {
     manifestSha256: transferManifestHash,
     yuidSignature: transferSignature,
   };
+  await expectStatus(
+    `/api/channels/${encryptedChannelId}/mls/history-recovery/transfers`,
+    400,
+    {
+      method: 'POST',
+      token: owner.token,
+      body: {...transferCreateBody, chunkCount: 258, totalBytes: 258},
+    },
+  );
+  await expectStatus(
+    `/api/channels/${encryptedChannelId}/mls/history-recovery/transfers`,
+    400,
+    {
+      method: 'POST',
+      token: owner.token,
+      body: {
+        ...transferCreateBody,
+        totalBytes: 64 * 1024 * 1024 + 257 * 28 + 1,
+      },
+    },
+  );
   const transferCreateResponse = await request(
     `/api/channels/${encryptedChannelId}/mls/history-recovery/transfers`,
     {

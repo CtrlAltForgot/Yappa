@@ -14,6 +14,15 @@ Uint8List _decode(String value) => Uint8List.fromList(
 );
 
 void main() {
+  test('uses the live event-store recovery ceiling', () {
+    expect(HistoryRecoveryCryptor.maxPlaintextBytes, 64 * 1024 * 1024);
+    expect(HistoryRecoveryCryptor.maxChunkCount, 257);
+    expect(
+      HistoryRecoveryCryptor.maxCiphertextBytes,
+      64 * 1024 * 1024 + 257 * 28,
+    );
+  });
+
   test(
     'round trips bounded signed recovery chunks and rejects tampering',
     () async {

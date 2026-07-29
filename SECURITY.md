@@ -1077,6 +1077,17 @@ Restart-durable recovery upload increment, 2026-07-28:
   and replay attempts leave events and receipts unchanged. Flutter analysis
   and all 78 client tests pass. Revocation/ban lifecycle, representative
   ceiling-scale behavior, and real-device evidence remain open.
+- The recovery size contract now matches the live storage path. The prior
+  256 MiB relay allowance exceeded both the 64 MiB encrypted event-store
+  ceiling and the 96 MiB protected-outbox envelope. Cryptography, client
+  transfer/outbox validation, and the backend now enforce 64 MiB of canonical
+  history, no more than 257 chunks, and no more than 67,116,060 ciphertext
+  bytes. Client and server boundary rejections are automated. Flutter
+  analysis, all 79 client tests, and the complete backend
+  security/storage/backup/deployment/recovery suite pass. A representative
+  near-ceiling runtime measurement remains required. The backend correction is
+  not yet deployed to Unraid because approved deployment access remains
+  unavailable.
 
 Sparse MLS-sequence correction, 2026-07-28:
 

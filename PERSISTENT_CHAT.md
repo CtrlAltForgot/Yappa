@@ -197,6 +197,11 @@ contract.
   conflicting transfer replay, and conflicting overlap are now rejected
   without partially changing durable history. Revocation/ban expansion,
   ceiling-scale behavior, and real two-device evidence remain.
+- Recovery capacity now uses one reachable limit across the live client and
+  relay: 64 MiB of canonical encrypted event history, at most 257 chunks, and
+  at most 67,116,060 ciphertext bytes. This replaces the unreachable 256 MiB
+  relay-only claim. Boundary rejection is automated; near-ceiling runtime and
+  disk measurement remain.
 - Transfers bind account/YUID, destination device key, server, channel, source
   device, history range, and version; use chunk integrity and resumable
   cursors; and reject replay, rollback, substitution, and removed devices.

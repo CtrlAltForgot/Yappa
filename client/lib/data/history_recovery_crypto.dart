@@ -132,6 +132,12 @@ class HistoryRecoveryCryptor {
   static const _macBytes = 16;
   static const _maxPlaintextChunkBytes =
       maxCiphertextChunkBytes - _nonceBytes - _macBytes;
+  static const maxPlaintextBytes = 64 * 1024 * 1024;
+  static const maxChunkCount =
+      (maxPlaintextBytes + _maxPlaintextChunkBytes - 1) ~/
+      _maxPlaintextChunkBytes;
+  static const maxCiphertextBytes =
+      maxPlaintextBytes + maxChunkCount * (_nonceBytes + _macBytes);
 
   final X25519 _agreement = X25519();
   final AesGcm _cipher = AesGcm.with256bits();
@@ -147,7 +153,7 @@ class HistoryRecoveryCryptor {
   }) async {
     context.validate();
     if (canonicalRecords.isEmpty ||
-        canonicalRecords.length > 256 * 1024 * 1024 ||
+        canonicalRecords.length > maxPlaintextBytes ||
         destinationRecoveryPublicKey.type != KeyPairType.x25519 ||
         !_constantTimeEquals(
           destinationRecoveryPublicKey.bytes,
@@ -158,7 +164,7 @@ class HistoryRecoveryCryptor {
     final chunkCount =
         (canonicalRecords.length + _maxPlaintextChunkBytes - 1) ~/
         _maxPlaintextChunkBytes;
-    if (chunkCount < 1 || chunkCount > 1024) {
+    if (chunkCount < 1 || chunkCount > maxChunkCount) {
       throw const FormatException('History recovery payload is too large.');
     }
 
@@ -251,7 +257,7 @@ class HistoryRecoveryCryptor {
     if (authorizedSourceYuidPublicKey.type != KeyPairType.ed25519 ||
         transfer.manifest.isEmpty ||
         transfer.chunks.isEmpty ||
-        transfer.chunks.length > 1024) {
+        transfer.chunks.length > maxChunkCount) {
       throw const FormatException('Invalid history recovery transfer.');
     }
     final manifestHash = await _hash.hash(transfer.manifest);

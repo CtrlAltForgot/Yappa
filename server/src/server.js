@@ -4086,6 +4086,9 @@ const historyRecoveryChunkBody = express.raw({
   type: 'application/octet-stream',
   limit: '256kb',
 });
+const historyRecoveryMaxChunks = 257;
+const historyRecoveryMaxCiphertextBytes =
+  64 * 1024 * 1024 + historyRecoveryMaxChunks * (12 + 16);
 
 function compactExpiredHistoryRecoveryTransfers(at = nowIso()) {
   const expired = db.prepare(`
@@ -4253,10 +4256,10 @@ app.post(
       eventCount > rangeCount ||
       !Number.isSafeInteger(chunkCount) ||
       chunkCount < 1 ||
-      chunkCount > 1024 ||
+      chunkCount > historyRecoveryMaxChunks ||
       !Number.isSafeInteger(totalBytes) ||
       totalBytes < chunkCount ||
-      totalBytes > 256 * 1024 * 1024 ||
+      totalBytes > historyRecoveryMaxCiphertextBytes ||
       !manifest ||
       manifest.length < 1 ||
       manifest.length > 64 * 1024 ||

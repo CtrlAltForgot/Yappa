@@ -275,8 +275,8 @@ class HistoryRecoveryOutbox {
         !RegExp(r'^[a-f0-9]{64}$').hasMatch(sealed.manifestSha256) ||
         !RegExp(r'^[A-Za-z0-9_-]{86}$').hasMatch(sealed.yuidSignature) ||
         sealed.chunks.isEmpty ||
-        sealed.chunks.length > 1024 ||
-        totalBytes > 256 * 1024 * 1024 ||
+        sealed.chunks.length > HistoryRecoveryCryptor.maxChunkCount ||
+        totalBytes > HistoryRecoveryCryptor.maxCiphertextBytes ||
         sealed.chunks.any(
           (chunk) =>
               chunk.isEmpty ||
