@@ -64,7 +64,7 @@ services:
       LISTEN_HOST: "0.0.0.0"
     volumes:
       - ./data:/app/data
-    user: "1000:1000"
+    user: "${YAPPA_RUNTIME_UID:-1000}:${YAPPA_RUNTIME_GID:-1000}"
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
@@ -82,7 +82,7 @@ services:
       - newchat-node
     network_mode: host
     command: node src/lan-discovery-relay.js
-    user: "1000:1000"
+    user: "${YAPPA_RUNTIME_UID:-1000}:${YAPPA_RUNTIME_GID:-1000}"
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777

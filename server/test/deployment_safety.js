@@ -204,7 +204,11 @@ for (const [name, script] of [
 }
 
 assert.match(startup, /chmod 600 livekit\.yaml/);
-assert.match(startup, /chown -R 1000:1000 data/);
+assert.match(startup, /RUNTIME_UID="\$\(id -u\)"/);
+assert.match(startup, /startup must run as an unprivileged installation owner/);
+assert.match(startup, /YAPPA_RUNTIME_UID=\$\{RUNTIME_UID\}/);
+assert.match(startup, /data must be owned by the installation owner/);
+assert.doesNotMatch(startup, /chown -R 1000:1000 data/);
 assert.match(startup, /chmod 700 data/);
 assert.match(
   startup,
@@ -362,7 +366,10 @@ assert.doesNotMatch(
   /\$\{YAPPA_HTTPS_PORT:-443\}:443\/udp/,
   'UDP 443 must remain available to the authenticated LiveKit TURN fallback.',
 );
-assert.match(compose, /user:\s*["']1000:1000["']/);
+assert.match(
+  compose,
+  /user:\s*["']\$\{YAPPA_RUNTIME_UID:-1000\}:\$\{YAPPA_RUNTIME_GID:-1000\}["']/,
+);
 assert.equal(
   (compose.match(/read_only:\s*true/g) || []).length,
   4,
@@ -648,6 +655,29 @@ const securityWorkflow = fs.readFileSync(
   path.join(workflowRoot, 'security.yml'),
   'utf8',
 );
+const serverFullStackWorkflow = fs.readFileSync(
+  path.join(workflowRoot, 'server_full_stack.yml'),
+  'utf8',
+);
+const serverFullStackContract = fs.readFileSync(
+  path.join(repositoryRoot, '.github', 'scripts', 'test-server-full-stack.sh'),
+  'utf8',
+);
+assert.match(
+  serverFullStackWorkflow,
+  /actions\/checkout@[a-f0-9]{40}/,
+  'Full-stack checkout action must be commit-pinned.',
+);
+assert.doesNotMatch(serverFullStackWorkflow, /continue-on-error:\s*true/);
+assert.match(serverFullStackWorkflow, /test-server-full-stack\.sh/);
+assert.match(serverFullStackContract, /build-server-bundle\.sh/);
+assert.match(serverFullStackContract, /install-yappa\.sh" install/);
+assert.match(serverFullStackContract, /install-yappa\.sh" verify/);
+assert.match(serverFullStackContract, /install-yappa\.sh" stop/);
+assert.match(serverFullStackContract, /install-yappa\.sh" recover/);
+assert.match(serverFullStackContract, /docker stop newchat-node/);
+assert.match(serverFullStackContract, /sha256sum "\$IDENTITY_PATH"/);
+assert.match(serverFullStackContract, /down --volumes --remove-orphans/);
 assert.match(
   desktopWorkflows[0],
   /bash -n server\/install-yappa\.sh/,

@@ -1,0 +1,55 @@
+name: Linux Server Full-Stack Contract
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "server/**"
+      - ".github/release-versions.json"
+      - ".github/scripts/build-server-bundle.sh"
+      - ".github/scripts/test-server-full-stack.sh"
+      - ".github/workflows/server_full_stack.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "server/**"
+      - ".github/release-versions.json"
+      - ".github/scripts/build-server-bundle.sh"
+      - ".github/scripts/test-server-full-stack.sh"
+      - ".github/workflows/server_full_stack.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: yappa-linux-full-stack-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  canonical-workload:
+    name: Canonical Docker workload + recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install host verification tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends age sqlite3
+
+      - name: Run canonical full-stack contract
+        run: .github/scripts/test-server-full-stack.sh
+
+      - name: Capture failure diagnostics
+        if: ${{ failure() }}
+        run: |
+          docker ps --all
+          docker logs newchat-node 2>&1 || true
+          docker logs yappa-livekit 2>&1 || true
+          docker logs yappa-proxy 2>&1 || true
