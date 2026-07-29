@@ -272,6 +272,24 @@ install_local_bundle() {
     echo "$install_directory" >&2
     exit 1
   fi
+  find "$install_directory" -type d -exec chmod 755 {} +
+  find "$install_directory" -type f -exec chmod 644 {} +
+  for installed_executable in \
+    install-yappa.sh \
+    firewall-yappa.sh \
+    start-yappa.sh \
+    setup-domain.sh \
+    backup-yappa.sh \
+    restore-yappa-backup.sh \
+    recover-yappa.sh \
+    rollback-yappa.sh \
+    service-yappa.sh \
+    upgrade-yappa.sh \
+    uninstall-yappa.sh \
+    verify-yappa-install.sh \
+    verify-yappa-backup.sh; do
+    chmod 755 "$install_directory/$installed_executable"
+  done
   chmod 700 "$install_directory"
 
   trap - EXIT INT TERM

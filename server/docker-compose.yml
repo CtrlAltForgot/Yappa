@@ -36,6 +36,7 @@ services:
     container_name: yappa-livekit
     network_mode: host
     command: --config /etc/livekit/livekit.yaml
+    user: "${YAPPA_RUNTIME_UID:-1000}:${YAPPA_RUNTIME_GID:-1000}"
     volumes:
       - ./livekit.yaml:/etc/livekit/livekit.yaml:ro
     read_only: true

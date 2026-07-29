@@ -772,6 +772,14 @@ assert.match(linuxInstaller, /refusing to merge or overwrite/);
 assert.match(linuxInstaller, /mkdir -m 700 "\$install_directory"/);
 assert.match(
   linuxInstaller,
+  /find "\$install_directory" -type f -exec chmod 644 \{\} \+/,
+);
+assert.match(
+  linuxInstaller,
+  /chmod 755 "\$install_directory\/\$installed_executable"/,
+);
+assert.match(
+  linuxInstaller,
   /verify\)[\s\S]*?"\$SCRIPT_ROOT\/verify-yappa-install\.sh"/,
   'The lifecycle verify command must run installation verification.',
 );
