@@ -68,24 +68,16 @@ if ! systemctl start "user@$TEST_UID.service"; then
     exit 1
   fi
   echo "Distro PAM wrapper is blocked by the hosted container boundary."
-  echo "Starting the same real unprivileged systemd user manager directly."
+  echo "Removing only its disposable account-policy check and retrying."
+  VENDOR_SYSTEMD_PAM=/usr/lib/pam.d/systemd-user
+  [[ -f "$VENDOR_SYSTEMD_PAM" ]] ||
+    { echo "No vendor systemd-user PAM policy is available." >&2; exit 1; }
+  install -d -m 755 /etc/pam.d
+  grep -Ev '^-?account[[:space:]]' "$VENDOR_SYSTEMD_PAM" \
+    > /etc/pam.d/systemd-user
+  chmod 644 /etc/pam.d/systemd-user
   systemctl reset-failed "user@$TEST_UID.service"
-  install -d -m 700 -o "$TEST_UID" -g "$TEST_UID" "/run/user/$TEST_UID"
-  SYSTEMD_USER_BINARY=
-  for candidate in /usr/lib/systemd/systemd /lib/systemd/systemd; do
-    if [[ -x "$candidate" ]]; then
-      SYSTEMD_USER_BINARY="$candidate"
-      break
-    fi
-  done
-  [[ -n "$SYSTEMD_USER_BINARY" ]] ||
-    { echo "No systemd user-manager binary is available." >&2; exit 1; }
-  runuser -u "$TEST_USER" -- env \
-    HOME="$TEST_HOME" \
-    XDG_RUNTIME_DIR="/run/user/$TEST_UID" \
-    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$TEST_UID/bus" \
-    "$SYSTEMD_USER_BINARY" --user &
-  DIRECT_MANAGER_PID=$!
+  systemctl start "user@$TEST_UID.service"
 fi
 RUNTIME_DIRECTORY="/run/user/$TEST_UID"
 for _ in {1..20}; do
@@ -94,11 +86,6 @@ for _ in {1..20}; do
 done
 [[ -S "$RUNTIME_DIRECTORY/bus" ]] ||
   { echo "Per-user systemd bus did not start." >&2; exit 1; }
-if [[ -n "${DIRECT_MANAGER_PID:-}" ]] &&
-  ! kill -0 "$DIRECT_MANAGER_PID" 2>/dev/null; then
-  echo "Direct unprivileged systemd user manager exited." >&2
-  exit 1
-fi
 
 run_as_test_user() {
   runuser -u "$TEST_USER" -- env \
