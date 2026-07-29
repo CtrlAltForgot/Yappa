@@ -235,7 +235,22 @@
       "verify",
       "verify-backup"
     ],
-    "windows": ["preflight"]
+    "windows": [
+      "preflight",
+      "install",
+      "start",
+      "stop",
+      "status",
+      "logs",
+      "backup",
+      "restore",
+      "upgrade",
+      "rollback",
+      "uninstall",
+      "recover",
+      "verify",
+      "verify-backup"
+    ]
   },
   "implementedHealthChecks": [
     "container-health",

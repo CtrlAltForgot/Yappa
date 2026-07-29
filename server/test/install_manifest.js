@@ -221,7 +221,22 @@ assert.deepEqual(manifest.implementedLifecycleCommands.linux, [
   'verify',
   'verify-backup',
 ]);
-assert.deepEqual(manifest.implementedLifecycleCommands.windows, ['preflight']);
+assert.deepEqual(manifest.implementedLifecycleCommands.windows, [
+  'preflight',
+  'install',
+  'start',
+  'stop',
+  'status',
+  'logs',
+  'backup',
+  'restore',
+  'upgrade',
+  'rollback',
+  'uninstall',
+  'recover',
+  'verify',
+  'verify-backup',
+]);
 for (const commands of Object.values(
   manifest.implementedLifecycleCommands,
 )) {

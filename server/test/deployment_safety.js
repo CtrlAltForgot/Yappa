@@ -764,12 +764,19 @@ assert.match(
 );
 assert.match(
   windowsInstaller,
-  /Installation remains disabled until release validation passes/,
+  /runs Yappa's canonical Linux lifecycle inside one[\s\S]*explicit WSL2 distribution/,
+);
+assert.match(windowsInstaller, /Invoke-Wsl -Arguments \$arguments\.ToArray\(\)/);
+assert.match(windowsInstaller, /not a Windows \/mnt drive/);
+assert.doesNotMatch(
+  windowsInstaller,
+  /(?:bash|sh)",\s*"-c"/,
+  'Windows lifecycle dispatch must not interpolate arguments into a shell command.',
 );
 assert.doesNotMatch(
   windowsInstaller,
   /(ConvertTo-SecureString|PSCredential|Get-Credential)/,
-  'The preflight-only wrapper must not request or retain administrator credentials.',
+  'The Windows wrapper must not request or retain administrator credentials.',
 );
 assert.match(installVerifier, /^set -euo pipefail$/m);
 assert.match(installVerifier, /^umask 077$/m);

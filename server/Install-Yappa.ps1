@@ -11,28 +11,59 @@ param(
         "backup",
         "restore",
         "verify",
+        "verify-backup",
         "upgrade",
         "rollback",
         "uninstall",
+        "recover",
         "help"
     )]
-    [string]$Command = "help"
+    [string]$Command = "help",
+
+    [string]$Distribution,
+    [string]$InstallDirectory,
+    [string]$LocalBundle,
+    [string]$Sha256,
+    [string]$Backup,
+    [string]$PreserveData,
+    [switch]$Lan,
+    [switch]$NoStart
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $ManifestPath = Join-Path $PSScriptRoot "install-manifest.json"
+$LinuxInstallerPath = Join-Path $PSScriptRoot "install-yappa.sh"
 
 function Show-Usage {
     @"
 Usage:
-  .\Install-Yappa.ps1 preflight
+  .\Install-Yappa.ps1 preflight [-Distribution NAME]
+  .\Install-Yappa.ps1 install -LocalBundle ARCHIVE -Sha256 DIGEST `
+    -InstallDirectory /absolute/wsl/path [-Lan] [-NoStart]
+  .\Install-Yappa.ps1 start -InstallDirectory /absolute/wsl/path [-Lan]
+  .\Install-Yappa.ps1 stop|status|logs|verify|recover `
+    -InstallDirectory /absolute/wsl/path
+  .\Install-Yappa.ps1 backup -InstallDirectory /absolute/wsl/path `
+    -Backup WINDOWS_OR_WSL_PATH
+  .\Install-Yappa.ps1 verify-backup -Backup WINDOWS_OR_WSL_PATH
+  .\Install-Yappa.ps1 restore -Backup WINDOWS_OR_WSL_PATH `
+    -LocalBundle ARCHIVE -Sha256 DIGEST `
+    -InstallDirectory /absolute/new/wsl/path
+  .\Install-Yappa.ps1 upgrade -InstallDirectory /absolute/wsl/path `
+    -LocalBundle ARCHIVE -Sha256 DIGEST -Backup WINDOWS_OR_WSL_PATH
+  .\Install-Yappa.ps1 rollback -InstallDirectory /absolute/wsl/path `
+    -Backup WINDOWS_OR_WSL_PATH
+  .\Install-Yappa.ps1 uninstall -InstallDirectory /absolute/wsl/path `
+    -Backup WINDOWS_OR_WSL_PATH -PreserveData /absolute/new/wsl/path
 
-The Windows lifecycle wrapper is intentionally preflight-only in this
-development release. Installation remains disabled until the manifest has a
-signed server bundle and the Windows 11/Windows Server conformance matrices
-pass. Yappa never asks for or stores a remote Administrator password.
+This development wrapper runs Yappa's canonical Linux lifecycle inside one
+explicit WSL2 distribution. Bundle, checksum, backup, restore, upgrade,
+rollback, and uninstall safety remain enforced by the shared installer.
+Windows service registration and Windows Firewall mutation remain disabled
+until their native conformance contracts pass.
+Yappa never asks for or stores a remote Administrator password.
 "@
 }
 
@@ -48,79 +79,199 @@ function Read-InstallManifest {
     return $manifest
 }
 
-function Test-Executable {
-    param([Parameter(Mandatory = $true)][string]$Name)
-
-    if ($null -ne (Get-Command $Name -ErrorAction SilentlyContinue)) {
-        Write-Output ("ok      {0}" -f $Name)
-        return $true
+function Get-WslPrefix {
+    $prefix = [System.Collections.Generic.List[string]]::new()
+    if (-not [string]::IsNullOrWhiteSpace($Distribution)) {
+        $prefix.Add("--distribution")
+        $prefix.Add($Distribution)
     }
-    Write-Output ("missing {0}" -f $Name)
-    return $false
+    $prefix.Add("--")
+    return $prefix
 }
 
-function Invoke-Preflight {
-    $manifest = Read-InstallManifest
-    $failed = $false
+function Invoke-Wsl {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Arguments,
+        [switch]$Capture
+    )
 
-    if ([Environment]::Is64BitOperatingSystem) {
-        Write-Output "ok      x86_64 operating system"
+    if ($null -eq (Get-Command "wsl.exe" -ErrorAction SilentlyContinue)) {
+        throw "WSL is required. Install WSL2 and one supported Linux distribution."
+    }
+
+    $allArguments = [System.Collections.Generic.List[string]]::new()
+    foreach ($item in (Get-WslPrefix)) {
+        $allArguments.Add($item)
+    }
+    foreach ($item in $Arguments) {
+        $allArguments.Add($item)
+    }
+
+    if ($Capture) {
+        $output = & wsl.exe @allArguments 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "WSL command failed with exit code $LASTEXITCODE."
+        }
+        return ($output | Out-String).Trim()
+    }
+
+    & wsl.exe @allArguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Yappa WSL lifecycle command failed with exit code $LASTEXITCODE."
+    }
+}
+
+function ConvertTo-WslPath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        throw "A non-empty path is required."
+    }
+    if ($Path.StartsWith("/")) {
+        return $Path
+    }
+    $resolved = [System.IO.Path]::GetFullPath($Path)
+    return Invoke-Wsl -Arguments @("wslpath", "-a", "--", $resolved) -Capture
+}
+
+function Assert-LinuxInstallDirectory {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [switch]$New
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or
+        -not $Path.StartsWith("/") -or
+        $Path -eq "/") {
+        throw "-InstallDirectory must be an absolute WSL Linux path other than /."
+    }
+    if ($Path.StartsWith("/mnt/", [StringComparison]::Ordinal)) {
+        throw "-InstallDirectory must use the WSL Linux filesystem, not a Windows /mnt drive."
+    }
+    if ($New -and $Path.EndsWith("/")) {
+        throw "A new install directory must not end with '/'."
+    }
+}
+
+function Get-SourceInstallerPath {
+    if (-not (Test-Path -LiteralPath $LinuxInstallerPath -PathType Leaf)) {
+        throw "Canonical Linux installer is missing: $LinuxInstallerPath"
+    }
+    return ConvertTo-WslPath -Path $LinuxInstallerPath
+}
+
+function Get-InstalledInstallerPath {
+    Assert-LinuxInstallDirectory -Path $InstallDirectory
+    return "$InstallDirectory/install-yappa.sh"
+}
+
+function Require-Value {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [AllowEmptyString()][string]$Value
+    )
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        throw "$Name is required for '$Command'."
+    }
+}
+
+function Add-PathArgument {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Collections.Generic.List[string]]$Arguments,
+        [Parameter(Mandatory = $true)][string]$Flag,
+        [Parameter(Mandatory = $true)][string]$Value
+    )
+    $Arguments.Add($Flag)
+    $Arguments.Add((ConvertTo-WslPath -Path $Value))
+}
+
+function Invoke-LinuxLifecycle {
+    [void](Read-InstallManifest)
+
+    if ($Command -eq "preflight") {
+        Invoke-Wsl -Arguments @("bash", (Get-SourceInstallerPath), "preflight")
+        return
+    }
+
+    $arguments = [System.Collections.Generic.List[string]]::new()
+    $installer = if ($Command -in @("install", "restore", "verify-backup")) {
+        Get-SourceInstallerPath
     } else {
-        Write-Output "blocked 64-bit Windows is required"
-        $failed = $true
+        Get-InstalledInstallerPath
     }
+    $arguments.Add("bash")
+    $arguments.Add($installer)
+    $arguments.Add($Command)
 
-    foreach ($executable in @("docker", "wsl.exe", "powershell.exe")) {
-        if (-not (Test-Executable -Name $executable)) {
-            $failed = $true
+    switch ($Command) {
+        "install" {
+            Assert-LinuxInstallDirectory -Path $InstallDirectory -New
+            Require-Value -Name "-LocalBundle" -Value $LocalBundle
+            Require-Value -Name "-Sha256" -Value $Sha256
+            Add-PathArgument -Arguments $arguments -Flag "--local-bundle" -Value $LocalBundle
+            $arguments.Add("--sha256")
+            $arguments.Add($Sha256)
+            $arguments.Add("--install-dir")
+            $arguments.Add($InstallDirectory)
+            if ($Lan) { $arguments.Add("--lan") }
+            if ($NoStart) { $arguments.Add("--no-start") }
+        }
+        "start" {
+            if ($Lan) { $arguments.Add("--lan") }
+        }
+        "backup" {
+            Require-Value -Name "-Backup" -Value $Backup
+            $arguments.Add((ConvertTo-WslPath -Path $Backup))
+        }
+        "verify-backup" {
+            Require-Value -Name "-Backup" -Value $Backup
+            $arguments.Add((ConvertTo-WslPath -Path $Backup))
+        }
+        "restore" {
+            Assert-LinuxInstallDirectory -Path $InstallDirectory -New
+            Require-Value -Name "-Backup" -Value $Backup
+            Require-Value -Name "-LocalBundle" -Value $LocalBundle
+            Require-Value -Name "-Sha256" -Value $Sha256
+            Add-PathArgument -Arguments $arguments -Flag "--backup" -Value $Backup
+            Add-PathArgument -Arguments $arguments -Flag "--local-bundle" -Value $LocalBundle
+            $arguments.Add("--sha256")
+            $arguments.Add($Sha256)
+            $arguments.Add("--install-dir")
+            $arguments.Add($InstallDirectory)
+        }
+        "upgrade" {
+            Require-Value -Name "-LocalBundle" -Value $LocalBundle
+            Require-Value -Name "-Sha256" -Value $Sha256
+            Require-Value -Name "-Backup" -Value $Backup
+            Add-PathArgument -Arguments $arguments -Flag "--local-bundle" -Value $LocalBundle
+            $arguments.Add("--sha256")
+            $arguments.Add($Sha256)
+            Add-PathArgument -Arguments $arguments -Flag "--backup" -Value $Backup
+        }
+        "rollback" {
+            Require-Value -Name "-Backup" -Value $Backup
+            Add-PathArgument -Arguments $arguments -Flag "--backup" -Value $Backup
+        }
+        "uninstall" {
+            Require-Value -Name "-Backup" -Value $Backup
+            Require-Value -Name "-PreserveData" -Value $PreserveData
+            Assert-LinuxInstallDirectory -Path $PreserveData -New
+            Add-PathArgument -Arguments $arguments -Flag "--backup" -Value $Backup
+            $arguments.Add("--preserve-data")
+            $arguments.Add($PreserveData)
         }
     }
 
-    if ($null -ne (Get-Command "docker" -ErrorAction SilentlyContinue)) {
-        & docker compose version *> $null
-        if ($LASTEXITCODE -eq 0) {
-            Write-Output "ok      docker compose v2"
-        } else {
-            Write-Output "missing docker compose v2"
-            $failed = $true
-        }
-    }
-
-    if ($null -ne (Get-Command "wsl.exe" -ErrorAction SilentlyContinue)) {
-        $wslStatus = (& wsl.exe --status 2>&1 | Out-String)
-        if ($LASTEXITCODE -eq 0 -and $wslStatus -match "2") {
-            Write-Output "ok      WSL 2"
-        } else {
-            Write-Output "blocked WSL 2 is not confirmed"
-            $failed = $true
-        }
-    }
-
-    $windowsTarget = $manifest.supportTargets |
-        Where-Object { $_.id -eq "windows-11-wsl2-x64" }
-    if ($windowsTarget.validation -ne "verified-release") {
-        Write-Output "pending Windows release conformance is not complete"
-    }
-    if (-not $manifest.release.published) {
-        Write-Output "pending no signed Yappa server release is published"
-    }
-
-    if ($failed) {
-        throw "Yappa Windows server preflight failed."
-    }
-    Write-Output "Yappa Windows prerequisite preflight passed."
-    Write-Output "Installation remains disabled until release validation passes."
+    Invoke-Wsl -Arguments $arguments.ToArray()
 }
 
 switch ($Command) {
     "help" {
         Show-Usage
     }
-    "preflight" {
-        Invoke-Preflight
-    }
     default {
-        [void](Read-InstallManifest)
-        throw "The '$Command' Windows lifecycle command is not implemented safely yet."
+        Invoke-LinuxLifecycle
     }
 }
