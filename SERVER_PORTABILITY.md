@@ -253,6 +253,11 @@ and proves privileged user-service registration fails closed in a container.
 No matrix target is optional. This is packaging/lifecycle evidence only: it
 deliberately does not claim Docker daemon, LiveKit/media, real systemd, or
 host-firewall runtime conformance.
+Exact-head hosted run `30411894908` passed all four non-optional jobs on commit
+`77397cb`. These targets are therefore marked `verified-development` for this
+bounded packaging/lifecycle contract. They remain unpublished with no public
+install command until the omitted real-host and release-authenticity gates
+pass.
 
 ### Canonical architecture
 

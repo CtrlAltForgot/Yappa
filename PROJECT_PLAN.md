@@ -1203,24 +1203,24 @@ Current implementation slice:
   runtime conformance. Local Fedora-derived and exact pinned Rocky Linux 10
   execution pass. Initial hosted run `30411754843` reached and passed preflight
   on all four distributions, then every job failed at Git's container
-  ownership guard before bundle construction. The workflow now marks the
-  exact GitHub workspace as safe after checkout; a corrected hosted run is
-  pending and no target has been promoted from `pending`.
+  ownership guard before bundle construction. The workflow now marks only the
+  exact GitHub workspace as safe after checkout. Corrected exact-head run
+  `30411894908` passed all four non-optional jobs on commit `77397cb`; those
+  targets are now `verified-development` for this bounded contract, while
+  public support and install commands remain disabled.
 
 Next work, in order:
 
-1. Obtain a green corrected four-distribution Linux host-contract run, then
-   record only the packaging/lifecycle evidence it actually establishes.
-2. Add real-host UFW/firewalld, per-user systemd, unattended-service,
+1. Add real-host UFW/firewalld, per-user systemd, unattended-service,
    sleep/network, and recovery matrices; run the identical conformance
    contract across every Tier-1 Linux target and implement Windows server
    lifecycle parity.
-3. Obtain hosted Linux desktop evidence and finish signed release engineering:
+2. Obtain hosted Linux desktop evidence and finish signed release engineering:
    production versions, signing, SBOMs, provenance, tagged publication,
    supported-version/vulnerability policy, and update/distribution behavior.
-4. Complete durable chat/history, threads, unspoofable cross-server
+3. Complete durable chat/history, threads, unspoofable cross-server
    YUID/multi-device DMs, calendar, and the provider-neutral shared music room.
-5. Complete native networking/media E2EE, Windows/KDE screen-sharing soak,
+4. Complete native networking/media E2EE, Windows/KDE screen-sharing soak,
    cross-feature product readiness, exact-tag matrix, production deployment,
    and all user/security/handoff documentation.
 

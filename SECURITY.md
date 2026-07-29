@@ -978,7 +978,10 @@ requires shell/preflight/bundle/checksum/fresh-install/private-mode/firewall
 plan/stopped-recovery behavior on all four. The contract explicitly rejects
 promotion of public support or install-command flags and labels the result as
 packaging/lifecycle evidence, not Docker, systemd, firewall, TLS, TURN, or
-media conformance.
+media conformance. Exact-head run `30411894908` passed all four non-optional
+jobs on commit `77397cb`; the manifest records only
+`verified-development`, while public support and install commands remain
+disabled.
 
 Local development bundle installation now requires a caller-supplied full
 lowercase SHA-256, one versioned archive root matching embedded metadata, a

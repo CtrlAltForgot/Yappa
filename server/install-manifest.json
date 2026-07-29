@@ -44,7 +44,7 @@
       "versions": ["24.04"],
       "architecture": "x86_64",
       "tier": 1,
-      "validation": "pending",
+      "validation": "verified-development",
       "publiclySupported": false,
       "installCommandAvailable": false
     },
@@ -55,7 +55,7 @@
       "versions": ["13"],
       "architecture": "x86_64",
       "tier": 1,
-      "validation": "pending",
+      "validation": "verified-development",
       "publiclySupported": false,
       "installCommandAvailable": false
     },
@@ -66,7 +66,7 @@
       "versions": ["44"],
       "architecture": "x86_64",
       "tier": 1,
-      "validation": "pending",
+      "validation": "verified-development",
       "publiclySupported": false,
       "installCommandAvailable": false
     },
@@ -77,7 +77,7 @@
       "versions": ["10"],
       "architecture": "x86_64",
       "tier": 1,
-      "validation": "pending",
+      "validation": "verified-development",
       "publiclySupported": false,
       "installCommandAvailable": false
     },
