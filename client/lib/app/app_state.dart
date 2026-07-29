@@ -36,6 +36,7 @@ class AppState extends ChangeNotifier {
   static const _messagesKey = 'yappa_messages';
   static const _messageForwardCursorsKey = 'yappa_message_forward_cursors_v1';
   static const _messageBackwardCursorsKey = 'yappa_message_backward_cursors_v1';
+  static const _messageNewerCursorsKey = 'yappa_message_newer_cursors_v1';
   static const _tokensKey = 'yappa_tokens';
   static const _secureTokensKey = 'yappa.session_tokens.v1';
   static const _rememberedUsersKey = 'yappa_authenticated_users';
@@ -64,7 +65,9 @@ class AppState extends ChangeNotifier {
   final Set<String> _refreshedMessageChannelIds = {};
   final Map<String, String> _olderMessageCursorByChannel = {};
   final Map<String, String> _forwardMessageCursorByChannel = {};
+  final Map<String, String> _newerMessageCursorByChannel = {};
   final Map<String, bool> _hasOlderMessagesByChannel = {};
+  final Set<String> _loadingNewerMessageChannelIds = {};
   final Set<String> _loadingOlderMessageChannelIds = {};
   final Set<String> _rotatedSessionServerIds = {};
   final Set<String> _registeredMediaDeviceServerIds = {};
@@ -410,8 +413,11 @@ class AppState extends ChangeNotifier {
   bool get selectedChannelLoadingOlderMessages =>
       _loadingOlderMessageChannelIds.contains(selectedChannelId);
 
-  bool get selectedChannelHistoryWindowFull =>
-      selectedMessages.length >= _activeMessagesPerChannel;
+  bool get selectedChannelHasNewerMessages =>
+      _newerMessageCursorByChannel.containsKey(selectedChannelId);
+
+  bool get selectedChannelLoadingNewerMessages =>
+      _loadingNewerMessageChannelIds.contains(selectedChannelId);
 
   List<Member> get selectedMembers =>
       List.unmodifiable(_membersByServer[selectedServerId] ?? const <Member>[]);
@@ -1826,6 +1832,7 @@ class AppState extends ChangeNotifier {
       _messagesByChannel.remove(channelId);
       _olderMessageCursorByChannel.remove(channelId);
       _forwardMessageCursorByChannel.remove(channelId);
+      _newerMessageCursorByChannel.remove(channelId);
       _hasOlderMessagesByChannel.remove(channelId);
       _refreshedMessageChannelIds.remove(channelId);
       _replaceChannelsForServer(server.id, channels);
@@ -1983,6 +1990,7 @@ class AppState extends ChangeNotifier {
       _messagesByChannel.remove(channelId);
       _olderMessageCursorByChannel.remove(channelId);
       _forwardMessageCursorByChannel.remove(channelId);
+      _newerMessageCursorByChannel.remove(channelId);
       _hasOlderMessagesByChannel.remove(channelId);
       _refreshedMessageChannelIds.remove(channelId);
     }
@@ -2558,6 +2566,9 @@ class AppState extends ChangeNotifier {
 
     try {
       var active = cached;
+      final viewingOlderWindow = _newerMessageCursorByChannel.containsKey(
+        channel.id,
+      );
       final originallyCachedIds = cached.map((message) => message.id).toSet();
       var cursor = savedForwardCursor;
       final seenCursors = <String>{};
@@ -2581,7 +2592,7 @@ class AppState extends ChangeNotifier {
             code: 'invalid_history_response',
           );
         }
-        if (page.messages.isNotEmpty) {
+        if (page.messages.isNotEmpty && !viewingOlderWindow) {
           final byId = <String, ChatMessage>{
             for (final message in active) message.id: message,
             for (final message in page.messages) message.id: message,
@@ -2593,6 +2604,8 @@ class AppState extends ChangeNotifier {
             _hasOlderMessagesByChannel[channel.id] = true;
             _olderMessageCursorByChannel[channel.id] = page.backwardCursor!;
           }
+        }
+        if (page.messages.isNotEmpty) {
           _forwardMessageCursorByChannel[channel.id] = page.forwardCursor!;
         }
         if (!page.hasMore) {
@@ -2600,28 +2613,32 @@ class AppState extends ChangeNotifier {
         }
         cursor = page.nextCursor!;
       }
-      final live = List<ChatMessage>.from(
-        _messagesByChannel[channel.id] ?? const <ChatMessage>[],
-      );
-      final liveIds = live.map((message) => message.id).toSet();
-      active.removeWhere(
-        (message) =>
-            originallyCachedIds.contains(message.id) &&
-            !liveIds.contains(message.id),
-      );
-      final merged =
-          <String, ChatMessage>{
-              for (final message in active) message.id: message,
-              for (final message in live) message.id: message,
-            }.values.toList()
-            ..sort((left, right) => left.sentAt.compareTo(right.sentAt));
-      _messagesByChannel[channel.id] = merged.length > _activeMessagesPerChannel
-          ? merged.sublist(merged.length - _activeMessagesPerChannel)
-          : merged;
+      if (!viewingOlderWindow) {
+        final live = List<ChatMessage>.from(
+          _messagesByChannel[channel.id] ?? const <ChatMessage>[],
+        );
+        final liveIds = live.map((message) => message.id).toSet();
+        active.removeWhere(
+          (message) =>
+              originallyCachedIds.contains(message.id) &&
+              !liveIds.contains(message.id),
+        );
+        final merged =
+            <String, ChatMessage>{
+                for (final message in active) message.id: message,
+                for (final message in live) message.id: message,
+              }.values.toList()
+              ..sort((left, right) => left.sentAt.compareTo(right.sentAt));
+        _messagesByChannel[channel.id] =
+            merged.length > _activeMessagesPerChannel
+            ? merged.sublist(merged.length - _activeMessagesPerChannel)
+            : merged;
+      }
     } on ApiException catch (error) {
       if (error.code != 'invalid_history_cursor') rethrow;
       _forwardMessageCursorByChannel.remove(channel.id);
       _olderMessageCursorByChannel.remove(channel.id);
+      _newerMessageCursorByChannel.remove(channel.id);
       _hasOlderMessagesByChannel.remove(channel.id);
       final page = await _api.fetchMessages(
         baseUrl: server.address,
@@ -2644,8 +2661,7 @@ class AppState extends ChangeNotifier {
         !channel.allowsPlaintextMessaging ||
         _hasOlderMessagesByChannel[channel.id] != true ||
         cursor == null ||
-        _loadingOlderMessageChannelIds.contains(channel.id) ||
-        current.length >= _activeMessagesPerChannel) {
+        _loadingOlderMessageChannelIds.contains(channel.id)) {
       return;
     }
 
@@ -2658,7 +2674,7 @@ class AppState extends ChangeNotifier {
         token: token,
         channelId: channel.id,
         cursor: cursor,
-        limit: remaining.clamp(1, 100),
+        limit: remaining > 0 ? remaining.clamp(1, 100) : 100,
       );
       if (page.direction != 'before') {
         throw ApiException(
@@ -2672,6 +2688,17 @@ class AppState extends ChangeNotifier {
       };
       final merged = byId.values.toList()
         ..sort((left, right) => left.sentAt.compareTo(right.sentAt));
+      if (merged.length > _activeMessagesPerChannel) {
+        merged.removeRange(_activeMessagesPerChannel, merged.length);
+        _newerMessageCursorByChannel[channel.id] = await _api
+            .createMessageHistoryCursor(
+              baseUrl: server.address,
+              token: token,
+              channelId: channel.id,
+              messageId: merged.last.id,
+              direction: 'after',
+            );
+      }
       _messagesByChannel[channel.id] = merged;
       _hasOlderMessagesByChannel[channel.id] = page.hasMore;
       if (page.nextCursor == null) {
@@ -2682,6 +2709,71 @@ class AppState extends ChangeNotifier {
       await _persist();
     } finally {
       _loadingOlderMessageChannelIds.remove(channel.id);
+      notifyListeners();
+    }
+  }
+
+  Future<void> loadNewerSelectedMessages() async {
+    final channel = selectedChannel;
+    final server = _serverById(selectedServerId);
+    final token = _tokensByServerId[selectedServerId];
+    final cursor = _newerMessageCursorByChannel[channel.id];
+    final current = _messagesByChannel[channel.id] ?? const <ChatMessage>[];
+    if (server == null ||
+        token == null ||
+        channel.type != ChannelType.text ||
+        !channel.allowsPlaintextMessaging ||
+        cursor == null ||
+        _loadingNewerMessageChannelIds.contains(channel.id)) {
+      return;
+    }
+
+    _loadingNewerMessageChannelIds.add(channel.id);
+    notifyListeners();
+    try {
+      final page = await _api.fetchMessages(
+        baseUrl: server.address,
+        token: token,
+        channelId: channel.id,
+        cursor: cursor,
+        limit: 100,
+      );
+      if (page.direction != 'after') {
+        throw ApiException(
+          'The server returned the wrong message history direction.',
+          code: 'invalid_history_response',
+        );
+      }
+      final byId = <String, ChatMessage>{
+        for (final message in current) message.id: message,
+        for (final message in page.messages) message.id: message,
+      };
+      final merged = byId.values.toList()
+        ..sort((left, right) => left.sentAt.compareTo(right.sentAt));
+      if (merged.length > _activeMessagesPerChannel) {
+        merged.removeRange(0, merged.length - _activeMessagesPerChannel);
+        _hasOlderMessagesByChannel[channel.id] = true;
+        _olderMessageCursorByChannel[channel.id] = await _api
+            .createMessageHistoryCursor(
+              baseUrl: server.address,
+              token: token,
+              channelId: channel.id,
+              messageId: merged.first.id,
+              direction: 'before',
+            );
+      }
+      _messagesByChannel[channel.id] = merged;
+      if (page.hasMore) {
+        _newerMessageCursorByChannel[channel.id] = page.nextCursor!;
+      } else {
+        _newerMessageCursorByChannel.remove(channel.id);
+        if (page.forwardCursor != null) {
+          _forwardMessageCursorByChannel[channel.id] = page.forwardCursor!;
+        }
+      }
+      await _persist();
+    } finally {
+      _loadingNewerMessageChannelIds.remove(channel.id);
       notifyListeners();
     }
   }
@@ -3495,6 +3587,9 @@ class AppState extends ChangeNotifier {
     final index = list.indexWhere((existing) => existing.id == message.id);
 
     if (index == -1) {
+      if (_newerMessageCursorByChannel.containsKey(message.channelId)) {
+        return;
+      }
       list.add(message);
     } else {
       list[index] = message;
@@ -3508,6 +3603,7 @@ class AppState extends ChangeNotifier {
       throw StateError('Initial message history must page backward.');
     }
     _messagesByChannel[channelId] = page.messages;
+    _newerMessageCursorByChannel.remove(channelId);
     _hasOlderMessagesByChannel[channelId] = page.hasMore;
     if (page.nextCursor == null) {
       _olderMessageCursorByChannel.remove(channelId);
@@ -3547,6 +3643,10 @@ class AppState extends ChangeNotifier {
     _decodeMessageCursors(
       prefs.getString(_messageBackwardCursorsKey),
       _olderMessageCursorByChannel,
+    );
+    _decodeMessageCursors(
+      prefs.getString(_messageNewerCursorsKey),
+      _newerMessageCursorByChannel,
     );
     _hasOlderMessagesByChannel
       ..clear()
@@ -3635,6 +3735,10 @@ class AppState extends ChangeNotifier {
     await prefs.setString(
       _messageBackwardCursorsKey,
       jsonEncode(_olderMessageCursorByChannel),
+    );
+    await prefs.setString(
+      _messageNewerCursorsKey,
+      jsonEncode(_newerMessageCursorByChannel),
     );
 
     await prefs.setString(

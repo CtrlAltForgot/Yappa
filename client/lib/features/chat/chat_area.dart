@@ -41,9 +41,11 @@ class ChatArea extends StatefulWidget {
   onEditMessage;
   final Future<void> Function(ChatMessage message)? onDeleteMessage;
   final Future<void> Function()? onLoadOlderMessages;
+  final Future<void> Function()? onLoadNewerMessages;
   final bool hasOlderMessages;
+  final bool hasNewerMessages;
   final bool loadingOlderMessages;
-  final bool historyWindowFull;
+  final bool loadingNewerMessages;
   final bool canDeleteAnyMessage;
   final MlsChannelStartup? textE2eeStartup;
 
@@ -107,9 +109,11 @@ class ChatArea extends StatefulWidget {
     this.onEditMessage,
     this.onDeleteMessage,
     this.onLoadOlderMessages,
+    this.onLoadNewerMessages,
     this.hasOlderMessages = false,
+    this.hasNewerMessages = false,
     this.loadingOlderMessages = false,
-    this.historyWindowFull = false,
+    this.loadingNewerMessages = false,
     this.canDeleteAnyMessage = false,
     this.textE2eeStartup,
     this.members = const [],
@@ -210,6 +214,7 @@ class _ChatAreaState extends State<ChatArea> {
 
   bool _isDragActive = false;
   bool _isNearMessageBottom = true;
+  bool _isNearMessageTop = false;
   int _unseenMessageCount = 0;
   bool _forceScrollToLatestOnNextMessage = false;
   Timer? _ticker;
@@ -265,6 +270,7 @@ class _ChatAreaState extends State<ChatArea> {
       _editingMessage = null;
       _unseenMessageCount = 0;
       _isNearMessageBottom = true;
+      _isNearMessageTop = false;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _scrollToLatest(jump: true);
       });
@@ -324,15 +330,27 @@ class _ChatAreaState extends State<ChatArea> {
     return (position.pixels - position.minScrollExtent) <= 36;
   }
 
+  bool _isScrolledNearTop() {
+    if (!_messageScrollController.hasClients) {
+      return false;
+    }
+
+    final position = _messageScrollController.position;
+    return (position.maxScrollExtent - position.pixels) <= 36;
+  }
+
   void _handleMessageScroll() {
     final isNearBottom = _isScrolledNearBottom();
+    final isNearTop = _isScrolledNearTop();
     if (isNearBottom == _isNearMessageBottom &&
+        isNearTop == _isNearMessageTop &&
         (!isNearBottom || _unseenMessageCount == 0)) {
       return;
     }
 
     setState(() {
       _isNearMessageBottom = isNearBottom;
+      _isNearMessageTop = isNearTop;
       if (isNearBottom) {
         _unseenMessageCount = 0;
       }
@@ -889,8 +907,9 @@ class _ChatAreaState extends State<ChatArea> {
                 if (widget.hasOlderMessages)
                   _HistoryPager(
                     loading: widget.loadingOlderMessages,
-                    windowFull: widget.historyWindowFull,
-                    onLoadOlder: widget.onLoadOlderMessages,
+                    enabledAtBoundary: _isNearMessageTop,
+                    direction: 'older',
+                    onLoad: widget.onLoadOlderMessages,
                   ),
                 Expanded(
                   child: Stack(
@@ -933,6 +952,13 @@ class _ChatAreaState extends State<ChatArea> {
                     ],
                   ),
                 ),
+                if (widget.hasNewerMessages)
+                  _HistoryPager(
+                    loading: widget.loadingNewerMessages,
+                    enabledAtBoundary: _isNearMessageBottom,
+                    direction: 'newer',
+                    onLoad: widget.onLoadNewerMessages,
+                  ),
                 if (widget.channel.encryptionMode == ChannelEncryptionMode.e2ee)
                   _EncryptedTextLifecycleNotice(
                     startup: widget.textE2eeStartup,
@@ -1093,48 +1119,52 @@ class _ChatAreaState extends State<ChatArea> {
 
 class _HistoryPager extends StatelessWidget {
   final bool loading;
-  final bool windowFull;
-  final Future<void> Function()? onLoadOlder;
+  final bool enabledAtBoundary;
+  final String direction;
+  final Future<void> Function()? onLoad;
 
   const _HistoryPager({
     required this.loading,
-    required this.windowFull,
-    required this.onLoadOlder,
+    required this.enabledAtBoundary,
+    required this.direction,
+    required this.onLoad,
   });
 
   @override
   Widget build(BuildContext context) {
     return Semantics(
       liveRegion: true,
-      label: windowFull
-          ? 'Local history window limit reached'
-          : 'Older messages are available',
+      label:
+          '${direction[0].toUpperCase()}${direction.substring(1)} messages '
+          'are available',
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         color: NewChatColors.background,
         alignment: Alignment.center,
-        child: windowFull
-            ? Text(
-                'This local history window is full. Recent messages remain '
-                'available after reconnecting.',
-                style: TextStyle(color: NewChatColors.textMuted, fontSize: 12),
-                textAlign: TextAlign.center,
-              )
-            : TextButton.icon(
-                onPressed: loading || onLoadOlder == null
-                    ? null
-                    : () => onLoadOlder!(),
-                icon: loading
-                    ? const SizedBox.square(
-                        dimension: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.history_rounded, size: 18),
-                label: Text(
-                  loading ? 'Loading older messages…' : 'Load older messages',
+        child: TextButton.icon(
+          onPressed: loading || !enabledAtBoundary || onLoad == null
+              ? null
+              : () => onLoad!(),
+          icon: loading
+              ? const SizedBox.square(
+                  dimension: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Icon(
+                  direction == 'older'
+                      ? Icons.history_rounded
+                      : Icons.update_rounded,
+                  size: 18,
                 ),
-              ),
+          label: Text(
+            loading
+                ? 'Loading $direction messages…'
+                : enabledAtBoundary
+                ? 'Load $direction messages'
+                : 'Scroll to the $direction edge to continue',
+          ),
+        ),
       ),
     );
   }

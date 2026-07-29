@@ -1284,14 +1284,15 @@ Current implementation slice:
   viewer substitution, cursor tampering, invalid bounds, and plaintext reads
   after E2EE cutover are negative-tested. Queries use the new composite
   `(channel_id, id)` index with an asserted SQLite query plan. The client
-  validates page metadata, deduplicates chronological pages, offers a
-  load-older action, persists only the newest 200 plaintext messages per
-  channel, and honestly reports its 1,000-message active-window limit. Focused
-  backend and client tests, Flutter analysis, the complete 61-test Flutter
+  validates page metadata, deduplicates chronological pages, offers older and
+  newer edge navigation, persists only the newest 200 plaintext messages per
+  channel, and slides a 1,000-message active window using authenticated return
+  boundaries. Focused
+  backend and client tests, Flutter analysis, the complete 62-test Flutter
   suite, and the complete backend/security/deployment-policy suite pass
   locally. Production deployment verification is unavailable because approved
   Unraid SSH access is still unavailable. Forward reconnect catch-up,
-  sliding-window navigation, attachment scale/restore validation,
+  exact viewport-continuity testing, attachment scale/restore validation,
   encrypted new-device history, scale, and destructive restore evidence remain
   open. Durable writes now reserve validated filesystem headroom (512 MiB
   critical, 2 GiB warning by default), fail with retryable HTTP 507 when
@@ -1307,12 +1308,16 @@ Current implementation slice:
   with cursor-loop rejection, deduplication, newest-1,000 trimming, and a
   backward recovery boundary. Multi-page forward ordering/no-overlap, empty
   catch-up, cursor integrity, and both indexed query directions are tested.
-  Interactive backward/forward sliding and viewport preservation remain.
+  The client now slides backward or forward at the corresponding scroll edge,
+  evicts the opposite side at 1,000 rows, and mints an authenticated exact
+  return cursor instead of constructing one locally. New realtime rows do not
+  silently disrupt an older visible window. Exact viewport widget evidence
+  remains.
   Threads are not implemented.
 
 Next work, in order:
 
-1. Continue the remaining `PERSISTENT_CHAT.md` sliding-window navigation,
+1. Finish `PERSISTENT_CHAT.md` viewport-continuity widget evidence,
    attachment scale/restore, encrypted-history continuity,
    real constrained-filesystem/concurrency capacity evidence, scale, and
    restore gates. Deploy and verify these history changes on Unraid when

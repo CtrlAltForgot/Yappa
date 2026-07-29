@@ -1079,6 +1079,41 @@ async function run() {
     false,
   );
 
+  const anchoredCursorResponse = await request(
+    `/api/channels/${textChannel.id}/messages/cursor?messageId=${
+      olderHistory.messages.at(-1).id
+    }&direction=after`,
+    { token: owner.token },
+  );
+  assert.equal(anchoredCursorResponse.status, 200);
+  const anchoredCursor = await anchoredCursorResponse.json();
+  assert.equal(anchoredCursor.direction, 'after');
+  assert.equal(anchoredCursor.messageId, olderHistory.messages.at(-1).id);
+  assert.match(anchoredCursor.cursor, /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
+  const anchoredHistoryResponse = await request(
+    `/api/channels/${textChannel.id}/messages?limit=2&cursor=${encodeURIComponent(
+      anchoredCursor.cursor,
+    )}`,
+    { token: owner.token },
+  );
+  assert.equal(anchoredHistoryResponse.status, 200);
+  assert.deepEqual(
+    (await anchoredHistoryResponse.json()).messages.map((item) => item.id),
+    historyMessageIds.slice(3, 5),
+  );
+  await expectStatus(
+    `/api/channels/${textChannel.id}/messages/cursor?messageId=999999999&direction=before`,
+    404,
+    { token: owner.token },
+  );
+  await expectStatus(
+    `/api/channels/${textChannel.id}/messages/cursor?messageId=${
+      olderHistory.messages.at(-1).id
+    }&direction=sideways`,
+    400,
+    { token: owner.token },
+  );
+
   const substitutedCursorResponse = await request(
     `/api/channels/${textChannel.id}/messages?cursor=${encodeURIComponent(
       newestHistory.page.nextCursor,

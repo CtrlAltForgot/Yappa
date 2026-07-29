@@ -5607,6 +5607,73 @@ app.get('/api/channels/:channelId/messages', authRequired, (req, res) => {
   });
 });
 
+app.get(
+  '/api/channels/:channelId/messages/cursor',
+  authRequired,
+  (req, res) => {
+    const channelId = Number(req.params.channelId);
+    const messageId = Number(req.query.messageId);
+    const direction = String(req.query.direction || '');
+    if (
+      !Number.isSafeInteger(channelId) ||
+      channelId <= 0 ||
+      !Number.isSafeInteger(messageId) ||
+      messageId <= 0 ||
+      (direction !== 'before' && direction !== 'after')
+    ) {
+      return apiError(
+        res,
+        400,
+        'invalid_history_cursor_anchor',
+        'A valid message and cursor direction are required.',
+      );
+    }
+    const channel = db.prepare(`
+      SELECT id, type, encryption_mode, encryption_version
+      FROM channels
+      WHERE id = ?
+    `).get(channelId);
+    if (!channel) {
+      return apiError(res, 404, 'channel_not_found', 'Channel not found.');
+    }
+    if (channel.type !== 'text') {
+      return apiError(
+        res,
+        400,
+        'channel_not_text',
+        'History cursors require a text channel.',
+      );
+    }
+    if (rejectPlaintextForEncryptedChannel(res, channel)) {
+      return;
+    }
+    const message = db.prepare(`
+      SELECT id
+      FROM messages
+      WHERE id = ? AND channel_id = ?
+    `).get(messageId, channelId);
+    if (!message) {
+      return apiError(
+        res,
+        404,
+        'history_cursor_anchor_not_found',
+        'That history boundary is no longer available.',
+      );
+    }
+    return res.json({
+      ok: true,
+      cursor: encodeHistoryCursor({
+        channelId,
+        messageId,
+        userId: req.auth.user.id,
+        direction,
+      }),
+      direction,
+      messageId: toId(messageId),
+    });
+  },
+);
+
 app.post(
   '/api/uploads/attachments',
   authRequired,

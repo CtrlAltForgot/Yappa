@@ -101,4 +101,39 @@ void main() {
       ),
     );
   });
+
+  test('creates a pinned cursor for an exact message boundary', () async {
+    late http.Request captured;
+    final api = ApiClient(
+      clientFactory: (_) => MockClient((request) async {
+        captured = request;
+        return http.Response(
+          jsonEncode({
+            'ok': true,
+            'cursor': 'anchor_payload.anchor_signature',
+            'direction': 'after',
+            'messageId': '41',
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }),
+    );
+
+    final cursor = await api.createMessageHistoryCursor(
+      baseUrl: 'http://127.0.0.1:4100',
+      token: 'session-token',
+      channelId: '7',
+      messageId: '41',
+      direction: 'after',
+    );
+
+    expect(captured.url.path, '/api/channels/7/messages/cursor');
+    expect(captured.url.queryParameters, {
+      'messageId': '41',
+      'direction': 'after',
+    });
+    expect(captured.headers['authorization'], 'Bearer session-token');
+    expect(cursor, 'anchor_payload.anchor_signature');
+  });
 }

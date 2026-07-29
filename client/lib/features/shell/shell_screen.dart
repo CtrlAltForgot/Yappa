@@ -464,12 +464,19 @@ class _ShellScreenState extends State<ShellScreen> {
                               loadingOlderMessages: widget
                                   .appState
                                   .selectedChannelLoadingOlderMessages,
-                              historyWindowFull: widget
+                              hasNewerMessages: widget
                                   .appState
-                                  .selectedChannelHistoryWindowFull,
+                                  .selectedChannelHasNewerMessages,
+                              loadingNewerMessages: widget
+                                  .appState
+                                  .selectedChannelLoadingNewerMessages,
                               onLoadOlderMessages:
                                   selectedChannel.allowsPlaintextMessaging
                                   ? widget.appState.loadOlderSelectedMessages
+                                  : null,
+                              onLoadNewerMessages:
+                                  selectedChannel.allowsPlaintextMessaging
+                                  ? widget.appState.loadNewerSelectedMessages
                                   : null,
                               textE2eeStartup: widget.appState
                                   .encryptedChannelStartup(selectedChannel.id),

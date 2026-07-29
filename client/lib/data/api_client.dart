@@ -1437,6 +1437,35 @@ class ApiClient {
     );
   }
 
+  Future<String> createMessageHistoryCursor({
+    required String baseUrl,
+    required String token,
+    required String channelId,
+    required String messageId,
+    required String direction,
+  }) async {
+    if (direction != 'before' && direction != 'after') {
+      throw ArgumentError.value(direction, 'direction');
+    }
+    final normalized = normalizeBaseUrl(baseUrl);
+    final uri = Uri.parse('$normalized/api/channels/$channelId/messages/cursor')
+        .replace(
+          queryParameters: {'messageId': messageId, 'direction': direction},
+        );
+    final json = await _requestJson('GET', uri.toString(), token: token);
+    final cursor = json['cursor'];
+    if (json['direction'] != direction ||
+        json['messageId']?.toString() != messageId ||
+        cursor is! String ||
+        cursor.isEmpty) {
+      throw ApiException(
+        'The server returned an invalid message history boundary.',
+        code: 'invalid_history_response',
+      );
+    }
+    return cursor;
+  }
+
   Future<ChatAttachment> uploadAttachment({
     required String baseUrl,
     required String token,

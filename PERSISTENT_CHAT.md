@@ -42,12 +42,18 @@ client must not make the conversation look complete when it is not.
 - Plaintext history reads use the composite `(channel_id, id)` index. The
   migration removes the superseded channel-only index, and an automated query
   plan assertion proves the older-than lookup uses the composite index.
-- The desktop client exposes an explicit load-older action, validates cursor
-  response consistency, deduplicates pages, and preserves chronological
+- The desktop client exposes explicit older/newer history navigation, validates
+  cursor response consistency, deduplicates pages, and preserves chronological
   ordering. Its ordinary plaintext cache persists only the newest 200 messages
-  per channel and its interactive backward-history window is capped at 1,000
-  messages with an honest limit notice; evicted persisted rows remain
+  per channel and its active window remains capped at 1,000 messages. Reaching
+  either scroll edge can shift that bounded window while retaining an
+  authenticated cursor back toward the evicted side; evicted rows remain
   authoritative and recoverable from the server.
+- Authenticated clients can mint an opaque before/after cursor for an exact
+  retained message boundary. The server resolves that message inside the
+  requested plaintext channel and binds the cursor to server, channel,
+  direction, message, protocol version, and viewer; clients never construct
+  numeric cursors locally.
 - The client persists viewer-bound forward and backward cursors alongside its
   bounded cache. Reconnect follows every forward continuation with cursor-loop
   detection, deduplicates missed realtime rows, retains the newest 1,000
@@ -55,7 +61,7 @@ client must not make the conversation look complete when it is not.
   by account/server-secret change fails closed and refreshes from a new
   authenticated newest page.
 - The complete backend/security/deployment-policy suite, Flutter analysis, and
-  all 61 Flutter tests pass with this increment. Production deployment remains
+  all 62 Flutter tests pass with this increment. Production deployment remains
   unverified because approved Unraid SSH access is unavailable.
 - The client stores its decrypted MLS event view in an authenticated encrypted
   local store protected by an OS-vault key, and fails closed if that key or
@@ -89,10 +95,9 @@ contract.
 
 ## Confirmed Gaps
 
-- Interactive navigation still cannot slide backward beyond the explicit
-  1,000-message window and then return forward without reconnecting. The
-  server protocol now supports both directions; the remaining work is a
-  bounded client window/navigation UX with exact viewport preservation.
+- Plaintext bounded-window navigation is implemented, but automated widget
+  evidence for exact viewport continuity across repeated backward/forward
+  shifts remains required before that interaction is a completed release gate.
 - Encrypted client history needs the same explicit bounded-window UX and
   honest older-history/recovery states; its server delivery cursor alone does
   not complete that product behavior.

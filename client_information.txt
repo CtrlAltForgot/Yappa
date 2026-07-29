@@ -26,9 +26,10 @@ independent review justify that claim.
 - Message clocks and date dividers now convert the server’s UTC timestamps to
   your computer’s local timezone, including messages near midnight.
 - Older messages in ordinary text feeds can now be loaded in additional
-  pages instead of disappearing beyond the newest screenful. Yappa keeps the
-  server as the durable record, limits the local cache, and clearly tells you
-  when the current on-screen history window is full.
+  pages instead of disappearing beyond the newest screenful. At the edge of
+  its bounded on-screen history, Yappa can move backward or forward again
+  without losing the server’s permanent record or silently growing local
+  storage forever.
 - After reconnecting, ordinary text feeds now resume from an authenticated
   history checkpoint and retrieve every missed page in order instead of merely
   replacing the screen with the latest batch.

@@ -987,6 +987,25 @@ Verified plaintext reconnect increment, 2026-07-28:
 Interactive bidirectional window sliding, viewport continuity, long-offline
 scale, concurrent catch-up/realtime races, and production deployment remain.
 
+Verified plaintext bounded-window increment, 2026-07-28:
+
+- An authenticated cursor-anchor endpoint mints an opaque before/after cursor
+  only after resolving the retained message inside the requested plaintext
+  channel. Invalid directions, missing boundaries, non-text channels, and
+  post-E2EE-cutover plaintext access fail closed.
+- Anchor cursors retain the existing HMAC binding to persistent server,
+  channel, direction, message, viewer, and protocol version. The client
+  validates the echoed direction and message boundary and never derives cursor
+  contents from a numeric message identifier.
+- The client can evict the opposite edge of its 1,000-message working window
+  and persist the exact authenticated return boundary. New realtime rows do
+  not silently alter an older visible window; reconnect catch-up advances its
+  durable resume checkpoint until the user returns toward current history.
+
+Focused anchor, tamper/substitution, direction, boundary, and client parsing
+coverage is present. Exact viewport widget testing, scale/race evidence, and
+production deployment remain required.
+
 ### Cross-Platform Server Deployment Gate
 
 `SERVER_PORTABILITY.md` defines the supported-host and parity contract. Windows
