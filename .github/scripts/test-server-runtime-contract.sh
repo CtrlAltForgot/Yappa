@@ -71,11 +71,20 @@ if ! systemctl start "user@$TEST_UID.service"; then
   echo "Starting the same real unprivileged systemd user manager directly."
   systemctl reset-failed "user@$TEST_UID.service"
   install -d -m 700 -o "$TEST_UID" -g "$TEST_UID" "/run/user/$TEST_UID"
+  SYSTEMD_USER_BINARY=
+  for candidate in /usr/lib/systemd/systemd /lib/systemd/systemd; do
+    if [[ -x "$candidate" ]]; then
+      SYSTEMD_USER_BINARY="$candidate"
+      break
+    fi
+  done
+  [[ -n "$SYSTEMD_USER_BINARY" ]] ||
+    { echo "No systemd user-manager binary is available." >&2; exit 1; }
   runuser -u "$TEST_USER" -- env \
     HOME="$TEST_HOME" \
     XDG_RUNTIME_DIR="/run/user/$TEST_UID" \
     DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$TEST_UID/bus" \
-    "$(command -v systemd)" --user &
+    "$SYSTEMD_USER_BINARY" --user &
   DIRECT_MANAGER_PID=$!
 fi
 RUNTIME_DIRECTORY="/run/user/$TEST_UID"

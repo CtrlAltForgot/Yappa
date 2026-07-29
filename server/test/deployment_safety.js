@@ -615,7 +615,7 @@ assert.match(serverRuntimeLauncher, /docker rm -f/);
 assert.match(serverRuntimeContract, /\/proc\/1\/comm/);
 assert.match(serverRuntimeContract, /systemctl --user is-active/);
 assert.match(serverRuntimeContract, /MANAGER_STATUS.*224/s);
-assert.match(serverRuntimeContract, /systemd\)" --user &/);
+assert.match(serverRuntimeContract, /SYSTEMD_USER_BINARY" --user &/);
 assert.match(serverRuntimeContract, /firewall-yappa\.sh" apply/);
 assert.match(serverRuntimeContract, /firewall-yappa\.sh" remove/);
 assert.match(
