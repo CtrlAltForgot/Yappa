@@ -40,6 +40,10 @@ class ChatArea extends StatefulWidget {
   final Future<void> Function(ChatMessage message, String content)?
   onEditMessage;
   final Future<void> Function(ChatMessage message)? onDeleteMessage;
+  final Future<void> Function()? onLoadOlderMessages;
+  final bool hasOlderMessages;
+  final bool loadingOlderMessages;
+  final bool historyWindowFull;
   final bool canDeleteAnyMessage;
   final MlsChannelStartup? textE2eeStartup;
 
@@ -102,6 +106,10 @@ class ChatArea extends StatefulWidget {
     this.onLoadLinkPreview,
     this.onEditMessage,
     this.onDeleteMessage,
+    this.onLoadOlderMessages,
+    this.hasOlderMessages = false,
+    this.loadingOlderMessages = false,
+    this.historyWindowFull = false,
     this.canDeleteAnyMessage = false,
     this.textE2eeStartup,
     this.members = const [],
@@ -295,7 +303,9 @@ class _ChatAreaState extends State<ChatArea> {
 
   bool _hasIncomingMessageChange(ChatArea oldWidget) {
     if (widget.messages.length != oldWidget.messages.length) {
-      return true;
+      return widget.messages.isEmpty ||
+          oldWidget.messages.isEmpty ||
+          widget.messages.last.id != oldWidget.messages.last.id;
     }
 
     if (widget.messages.isEmpty || oldWidget.messages.isEmpty) {
@@ -876,6 +886,12 @@ class _ChatAreaState extends State<ChatArea> {
                   ),
                 )
               else ...[
+                if (widget.hasOlderMessages)
+                  _HistoryPager(
+                    loading: widget.loadingOlderMessages,
+                    windowFull: widget.historyWindowFull,
+                    onLoadOlder: widget.onLoadOlderMessages,
+                  ),
                 Expanded(
                   child: Stack(
                     clipBehavior: Clip.none,
@@ -1071,6 +1087,55 @@ class _ChatAreaState extends State<ChatArea> {
               ),
             )
           : content,
+    );
+  }
+}
+
+class _HistoryPager extends StatelessWidget {
+  final bool loading;
+  final bool windowFull;
+  final Future<void> Function()? onLoadOlder;
+
+  const _HistoryPager({
+    required this.loading,
+    required this.windowFull,
+    required this.onLoadOlder,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      liveRegion: true,
+      label: windowFull
+          ? 'Local history window limit reached'
+          : 'Older messages are available',
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        color: NewChatColors.background,
+        alignment: Alignment.center,
+        child: windowFull
+            ? Text(
+                'This local history window is full. Recent messages remain '
+                'available after reconnecting.',
+                style: TextStyle(color: NewChatColors.textMuted, fontSize: 12),
+                textAlign: TextAlign.center,
+              )
+            : TextButton.icon(
+                onPressed: loading || onLoadOlder == null
+                    ? null
+                    : () => onLoadOlder!(),
+                icon: loading
+                    ? const SizedBox.square(
+                        dimension: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.history_rounded, size: 18),
+                label: Text(
+                  loading ? 'Loading older messages…' : 'Load older messages',
+                ),
+              ),
+      ),
     );
   }
 }

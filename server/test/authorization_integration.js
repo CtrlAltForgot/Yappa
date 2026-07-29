@@ -982,6 +982,83 @@ async function run() {
     token: member.token,
   });
 
+  const historyMessageIds = [message.id];
+  for (let index = 1; index <= 4; index += 1) {
+    const response = await request(
+      `/api/channels/${textChannel.id}/messages`,
+      {
+        method: 'POST',
+        token: owner.token,
+        body: { content: `durable history page ${index}` },
+      },
+    );
+    assert.equal(response.status, 201);
+    historyMessageIds.push((await response.json()).message.id);
+  }
+
+  const newestHistoryResponse = await request(
+    `/api/channels/${textChannel.id}/messages?limit=2`,
+    { token: owner.token },
+  );
+  assert.equal(newestHistoryResponse.status, 200);
+  const newestHistory = await newestHistoryResponse.json();
+  assert.deepEqual(
+    newestHistory.messages.map((item) => item.id),
+    historyMessageIds.slice(-2),
+  );
+  assert.equal(newestHistory.page.hasMore, true);
+  assert.match(newestHistory.page.nextCursor, /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
+
+  const olderHistoryResponse = await request(
+    `/api/channels/${textChannel.id}/messages?limit=2&cursor=${encodeURIComponent(
+      newestHistory.page.nextCursor,
+    )}`,
+    { token: owner.token },
+  );
+  assert.equal(olderHistoryResponse.status, 200);
+  const olderHistory = await olderHistoryResponse.json();
+  assert.deepEqual(
+    olderHistory.messages.map((item) => item.id),
+    historyMessageIds.slice(1, 3),
+  );
+  assert.equal(olderHistory.page.hasMore, true);
+  assert.equal(
+    olderHistory.messages.some((item) =>
+      newestHistory.messages.some((newest) => newest.id === item.id)),
+    false,
+  );
+
+  const substitutedCursorResponse = await request(
+    `/api/channels/${textChannel.id}/messages?cursor=${encodeURIComponent(
+      newestHistory.page.nextCursor,
+    )}`,
+    { token: member.token },
+  );
+  assert.equal(substitutedCursorResponse.status, 400);
+  assert.equal(
+    (await substitutedCursorResponse.json()).error?.code,
+    'invalid_history_cursor',
+  );
+  const tamperedCursor =
+    `${newestHistory.page.nextCursor.slice(0, -1)}` +
+    `${newestHistory.page.nextCursor.endsWith('A') ? 'B' : 'A'}`;
+  const tamperedCursorResponse = await request(
+    `/api/channels/${textChannel.id}/messages?cursor=${encodeURIComponent(
+      tamperedCursor,
+    )}`,
+    { token: owner.token },
+  );
+  assert.equal(tamperedCursorResponse.status, 400);
+  assert.equal(
+    (await tamperedCursorResponse.json()).error?.code,
+    'invalid_history_cursor',
+  );
+  await expectStatus(
+    `/api/channels/${textChannel.id}/messages?limit=101`,
+    400,
+    { token: owner.token },
+  );
+
   const encryptionDb = new Database(dbPath);
   encryptionDb
     .prepare(`
@@ -999,6 +1076,15 @@ async function run() {
   );
   assert.equal(encryptedChannel.encryptionMode, 'e2ee');
   assert.equal(encryptedChannel.encryptionVersion, 1);
+  const plaintextHistoryRejected = await request(
+    `/api/channels/${textChannel.id}/messages`,
+    { token: owner.token },
+  );
+  assert.equal(plaintextHistoryRejected.status, 409);
+  assert.equal(
+    (await plaintextHistoryRejected.json()).error?.code,
+    'encrypted_channel_requires_e2ee',
+  );
   const plaintextRejected = await request(
     `/api/channels/${textChannel.id}/messages`,
     {

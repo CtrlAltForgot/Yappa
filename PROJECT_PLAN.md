@@ -1274,25 +1274,30 @@ Current implementation slice:
   SBOM review, final-asset verification, and explicit publication remain open
   as detailed in `RELEASE_ENGINEERING.md`.
 - Durable chat is the active implementation phase. The verified plaintext
-  foundation stores messages indefinitely until an authorized deletion, but
-  the client can currently retrieve only the newest bounded window because
-  `/api/channels/:channelId/messages` has no history cursor. The table also
-  lacks the required composite channel/message history index, client history
-  caching is not yet proven bounded and recoverable, and ordinary attachment
-  expiry still conflicts with the indefinite-retention contract. Threads are
-  not implemented. The first bounded slice is cursor-integrity-protected,
-  authorization-checked backward pagination with an indexed query, followed
-  by client load-older support and bounded cache behavior. Completion still
-  requires the storage-full, attachment, E2EE new-device history, scale, and
-  destructive restore evidence listed in `PERSISTENT_CHAT.md`.
+  foundation stores messages indefinitely until an authorized deletion.
+  Plaintext history now has bounded backward pagination using an opaque
+  authenticated cursor bound to the server, channel, direction, message ID,
+  protocol version, and viewer. Active auth/ban checks run for each page;
+  viewer substitution, cursor tampering, invalid bounds, and plaintext reads
+  after E2EE cutover are negative-tested. Queries use the new composite
+  `(channel_id, id)` index with an asserted SQLite query plan. The client
+  validates page metadata, deduplicates chronological pages, offers a
+  load-older action, persists only the newest 200 plaintext messages per
+  channel, and honestly reports its 1,000-message active-window limit. Focused
+  backend and client tests, Flutter analysis, the complete 60-test Flutter
+  suite, and the complete backend/security/deployment-policy suite pass
+  locally. Production deployment verification is unavailable because approved
+  Unraid SSH access is still unavailable. Forward reconnect catch-up,
+  sliding-window navigation, ordinary attachment expiry,
+  storage-full behavior, encrypted new-device history, scale, and destructive
+  restore evidence remain open. Threads are not implemented.
 
 Next work, in order:
 
-1. Implement and verify the first durable-history slice: authenticated stable
-   cursor pagination, the composite history index, client load-older behavior,
-   bounded recoverable local caching, and negative authorization/cursor tests.
-   Then continue the remaining `PERSISTENT_CHAT.md` storage, attachment,
-   encrypted-history continuity, capacity, scale, and restore gates.
+1. Continue the remaining `PERSISTENT_CHAT.md` forward-catch-up,
+   sliding-window, attachment-retention, encrypted-history continuity,
+   capacity, scale, and restore gates. Deploy and verify this first history
+   slice on Unraid when approved access becomes available.
 2. Add bare-metal/reboot and sleep/network-transition evidence; validate the
    Windows bridge on real WSL2; then implement and test Windows Firewall and
    background-supervision parity.

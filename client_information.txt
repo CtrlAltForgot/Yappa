@@ -1,4 +1,4 @@
-📝 Yappa Update — July 24, 2026 📝
+📝 Yappa Update — July 28, 2026 📝
 
 This release brings Yappa’s client and self-hosted server back into sync and
 makes major progress toward a dependable first public release.
@@ -25,6 +25,10 @@ independent review justify that claim.
   technical encryption details.
 - Message clocks and date dividers now convert the server’s UTC timestamps to
   your computer’s local timezone, including messages near midnight.
+- Older messages in ordinary text feeds can now be loaded in additional
+  pages instead of disappearing beyond the newest screenful. Yappa keeps the
+  server as the durable record, limits the local cache, and clearly tells you
+  when the current on-screen history window is full.
 - The current Linux release package was rebuilt and launched after these
   changes. Its native encryption, voice, protected-storage, and media-preview
   libraries all resolved successfully. Linux packages now use portable

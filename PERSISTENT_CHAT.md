@@ -29,6 +29,23 @@ client must not make the conversation look complete when it is not.
   per channel and accepts an idempotent client operation identifier.
 - The encrypted delivery API supports bounded cursor reads of up to 200 events
   and stores per-device delivered and acknowledged cursors.
+- The legacy plaintext history API now pages backward in bounded windows of up
+  to 100 messages. Its authenticated opaque cursor binds protocol version,
+  server, channel, direction, message ID, and viewer account; cross-account
+  substitution and signature tampering fail closed. Every page re-runs active
+  session/ban authorization and rejects plaintext reads after an E2EE cutover.
+- Plaintext history reads use the composite `(channel_id, id)` index. The
+  migration removes the superseded channel-only index, and an automated query
+  plan assertion proves the older-than lookup uses the composite index.
+- The desktop client exposes an explicit load-older action, validates cursor
+  response consistency, deduplicates pages, and preserves chronological
+  ordering. Its ordinary plaintext cache persists only the newest 200 messages
+  per channel and its interactive backward-history window is capped at 1,000
+  messages with an honest limit notice; evicted persisted rows remain
+  authoritative and recoverable from the server.
+- The complete backend/security/deployment-policy suite, Flutter analysis, and
+  all 60 Flutter tests pass with this increment. Production deployment remains
+  unverified because approved Unraid SSH access is unavailable.
 - The client stores its decrypted MLS event view in an authenticated encrypted
   local store protected by an OS-vault key, and fails closed if that key or
   store authentication is unavailable.
@@ -40,9 +57,12 @@ contract.
 
 ## Confirmed Gaps
 
-- The legacy plaintext history endpoint returns only the newest 50 messages
-  by default (up to 100) and has no before/after cursor. Older rows remain in
-  SQLite but are not currently reachable through client pagination.
+- Plaintext reconnect catch-up does not yet use a forward cursor. The current
+  client refreshes the newest page and can page backward, but it cannot slide
+  beyond its explicit 1,000-message interactive window without reconnecting.
+- Encrypted client history needs the same explicit bounded-window UX and
+  honest older-history/recovery states; its server delivery cursor alone does
+  not complete that product behavior.
 - Ordinary and encrypted attachment retention defaults to 30 days. That does
   not satisfy durable chat history for attachments.
 - MLS gives a newly admitted device access from its admitted epoch forward;

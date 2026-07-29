@@ -128,6 +128,33 @@ try {
       .get().count,
     1,
   );
+  assert.equal(
+    db
+      .prepare(`
+        SELECT COUNT(*) AS count
+        FROM sqlite_master
+        WHERE type = 'index'
+        AND name = 'idx_messages_channel_id_id'
+      `)
+      .get().count,
+    1,
+  );
+  const historyQueryPlan = db
+    .prepare(`
+      EXPLAIN QUERY PLAN
+      SELECT id
+      FROM messages
+      WHERE channel_id = ? AND id < ?
+      ORDER BY id DESC
+      LIMIT ?
+    `)
+    .all(1, Number.MAX_SAFE_INTEGER, 50)
+    .map((row) => row.detail)
+    .join('\n');
+  assert.match(
+    historyQueryPlan,
+    /idx_messages_channel_id_id \(channel_id=\? AND id<\?\)/,
+  );
   assert.equal(attachmentColumns.includes('ciphertext_sha256'), true);
   assert.equal(attachmentColumns.includes('secretstream_header'), true);
 

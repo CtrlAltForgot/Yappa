@@ -2223,6 +2223,74 @@ function attachmentGrantSignature({ attachmentId, userId, expires }) {
     .digest('base64url');
 }
 
+const HISTORY_CURSOR_VERSION = 1;
+
+function historyCursorSignature(encodedPayload) {
+  return crypto
+    .createHmac('sha256', ATTACHMENT_SIGNING_SECRET)
+    .update(`yappa-history-cursor-v1.${encodedPayload}`, 'utf8')
+    .digest('base64url');
+}
+
+function encodeHistoryCursor({ channelId, messageId, userId }) {
+  const encodedPayload = Buffer.from(
+    JSON.stringify({
+      v: HISTORY_CURSOR_VERSION,
+      s: serverId,
+      c: toId(channelId),
+      m: toId(messageId),
+      u: toId(userId),
+      d: 'before',
+    }),
+    'utf8',
+  ).toString('base64url');
+  return `${encodedPayload}.${historyCursorSignature(encodedPayload)}`;
+}
+
+function decodeHistoryCursor(cursor, { channelId, userId }) {
+  if (
+    typeof cursor !== 'string' ||
+    cursor.length < 32 ||
+    cursor.length > 1024 ||
+    !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(cursor)
+  ) {
+    return null;
+  }
+
+  const [encodedPayload, providedSignature] = cursor.split('.');
+  const expectedSignature = historyCursorSignature(encodedPayload);
+  const providedBytes = Buffer.from(providedSignature, 'utf8');
+  const expectedBytes = Buffer.from(expectedSignature, 'utf8');
+  if (
+    providedBytes.length !== expectedBytes.length ||
+    !crypto.timingSafeEqual(providedBytes, expectedBytes)
+  ) {
+    return null;
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.from(encodedPayload, 'base64url').toString('utf8'));
+  } catch (_) {
+    return null;
+  }
+
+  const messageId = Number(payload?.m);
+  if (
+    payload?.v !== HISTORY_CURSOR_VERSION ||
+    payload?.s !== serverId ||
+    payload?.c !== toId(channelId) ||
+    payload?.u !== toId(userId) ||
+    payload?.d !== 'before' ||
+    !Number.isSafeInteger(messageId) ||
+    messageId <= 0 ||
+    payload.m !== toId(messageId)
+  ) {
+    return null;
+  }
+  return messageId;
+}
+
 function signedAttachmentUrl(row, viewerUserId) {
   const attachmentId = toId(row.id);
   const userId = toId(viewerUserId);
@@ -5279,18 +5347,58 @@ app.get('/api/channels', authRequired, (_req, res) => {
 
 app.get('/api/channels/:channelId/messages', authRequired, (req, res) => {
   const channelId = Number(req.params.channelId);
-  if (!Number.isInteger(channelId)) {
+  if (!Number.isSafeInteger(channelId) || channelId <= 0) {
     return apiError(res, 400, 'invalid_channel_id', 'Invalid channel id.');
   }
 
-  const limitRaw = Number(req.query.limit || 50);
-  const limit = Math.max(
-    1,
-    Math.min(100, Number.isFinite(limitRaw) ? limitRaw : 50),
-  );
+  const channel = db.prepare(`
+    SELECT id, type, encryption_mode, encryption_version
+    FROM channels
+    WHERE id = ?
+  `).get(channelId);
+  if (!channel) {
+    return apiError(res, 404, 'channel_not_found', 'Channel not found.');
+  }
+  if (channel.type !== 'text') {
+    return apiError(
+      res,
+      400,
+      'channel_not_text',
+      'Messages can only be read from text channels.',
+    );
+  }
+  if (rejectPlaintextForEncryptedChannel(res, channel)) {
+    return;
+  }
 
-  const rows = db
-  .prepare(`
+  const limitText = req.query.limit == null ? '50' : String(req.query.limit);
+  const limit = Number(limitText);
+  if (!/^[1-9][0-9]*$/.test(limitText) || !Number.isSafeInteger(limit) || limit > 100) {
+    return apiError(
+      res,
+      400,
+      'invalid_history_limit',
+      'History limit must be an integer from 1 to 100.',
+    );
+  }
+
+  let beforeMessageId = null;
+  if (req.query.cursor != null) {
+    beforeMessageId = decodeHistoryCursor(String(req.query.cursor), {
+      channelId,
+      userId: req.auth.user.id,
+    });
+    if (beforeMessageId == null) {
+      return apiError(
+        res,
+        400,
+        'invalid_history_cursor',
+        'History cursor is invalid for this account and channel.',
+      );
+    }
+  }
+
+  const historySelect = `
   SELECT
   messages.id,
   messages.channel_id,
@@ -5305,11 +5413,25 @@ app.get('/api/channels/:channelId/messages', authRequired, (req, res) => {
   FROM messages
   JOIN users ON users.id = messages.user_id
   WHERE messages.channel_id = ?
+  `;
+  const rows = beforeMessageId == null
+    ? db.prepare(`
+  ${historySelect}
   ORDER BY messages.id DESC
   LIMIT ?
-  `)
-  .all(channelId, limit)
-  .reverse();
+  `).all(channelId, limit + 1)
+    : db.prepare(`
+  ${historySelect}
+  AND messages.id < ?
+  ORDER BY messages.id DESC
+  LIMIT ?
+  `).all(channelId, beforeMessageId, limit + 1);
+
+  const hasMore = rows.length > limit;
+  if (hasMore) {
+    rows.pop();
+  }
+  rows.reverse();
 
   const attachmentsMap = getAttachmentsForMessageIds(
     db,
@@ -5325,6 +5447,17 @@ app.get('/api/channels/:channelId/messages', authRequired, (req, res) => {
       req.auth.user.id,
     ),
     ),
+    page: {
+      hasMore,
+      nextCursor:
+        hasMore && rows.length > 0
+          ? encodeHistoryCursor({
+              channelId,
+              messageId: rows[0].id,
+              userId: req.auth.user.id,
+            })
+          : null,
+    },
   });
 });
 

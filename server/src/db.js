@@ -462,7 +462,9 @@ function runMigrations(db) {
   ON media_devices (user_id);
   CREATE INDEX IF NOT EXISTS idx_media_devices_active
   ON media_devices (revoked_at);
-  CREATE INDEX IF NOT EXISTS idx_messages_channel_id ON messages (channel_id);
+  DROP INDEX IF EXISTS idx_messages_channel_id;
+  CREATE INDEX IF NOT EXISTS idx_messages_channel_id_id
+  ON messages (channel_id, id);
   CREATE INDEX IF NOT EXISTS idx_channels_position ON channels (position);
   CREATE INDEX IF NOT EXISTS idx_attachments_channel_id ON attachments (channel_id);
   CREATE INDEX IF NOT EXISTS idx_attachments_message_id ON attachments (message_id);

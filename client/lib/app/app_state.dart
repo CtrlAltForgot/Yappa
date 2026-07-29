@@ -44,6 +44,8 @@ class AppState extends ChangeNotifier {
   static const _localProfilesKey = 'yappa_local_profiles';
   static const _globalYuidKey = 'yappa_global_yuid';
   static const _voiceMemberVolumesKey = 'yappa_voice_member_volumes';
+  static const int _persistedMessagesPerChannel = 200;
+  static const int _activeMessagesPerChannel = 1000;
 
   final ApiClient _api = ApiClient();
   final SecretStorage _secretStorage;
@@ -58,6 +60,9 @@ class AppState extends ChangeNotifier {
 
   final Map<String, Future<LinkPreview?>> _linkPreviewCache = {};
   final Set<String> _refreshedMessageChannelIds = {};
+  final Map<String, String> _olderMessageCursorByChannel = {};
+  final Map<String, bool> _hasOlderMessagesByChannel = {};
+  final Set<String> _loadingOlderMessageChannelIds = {};
   final Set<String> _rotatedSessionServerIds = {};
   final Set<String> _registeredMediaDeviceServerIds = {};
   final Map<String, MlsServerRuntime> _mlsRuntimesByServerId = {};
@@ -395,6 +400,15 @@ class AppState extends ChangeNotifier {
   List<ChatMessage> get selectedMessages => List.unmodifiable(
     _messagesByChannel[selectedChannelId] ?? const <ChatMessage>[],
   );
+
+  bool get selectedChannelHasOlderMessages =>
+      _hasOlderMessagesByChannel[selectedChannelId] == true;
+
+  bool get selectedChannelLoadingOlderMessages =>
+      _loadingOlderMessageChannelIds.contains(selectedChannelId);
+
+  bool get selectedChannelHistoryWindowFull =>
+      selectedMessages.length >= _activeMessagesPerChannel;
 
   List<Member> get selectedMembers =>
       List.unmodifiable(_membersByServer[selectedServerId] ?? const <Member>[]);
@@ -784,12 +798,12 @@ class AppState extends ChangeNotifier {
               channel: channel,
             );
           } else if (channel.allowsPlaintextMessaging) {
-            final messages = await _api.fetchMessages(
+            final page = await _api.fetchMessages(
               baseUrl: server.address,
               token: token,
               channelId: channel.id,
             );
-            _messagesByChannel[channel.id] = messages;
+            _replaceMessageHistoryPage(channel.id, page);
             _refreshedMessageChannelIds.add(channel.id);
           }
         } catch (_) {
@@ -2488,14 +2502,62 @@ class AppState extends ChangeNotifier {
       return;
     }
     if (!targetChannel.allowsPlaintextMessaging) return;
-    final messages = await _api.fetchMessages(
+    final page = await _api.fetchMessages(
       baseUrl: server.address,
       token: token,
       channelId: targetChannel.id,
     );
 
-    _messagesByChannel[targetChannel.id] = messages;
+    _replaceMessageHistoryPage(targetChannel.id, page);
     _refreshedMessageChannelIds.add(targetChannel.id);
+  }
+
+  Future<void> loadOlderSelectedMessages() async {
+    final channel = selectedChannel;
+    final server = _serverById(selectedServerId);
+    final token = _tokensByServerId[selectedServerId];
+    final cursor = _olderMessageCursorByChannel[channel.id];
+    final current = _messagesByChannel[channel.id] ?? const <ChatMessage>[];
+    if (server == null ||
+        token == null ||
+        channel.type != ChannelType.text ||
+        !channel.allowsPlaintextMessaging ||
+        _hasOlderMessagesByChannel[channel.id] != true ||
+        cursor == null ||
+        _loadingOlderMessageChannelIds.contains(channel.id) ||
+        current.length >= _activeMessagesPerChannel) {
+      return;
+    }
+
+    _loadingOlderMessageChannelIds.add(channel.id);
+    notifyListeners();
+    try {
+      final remaining = _activeMessagesPerChannel - current.length;
+      final page = await _api.fetchMessages(
+        baseUrl: server.address,
+        token: token,
+        channelId: channel.id,
+        cursor: cursor,
+        limit: remaining.clamp(1, 100),
+      );
+      final byId = <String, ChatMessage>{
+        for (final message in page.messages) message.id: message,
+        for (final message in current) message.id: message,
+      };
+      final merged = byId.values.toList()
+        ..sort((left, right) => left.sentAt.compareTo(right.sentAt));
+      _messagesByChannel[channel.id] = merged;
+      _hasOlderMessagesByChannel[channel.id] = page.hasMore;
+      if (page.nextCursor == null) {
+        _olderMessageCursorByChannel.remove(channel.id);
+      } else {
+        _olderMessageCursorByChannel[channel.id] = page.nextCursor!;
+      }
+      await _persist();
+    } finally {
+      _loadingOlderMessageChannelIds.remove(channel.id);
+      notifyListeners();
+    }
   }
 
   Future<void> toggleEncryptedReaction({
@@ -3315,6 +3377,16 @@ class AppState extends ChangeNotifier {
     list.sort((a, b) => a.sentAt.compareTo(b.sentAt));
   }
 
+  void _replaceMessageHistoryPage(String channelId, MessageHistoryPage page) {
+    _messagesByChannel[channelId] = page.messages;
+    _hasOlderMessagesByChannel[channelId] = page.hasMore;
+    if (page.nextCursor == null) {
+      _olderMessageCursorByChannel.remove(channelId);
+    } else {
+      _olderMessageCursorByChannel[channelId] = page.nextCursor!;
+    }
+  }
+
   void _removeMessage(String channelId, String messageId) {
     final list = _messagesByChannel[channelId];
     if (list == null) {
@@ -3397,7 +3469,14 @@ class AppState extends ChangeNotifier {
       _messagesKey,
       jsonEncode({
         for (final entry in _messagesByChannel.entries)
-          entry.key: entry.value.map((message) => message.toJson()).toList(),
+          entry.key: entry.value
+              .skip(
+                entry.value.length > _persistedMessagesPerChannel
+                    ? entry.value.length - _persistedMessagesPerChannel
+                    : 0,
+              )
+              .map((message) => message.toJson())
+              .toList(),
       }),
     );
 
@@ -3539,18 +3618,21 @@ class AppState extends ChangeNotifier {
       ..clear()
       ..addAll(
         decoded.map(
-          (key, value) => MapEntry(
-            key.toString(),
-            (value as List)
-                .whereType<Map>()
-                .map(
-                  (item) =>
-                      ChatMessage.fromJson(Map<String, dynamic>.from(item)),
-                )
-                .toList(),
-          ),
+          (key, value) =>
+              MapEntry(key.toString(), _decodeCachedMessageList(value)),
         ),
       );
+  }
+
+  static List<ChatMessage> _decodeCachedMessageList(dynamic value) {
+    final messages = (value as List)
+        .whereType<Map>()
+        .map((item) => ChatMessage.fromJson(Map<String, dynamic>.from(item)))
+        .toList();
+    if (messages.length <= _persistedMessagesPerChannel) {
+      return messages;
+    }
+    return messages.sublist(messages.length - _persistedMessagesPerChannel);
   }
 
   void _decodeTokens(String? raw) {

@@ -458,6 +458,19 @@ class _ShellScreenState extends State<ShellScreen> {
                             child: ChatArea(
                               channel: selectedChannel,
                               messages: widget.appState.selectedMessages,
+                              hasOlderMessages: widget
+                                  .appState
+                                  .selectedChannelHasOlderMessages,
+                              loadingOlderMessages: widget
+                                  .appState
+                                  .selectedChannelLoadingOlderMessages,
+                              historyWindowFull: widget
+                                  .appState
+                                  .selectedChannelHistoryWindowFull,
+                              onLoadOlderMessages:
+                                  selectedChannel.allowsPlaintextMessaging
+                                  ? widget.appState.loadOlderSelectedMessages
+                                  : null,
                               textE2eeStartup: widget.appState
                                   .encryptedChannelStartup(selectedChannel.id),
                               members: widget.appState.selectedMembers,

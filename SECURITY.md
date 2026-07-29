@@ -902,6 +902,28 @@ completion additionally requires:
   deletion, missing attachments, key loss, and failed recovery. Truncation
   must not be presented as a complete conversation.
 
+Verified plaintext-history increment, 2026-07-28:
+
+- Backward history cursors are HMAC-authenticated with a domain-separated
+  history-cursor context and the deployment's protected attachment-signing
+  secret. The payload binds cursor version, persistent server identity,
+  channel, exclusive message boundary, backward direction, and viewer account.
+- Active session and ban authorization runs before cursor processing on every
+  request. A cursor copied to another account or altered in transit is rejected
+  without reading a history page.
+- The legacy plaintext endpoint resolves the current channel and rejects
+  non-text or E2EE channels, closing the post-cutover legacy-row disclosure
+  path. Limits outside 1–100 and malformed cursors fail closed.
+- Automated integration coverage exercises multi-page ordering, no overlap,
+  viewer substitution, tampering, invalid bounds, unauthenticated access, and
+  E2EE cutover rejection. A schema test asserts the composite history index
+  and its SQLite query plan.
+
+This increment does not complete durable-chat security. Forward catch-up,
+channel-specific membership if private channel ACLs are introduced, durable
+attachment defaults, storage exhaustion, encrypted device-history recovery,
+large-scale behavior, and destructive restore proof remain required.
+
 ### Cross-Platform Server Deployment Gate
 
 `SERVER_PORTABILITY.md` defines the supported-host and parity contract. Windows

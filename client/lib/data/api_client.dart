@@ -1303,26 +1303,58 @@ class ApiClient {
     return cursor;
   }
 
-  Future<List<ChatMessage>> fetchMessages({
+  Future<MessageHistoryPage> fetchMessages({
     required String baseUrl,
     required String token,
     required String channelId,
+    String? cursor,
+    int limit = 50,
   }) async {
+    if (limit < 1 || limit > 100) {
+      throw ArgumentError.value(limit, 'limit', 'must be from 1 to 100');
+    }
     final normalized = normalizeBaseUrl(baseUrl);
-    final json = await _requestJson(
-      'GET',
+    final query = <String, String>{'limit': limit.toString()};
+    if (cursor != null && cursor.isNotEmpty) {
+      query['cursor'] = cursor;
+    }
+    final uri = Uri.parse(
       '$normalized/api/channels/$channelId/messages',
-      token: token,
-    );
+    ).replace(queryParameters: query);
+    final json = await _requestJson('GET', uri.toString(), token: token);
 
     final messagesJson = (json['messages'] as List? ?? const [])
         .map((item) => Map<String, dynamic>.from(item as Map))
         .toList();
 
-    return messagesJson
+    final messages = messagesJson
         .map(ChatMessage.fromJson)
         .map((message) => _resolveMessageUrls(message, normalized))
         .toList();
+    final pageJson = json['page'];
+    if (pageJson is! Map) {
+      throw ApiException(
+        'The server returned an invalid message history page.',
+        code: 'invalid_history_response',
+      );
+    }
+    final page = Map<String, dynamic>.from(pageJson);
+    final hasMore = page['hasMore'];
+    final nextCursor = page['nextCursor'];
+    if (hasMore is! bool ||
+        (nextCursor != null && nextCursor is! String) ||
+        (hasMore && (nextCursor is! String || nextCursor.isEmpty)) ||
+        (!hasMore && nextCursor != null)) {
+      throw ApiException(
+        'The server returned an invalid message history cursor.',
+        code: 'invalid_history_response',
+      );
+    }
+    return MessageHistoryPage(
+      messages: messages,
+      hasMore: hasMore,
+      nextCursor: nextCursor as String?,
+    );
   }
 
   Future<ChatAttachment> uploadAttachment({
