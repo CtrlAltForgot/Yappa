@@ -672,6 +672,28 @@ const serverFullStackContract = fs.readFileSync(
   path.join(repositoryRoot, '.github', 'scripts', 'test-server-full-stack.sh'),
   'utf8',
 );
+const releaseAuthenticityWorkflow = fs.readFileSync(
+  path.join(workflowRoot, 'release_authenticity.yml'),
+  'utf8',
+);
+const releaseEvidenceGenerator = fs.readFileSync(
+  path.join(
+    repositoryRoot,
+    '.github',
+    'scripts',
+    'generate-release-evidence.js',
+  ),
+  'utf8',
+);
+const releaseRefGuard = fs.readFileSync(
+  path.join(
+    repositoryRoot,
+    '.github',
+    'scripts',
+    'validate-release-ref.js',
+  ),
+  'utf8',
+);
 assert.match(
   serverFullStackWorkflow,
   /actions\/checkout@[a-f0-9]{40}/,
@@ -687,6 +709,28 @@ assert.match(serverFullStackContract, /install-yappa\.sh" recover/);
 assert.match(serverFullStackContract, /docker stop newchat-node/);
 assert.match(serverFullStackContract, /sha256sum "\$IDENTITY_PATH"/);
 assert.match(serverFullStackContract, /down --volumes --remove-orphans/);
+assert.match(
+  releaseAuthenticityWorkflow,
+  /actions\/attest-build-provenance@[a-f0-9]{40}/,
+  'Artifact attestation action must be commit-pinned.',
+);
+assert.match(releaseAuthenticityWorkflow, /id-token:\s*write/);
+assert.match(releaseAuthenticityWorkflow, /attestations:\s*write/);
+assert.match(releaseAuthenticityWorkflow, /test-release-evidence\.js/);
+assert.match(releaseAuthenticityWorkflow, /github\.event_name != 'pull_request'/);
+assert.match(releaseEvidenceGenerator, /spdxVersion:\s*'SPDX-2\.3'/);
+assert.match(releaseEvidenceGenerator, /pkg:npm/);
+assert.match(releaseEvidenceGenerator, /pkg:cargo/);
+assert.match(releaseEvidenceGenerator, /pkg:pub/);
+assert.match(releaseEvidenceGenerator, /Refusing to overwrite release evidence/);
+assert.match(releaseRefGuard, /refName !== `v\$\{version\}`/);
+assert.match(releaseRefGuard, /installManifest\.release\.channel !== 'stable'/);
+assert.match(releaseRefGuard, /installManifest\.release\.published !== true/);
+for (const workflow of desktopWorkflows) {
+  assert.match(workflow, /generate-release-evidence\.js/);
+  assert.match(workflow, /actions\/attest-build-provenance@[a-f0-9]{40}/);
+  assert.match(workflow, /attestations:\s*write/);
+}
 assert.match(
   desktopWorkflows[0],
   /bash -n server\/install-yappa\.sh/,

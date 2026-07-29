@@ -5,6 +5,8 @@ on:
 
 permissions:
   contents: read
+  id-token: write
+  attestations: write
 
 concurrency:
   group: yappa-linux-${{ github.ref }}
@@ -49,11 +51,27 @@ jobs:
       - name: Build, inspect, and package Linux
         run: .github/scripts/build-linux.sh "${{ steps.versions.outputs.safe_yappa }}"
 
+      - name: Generate checksum and SPDX evidence
+        run: |
+          node .github/scripts/generate-release-evidence.js \
+            --artifact "client/dist/Yappa-${{ steps.versions.outputs.safe_yappa }}-linux-x64.tar.gz" \
+            --output-dir client/dist/evidence \
+            --version "${{ steps.versions.outputs.yappa }}" \
+            --commit "${{ github.sha }}" \
+            --github-attestation true
+
+      - name: Attest Linux artifact provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: client/dist/Yappa-${{ steps.versions.outputs.safe_yappa }}-linux-x64.tar.gz
+
       - name: Upload Linux artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: Yappa-linux-x64-${{ github.sha }}
-          path: client/dist/Yappa-${{ steps.versions.outputs.safe_yappa }}-linux-x64.tar.gz
+          path: |
+            client/dist/Yappa-${{ steps.versions.outputs.safe_yappa }}-linux-x64.tar.gz
+            client/dist/evidence/*
           if-no-files-found: error
 
       - name: Upload Linux diagnostics
