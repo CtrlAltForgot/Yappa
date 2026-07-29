@@ -128,6 +128,10 @@ active attachment are preserved while their implicit expiry is removed.
 Rollback to schema 3 requires the normal complete pre-upgrade restore; opening
 the migrated database with a schema-3 binary is forbidden.
 
+The distributable install manifest declares database schema 4. Upgrade,
+fresh-restore, and install verification must use that manifest value; schema 5
+or later fails closed until a matching backend migration is shipped.
+
 The production Unraid database migrated from version 1 to version 2 on
 2026-07-24 after its encrypted pre-upgrade archive checksum was verified.
 Post-migration inspection confirmed schema 2, the operation column and index,

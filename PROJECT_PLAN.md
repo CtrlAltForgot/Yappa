@@ -1292,8 +1292,8 @@ Current implementation slice:
   suite, and the complete backend/security/deployment-policy suite pass
   locally. Production deployment verification is unavailable because approved
   Unraid SSH access is still unavailable. Forward reconnect catch-up,
-  attachment scale/restore validation, encrypted new-device history, scale,
-  and destructive restore evidence remain open. Durable writes now reserve
+  authenticated post-restore download validation, encrypted new-device
+  history, and broader scale evidence remain open. Durable writes now reserve
   validated filesystem headroom (512 MiB
   critical, 2 GiB warning by default), fail with retryable HTTP 507 when
   capacity is critical/unavailable, and translate real SQLite/filesystem-full
@@ -1314,11 +1314,17 @@ Current implementation slice:
   silently disrupt an older visible window. Bidirectional 100-row replacement
   widget coverage holds the retained visible item within one logical pixel,
   including lazy rematerialization after its list index changes.
+  The server manifest now correctly declares database schema 4. A destructive
+  fixture writes 5,000 messages plus 128 linked permanent 64-KiB attachments,
+  runs the production encrypted backup script, deletes the source installation,
+  fresh-restores it, passes SQLite integrity/foreign-key checks, and verifies
+  every restored file against its pre-backup SHA-256 digest. Production backup
+  drill and authenticated post-restore download evidence remain.
   Threads are not implemented.
 
 Next work, in order:
 
-1. Continue `PERSISTENT_CHAT.md` attachment scale/restore,
+1. Continue `PERSISTENT_CHAT.md` authenticated restored-download evidence,
    encrypted-history continuity,
    real constrained-filesystem/concurrency capacity evidence, scale, and
    restore gates. Deploy and verify these history changes on Unraid when

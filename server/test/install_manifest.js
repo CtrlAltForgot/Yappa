@@ -39,7 +39,7 @@ assert.equal(
   'Client and server release metadata must use the same Yappa version.',
 );
 assert.equal(manifest.release.configurationSchemaVersion, 1);
-assert.equal(manifest.release.databaseSchemaVersion, 3);
+assert.equal(manifest.release.databaseSchemaVersion, 4);
 assert.equal(manifest.artifacts.serverBundle.format, 'tar.gz');
 assert.equal(
   manifest.artifacts.serverBundle.rootPattern,

@@ -5,6 +5,11 @@ const os = require('os');
 const path = require('path');
 const {spawnSync} = require('child_process');
 const Database = require('better-sqlite3');
+const {
+  createDb,
+  createUserWithRole,
+  nowIso,
+} = require('../src/db');
 
 const repositoryRoot = path.resolve(__dirname, '..', '..');
 const serverRoot = path.join(repositoryRoot, 'server');
@@ -75,6 +80,130 @@ function makeBackup(name, schemaVersion = 3, envDatabase = './data/yappa.db') {
   return backup;
 }
 
+function makeScaleBackup() {
+  const source = path.join(temporaryRoot, 'scale-source');
+  const backup = path.join(temporaryRoot, 'scale.tar.gz.age');
+  const attachmentsRoot = path.join(source, 'data', 'attachments');
+  const identityDirectory = path.join(
+    source,
+    'data',
+    'servers',
+    'scale-server',
+  );
+  fs.mkdirSync(attachmentsRoot, {recursive: true});
+  fs.mkdirSync(identityDirectory, {recursive: true});
+  fs.writeFileSync(
+    path.join(source, '.env'),
+    'SESSION_SECRET=test-only\nDB_PATH=./data/yappa.db\n',
+  );
+  fs.writeFileSync(
+    path.join(identityDirectory, 'server-identity.json'),
+    '{"serverId":"scale-server","publicKey":"fixture"}\n',
+  );
+
+  const databasePath = path.join(source, 'data', 'yappa.db');
+  const database = createDb(databasePath, {
+    serverName: 'Scale restore fixture',
+    serverDescription: 'Disposable durable-chat restore evidence',
+  });
+  const owner = createUserWithRole(database, {
+    username: 'scaleowner',
+    usernameNormalized: 'scaleowner',
+    passwordHash: 'unused-test-hash',
+    role: 'owner',
+  });
+  const channel = database
+    .prepare("SELECT id FROM channels WHERE type = 'text' ORDER BY id LIMIT 1")
+    .get();
+  const createdAt = nowIso();
+  const insertMessage = database.prepare(`
+    INSERT INTO messages (channel_id, user_id, content, created_at)
+    VALUES (?, ?, ?, ?)
+  `);
+  const insertAttachment = database.prepare(`
+    INSERT INTO attachments (
+      server_id, channel_id, message_id, uploader_user_id, kind,
+      original_name, stored_name, relative_path, mime_type, size_bytes,
+      created_at, expires_at, deleted_at
+    )
+    VALUES (?, ?, ?, ?, 'file', ?, ?, ?, 'application/octet-stream', ?,
+      ?, NULL, NULL)
+  `);
+  const attachmentDigests = new Map();
+  database.transaction(() => {
+    for (let index = 0; index < 5000; index += 1) {
+      const message = insertMessage.run(
+        channel.id,
+        owner.id,
+        `durable scale message ${index.toString().padStart(4, '0')}`,
+        createdAt,
+      );
+      if (index < 128) {
+        const storedName = `scale-${index.toString().padStart(3, '0')}.bin`;
+        const relativePath = `attachments/${storedName}`;
+        const bytes = Buffer.alloc(64 * 1024);
+        bytes.writeUInt32BE(index, 0);
+        crypto
+          .createHash('sha256')
+          .update(`yappa-scale-${index}`)
+          .digest()
+          .copy(bytes, 4);
+        fs.writeFileSync(path.join(attachmentsRoot, storedName), bytes);
+        attachmentDigests.set(storedName, digest(path.join(attachmentsRoot, storedName)));
+        insertAttachment.run(
+          'scale-server',
+          channel.id,
+          message.lastInsertRowid,
+          owner.id,
+          storedName,
+          storedName,
+          relativePath,
+          bytes.length,
+          createdAt,
+        );
+      }
+    }
+  })();
+  database.pragma('wal_checkpoint(TRUNCATE)');
+  assert.equal(
+    database
+      .prepare('SELECT COALESCE(MAX(version), 0) FROM schema_migrations')
+      .pluck()
+      .get(),
+    4,
+  );
+  database.close();
+
+  const backupScript = path.join(source, 'backup-yappa.sh');
+  fs.copyFileSync(path.join(serverRoot, 'backup-yappa.sh'), backupScript);
+  fs.chmodSync(backupScript, 0o700);
+  const fakeBin = path.join(source, 'test-bin');
+  fs.mkdirSync(fakeBin);
+  fs.writeFileSync(
+    path.join(fakeBin, 'docker'),
+    `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\${1:-}" == "inspect" ]]; then
+  printf 'true\\n'
+fi
+`,
+    {mode: 0o700},
+  );
+  const backedUp = spawnSync(backupScript, [backup], {
+    cwd: source,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: `${fakeBin}:${process.env.PATH}`,
+      YAPPA_AGE_BIN: fakeAge,
+    },
+  });
+  assert.equal(backedUp.status, 0, backedUp.stderr || backedUp.stdout);
+  assert.equal(fs.statSync(backup).mode & 0o777, 0o600);
+  fs.rmSync(source, {recursive: true, force: true});
+  return {backup, attachmentDigests};
+}
+
 function restore(backup, bundle, checksum, destination) {
   return run(path.join(serverRoot, 'install-yappa.sh'), [
     'restore',
@@ -92,7 +221,24 @@ function restore(backup, bundle, checksum, destination) {
 try {
   fs.writeFileSync(
     fakeAge,
-    '#!/usr/bin/env bash\nset -euo pipefail\n[[ "$1" == "--decrypt" ]]\ncat "$2"\n',
+    `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\${1:-}" == "--decrypt" ]]; then
+  cat "$2"
+  exit 0
+fi
+output=''
+while [[ $# -gt 0 ]]; do
+  if [[ "$1" == "--output" ]]; then
+    output="$2"
+    shift 2
+  else
+    shift
+  fi
+done
+[[ -n "$output" ]]
+cat > "$output"
+`,
     {mode: 0o700},
   );
   const bundleDirectory = path.join(temporaryRoot, 'bundle');
@@ -153,6 +299,70 @@ try {
   );
   restoredDatabase.close();
 
+  const scale = makeScaleBackup();
+  const scaleDestination = path.join(temporaryRoot, 'scale-restored-server');
+  const scaleRestored = restore(
+    scale.backup,
+    bundle,
+    checksum,
+    scaleDestination,
+  );
+  assert.equal(
+    scaleRestored.status,
+    0,
+    scaleRestored.stderr || scaleRestored.stdout,
+  );
+  const scaleDatabase = new Database(
+    path.join(scaleDestination, 'data', 'yappa.db'),
+    {readonly: true},
+  );
+  assert.equal(scaleDatabase.pragma('quick_check', {simple: true}), 'ok');
+  assert.deepEqual(scaleDatabase.pragma('foreign_key_check'), []);
+  assert.equal(
+    scaleDatabase.prepare('SELECT COUNT(*) FROM messages').pluck().get(),
+    5000,
+  );
+  assert.equal(
+    scaleDatabase
+      .prepare(
+        `SELECT COUNT(*) FROM attachments
+         WHERE message_id IS NOT NULL
+         AND expires_at IS NULL
+         AND deleted_at IS NULL`,
+      )
+      .pluck()
+      .get(),
+    128,
+  );
+  assert.equal(
+    scaleDatabase
+      .prepare('SELECT content FROM messages ORDER BY id LIMIT 1')
+      .pluck()
+      .get(),
+    'durable scale message 0000',
+  );
+  assert.equal(
+    scaleDatabase
+      .prepare('SELECT content FROM messages ORDER BY id DESC LIMIT 1')
+      .pluck()
+      .get(),
+    'durable scale message 4999',
+  );
+  scaleDatabase.close();
+  for (const [storedName, expectedDigest] of scale.attachmentDigests) {
+    assert.equal(
+      digest(
+        path.join(
+          scaleDestination,
+          'data',
+          'attachments',
+          storedName,
+        ),
+      ),
+      expectedDigest,
+    );
+  }
+
   const wrongDigestDestination = path.join(temporaryRoot, 'wrong-digest');
   const wrongDigest = restore(
     backup,
@@ -174,7 +384,7 @@ try {
   );
 
   for (const [name, invalidBackup, expectedError] of [
-    ['future-schema', makeBackup('future-schema', 4), /schema is not supported/],
+    ['future-schema', makeBackup('future-schema', 5), /schema is not supported/],
     [
       'escaped-database',
       makeBackup('escaped-database', 3, '../outside.db'),

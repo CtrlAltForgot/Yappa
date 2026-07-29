@@ -966,6 +966,22 @@ Actual constrained-filesystem exhaustion/recovery, simultaneous boundary
 writes, portable backup-root monitoring, and production deployment remain
 required before this gate is complete.
 
+Verified destructive durable-chat restore increment, 2026-07-28:
+
+- The distributable install manifest now declares database schema 4, matching
+  the backend's attachment-retention migration. Restore and upgrade guards
+  therefore accept current backups and reject schema 5 rather than incorrectly
+  treating the current schema as future data.
+- A disposable schema-4 installation writes 5,000 messages and 128 linked,
+  non-expiring 64-KiB attachments, runs the production encrypted backup script,
+  and then deletes the entire source installation before fresh restore.
+- The restored database passes SQLite quick and foreign-key checks, retains
+  exact first/last message sentinels and all active links, and all 128 files
+  reproduce their independently recorded SHA-256 digests.
+
+This is deterministic destructive-restore evidence, not a substitute for a
+production backup drill or authenticated post-restore client download test.
+
 Verified plaintext reconnect increment, 2026-07-28:
 
 - History cursors authenticate backward or forward direction in addition to

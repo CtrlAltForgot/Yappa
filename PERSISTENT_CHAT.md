@@ -73,6 +73,12 @@ client must not make the conversation look complete when it is not.
   store authentication is unavailable.
 - The backup workflow includes the database and attachment roots and has an
   integration test for encrypted backup/restore orchestration.
+- The production backup and fresh-install restore scripts now have a
+  destructive scale fixture with 5,000 linked messages and 128 permanent
+  64-KiB attachments. The source installation is erased after encrypted backup;
+  the restored schema-4 database passes SQLite integrity and foreign-key
+  checks, retains both end messages and every attachment link, and every
+  restored file matches its pre-backup SHA-256 digest.
 - Fresh servers now use indefinite (`0`) retention for ordinary and encrypted
   chat attachments. Schema version 4 clears scheduled expiry from every active
   attachment and resets the server policy to indefinite without resurrecting
@@ -103,9 +109,10 @@ contract.
 - Encrypted client history needs the same explicit bounded-window UX and
   honest older-history/recovery states; its server delivery cursor alone does
   not complete that product behavior.
-- Transactional message/attachment linking, explicit deletion, file/hash
-  presence, backup, and restored-download behavior still need a complete
-  multi-page persistence exercise at representative scale.
+- Explicit deletion and authenticated restored-download behavior still need a
+  complete multi-page exercise; linked row/file presence, backup, destructive
+  restore, and full-file digest integrity now have representative-scale
+  evidence.
 - MLS gives a newly admitted device access from its admitted epoch forward;
   server-retained ciphertext alone does not give that device authenticated
   access to earlier plaintext. Secure history transfer/recovery semantics are

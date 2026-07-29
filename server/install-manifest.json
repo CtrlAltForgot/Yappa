@@ -7,7 +7,7 @@
     "channel": "development",
     "published": false,
     "configurationSchemaVersion": 1,
-    "databaseSchemaVersion": 3,
+    "databaseSchemaVersion": 4,
     "minimumUpgradeVersion": null
   },
   "artifacts": {
