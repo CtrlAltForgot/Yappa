@@ -1200,18 +1200,22 @@ Current implementation slice:
   deterministic bundle creation, checksum-pinned fresh installation, private
   modes, firewall planning, intentional-stop recovery, and privileged service
   refusal. It explicitly does not claim Docker/LiveKit/systemd/firewall/media
-  runtime conformance. Local Fedora-derived execution passes; hosted evidence
-  is pending.
+  runtime conformance. Local Fedora-derived and exact pinned Rocky Linux 10
+  execution pass. Initial hosted run `30411754843` reached and passed preflight
+  on all four distributions, then every job failed at Git's container
+  ownership guard before bundle construction. The workflow now marks the
+  exact GitHub workspace as safe after checkout; a corrected hosted run is
+  pending and no target has been promoted from `pending`.
 
 Next work, in order:
 
-1. Finish full validation, commit, and obtain fresh-checkout CI evidence for
-   restore, upgrade/rollback, and the operational verifier; exercise them on
-   Unraid if deployment access becomes available.
-2. Finish real-host firewall, unattended-service, sleep/network, and recovery
-   matrices; run the identical conformance
-   contract across every Tier-1 Linux/Windows target.
-3. Finish hosted Linux desktop evidence and signed release engineering:
+1. Obtain a green corrected four-distribution Linux host-contract run, then
+   record only the packaging/lifecycle evidence it actually establishes.
+2. Add real-host UFW/firewalld, per-user systemd, unattended-service,
+   sleep/network, and recovery matrices; run the identical conformance
+   contract across every Tier-1 Linux target and implement Windows server
+   lifecycle parity.
+3. Obtain hosted Linux desktop evidence and finish signed release engineering:
    production versions, signing, SBOMs, provenance, tagged publication,
    supported-version/vulnerability policy, and update/distribution behavior.
 4. Complete durable chat/history, threads, unspoofable cross-server

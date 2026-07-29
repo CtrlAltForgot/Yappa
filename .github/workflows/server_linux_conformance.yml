@@ -91,6 +91,7 @@ jobs:
       - name: Run host packaging and lifecycle contract
         shell: bash
         run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           .github/scripts/test-server-host-contract.sh \
             "${{ matrix.os_id }}" \
             "${{ matrix.version }}" \
