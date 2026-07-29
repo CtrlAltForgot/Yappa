@@ -1259,6 +1259,20 @@ Current implementation slice:
   locally. These backend/deployment
   changes are not yet deployed to Unraid because approved SSH access remains
   unavailable.
+- Release evidence foundations now generate a SHA-256 sidecar, SPDX 2.3 locked
+  npm/Cargo/Pub source-dependency SBOM, and exact version/commit evidence record
+  for every desktop archive and the deterministic server bundle. Trusted
+  desktop builds and the server authenticity workflow use the official
+  GitHub/Sigstore provenance action pinned to commit `0f67c3f`. Pull-request
+  run `30415903314` passed deterministic/negative/tag-guard/bundle evidence on
+  commit `578b0a2`; trusted manual run `30415925969` created a real
+  server-bundle attestation, and independent `gh attestation verify` against
+  `CtrlAltForgot/Yappa` succeeded. A read-only `v*` workflow now rejects
+  development versions, non-exact tags, unpublished server state, and public
+  targets lacking release verification. It cannot publish. Platform code
+  signing, notarization, detached installer/server signatures, binary/license
+  SBOM review, final-asset verification, and explicit publication remain open
+  as detailed in `RELEASE_ENGINEERING.md`.
 
 Next work, in order:
 
@@ -1266,7 +1280,8 @@ Next work, in order:
    Windows bridge on real WSL2; then implement and test Windows Firewall and
    background-supervision parity.
 2. Obtain hosted Linux desktop evidence and finish signed release engineering:
-   production versions, signing, SBOMs, provenance, tagged publication,
+   production versions, platform/detached signing, binary/license SBOM review,
+   final provenance verification, tagged publication,
    supported-version/vulnerability policy, and update/distribution behavior.
 3. Complete durable chat/history, threads, unspoofable cross-server
    YUID/multi-device DMs, calendar, and the provider-neutral shared music room.

@@ -1033,6 +1033,22 @@ legacy 64-bit `node_` identities remain accepted by cryptographic verification.
 This does not prove outside-network reachability, forced TURN media, a real
 call, bare-metal firewall policy, reboot, or sleep/network transitions.
 
+Release evidence generation now binds each desktop archive and canonical
+server bundle to a SHA-256, exact version/source commit, and SPDX 2.3 document
+covering locked npm, Cargo, and hosted Pub dependencies. It refuses overwrite
+and labels signature/provenance state explicitly. Pull-request run
+`30415903314` passed deterministic generation and adversarial guard checks on
+commit `578b0a2`. Trusted manual run `30415925969` then generated a real
+GitHub/Sigstore build-provenance attestation for the server bundle; the
+downloaded artifact passed independent `gh attestation verify --repo
+CtrlAltForgot/Yappa`. OIDC and attestation permissions are scoped to build
+jobs, and the official action is exact-commit pinned. The tag gate is
+read-only and rejects development/non-exact/unpublished state. This provenance
+does not substitute for Windows/Apple/Linux platform signing, notarization,
+detached server/installer signatures, binary dependency/license review, final
+release-asset verification, or publication authorization. The complete
+contract and remaining credential boundaries are in `RELEASE_ENGINEERING.md`.
+
 Local development bundle installation now requires a caller-supplied full
 lowercase SHA-256, one versioned archive root matching embedded metadata, a
 brand-new absolute destination, and a private installed root. Extraction occurs
