@@ -27,10 +27,14 @@ client-supervision permission. The wrapper requires an explicit
 `--local-source` flag and otherwise fails closed. Do not copy a command from a
 development checkout and describe it as a supported one-click install.
 
-`Install-Yappa.ps1 preflight` checks the currently planned Windows/WSL
-prerequisites but intentionally cannot install or operate the server yet.
-Windows lifecycle commands remain disabled until signed artifacts and the
-Windows 11/Windows Server conformance matrices exist.
+`Install-Yappa.ps1` now runs preflight and the implemented canonical lifecycle
+inside one explicit WSL2 distribution. Development install/restore requires a
+local bundle, full SHA-256, and a new absolute Linux path outside `/mnt`; later
+commands require that same `-InstallDirectory`. Windows bundle and encrypted
+backup paths are converted without shell-string interpolation. This remains an
+unpublished bridge contract, not Windows support: real WSL2 Docker operation,
+Windows service and firewall integration, signed artifacts, and the Windows
+11/Windows Server conformance matrices are still required.
 
 ## Development server bundle
 

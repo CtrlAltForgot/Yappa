@@ -957,8 +957,14 @@ validates the manifest, checks architecture/resources and required tools, and
 requires the explicit `--local-source` development path before initialization.
 It never pipes downloaded content into a shell. The PowerShell front end uses
 strict/error-stop behavior, reads the same manifest, requests no administrator
-credential, and is deliberately preflight-only. Windows mutation remains
-disabled until the native negative tests and conformance evidence above exist.
+credential, and now dispatches the implemented canonical lifecycle into an
+explicit WSL2 distribution. It uses discrete process arguments rather than
+interpolated shell commands, converts only bundle/backup paths, and rejects
+durable installs or preserved state on `/mnt` where Linux permission
+guarantees can differ. Exact-head hosted run `30414007960` passed parser,
+manifest, injection-shaped path, distribution, and negative path contracts on
+commit `dd322a7`. Windows support remains disabled until a real WSL2 workload
+and native service/firewall negative tests and conformance evidence exist.
 
 The canonical development server bundle is now built from an explicit runtime
 allowlist with a private umask, normalized ownership/order/timestamps/gzip

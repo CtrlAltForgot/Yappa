@@ -113,11 +113,19 @@ the local x86-64 development server tree and, only with explicit
 `--local-source`, dispatch the current start/stop/status/log/backup,
 fresh-install restore, install-verification, and backup-verification
 operations.
-`server/Install-Yappa.ps1` currently implements prerequisite
-preflight only and refuses every mutating lifecycle command. This is useful
-foundation, not Windows support: remote download, artifact verification,
-upgrade, rollback, uninstall, services, firewalls, cross-platform discovery,
-and the conformance matrix remain open.
+`server/Install-Yappa.ps1` now dispatches prerequisite preflight and the
+canonical checksum-pinned install, runtime, backup/restore,
+upgrade/rollback/uninstall, recovery, and verification operations inside one
+explicit WSL2 distribution. Windows and Linux paths remain separate process
+arguments; Windows bundle/backup paths are converted with `wslpath`, and the
+durable installation is rejected on `/mnt` so Linux ownership/mode guarantees
+are not silently weakened by a Windows-mounted filesystem. Exact-head hosted
+run `30414007960` passed the PowerShell parser, shared manifest, argument
+preservation, injection-shaped path, distribution selection, installed-path,
+and negative path contracts on commit `dd322a7`. This is bridge evidence, not
+Windows support: real WSL2 Docker operation, Windows service/firewall
+integration, cross-platform discovery, and the conformance matrix remain
+open.
 
 `.github/scripts/build-server-bundle.sh` now packages an explicit canonical
 runtime allowlist into a normalized `tar.gz` with source/version metadata and a

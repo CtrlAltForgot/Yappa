@@ -1111,7 +1111,7 @@ Completed and evidenced:
   inspection, and startup smoke pass. Hosted Linux remains pending because its
   self-hosted runner was unavailable.
 - The portable-server contract, JSON Schema, Tier-1 support truth, Linux and
-  preflight-only Windows front ends, deterministic server bundle, and
+  WSL2-dispatching Windows front ends, deterministic server bundle, and
   checksum-pinned fresh-directory local installation are implemented.
 - Exact-head security run `30407691102` passed on commit `fb5cae6`, including
   the complete backend suite, locked production audit, real deterministic
@@ -1230,11 +1230,24 @@ Current implementation slice:
   the backend security suite in run `30413430380`. This is not full
   Docker/media, bare-metal reboot, sleep/network, or unattended recovery
   evidence.
+- The PowerShell front end now dispatches the canonical checksum-pinned
+  install/start/stop/status/logs/backup/restore/upgrade/rollback/uninstall/
+  recover/verify lifecycle inside one explicit WSL2 distribution. It converts
+  Windows bundle and backup paths with `wslpath`, preserves every value as a
+  discrete process argument rather than a shell command string, requires the
+  durable installation and preserved state to live on the WSL Linux
+  filesystem, and never requests an Administrator credential. Exact-head
+  Windows run `30414007960` passed parser, shared-manifest, injection-shaped
+  path, distribution-selection, installed-path, and fail-closed negative
+  contracts on commit `dd322a7`. This proves the PowerShell bridge only; real
+  WSL2 Docker, restart/network behavior, Windows Firewall, Windows service
+  supervision, and Windows Server hardware remain unverified.
 
 Next work, in order:
 
 1. Add full Docker workload, bare-metal/reboot, sleep/network, and unattended
-   recovery evidence, and implement Windows server lifecycle parity.
+   recovery evidence; validate the Windows bridge on real WSL2; then implement
+   and test Windows Firewall and background-supervision parity.
 2. Obtain hosted Linux desktop evidence and finish signed release engineering:
    production versions, signing, SBOMs, provenance, tagged publication,
    supported-version/vulnerability policy, and update/distribution behavior.
@@ -1244,8 +1257,9 @@ Next work, in order:
    cross-feature product readiness, exact-tag matrix, production deployment,
    and all user/security/handoff documentation.
 
-No public-release claim is justified yet. In particular, Windows server
-mutation, hosted Linux artifacts, public installer signing, external/TURN
+No public-release claim is justified yet. In particular, real Windows/WSL2
+runtime mutation and native host integration, hosted Linux artifacts, public
+installer signing, external/TURN
 media, real multi-device E2EE, screen-sharing soak, persistent-history
 completion, threads, DMs, calendar, and music remain open.
 
@@ -1353,12 +1367,12 @@ restore. Restore assembles the selected runtime and decrypted state privately,
 validates its configured database, integrity, schema and identity, refuses
 merge/overwrite, and leaves the atomic final installation stopped. Focused
 positive and adversarial tests and the complete backend/security suite pass
-locally; fresh CI is still required. The PowerShell wrapper reads the same
-contract and performs prerequisite checks but refuses mutation. It is not
-Windows support evidence.
-Signed bundles, remote installation, upgrade/rollback/uninstall,
-service/firewall integration, cross-platform discovery, and every Tier-1
-conformance run remain required.
+locally. The PowerShell wrapper reads the same contract and safely dispatches
+the implemented canonical lifecycle into an explicit WSL2 distribution. Its
+hosted argument contract passes, but no real WSL2 workload or native Windows
+service/firewall behavior is support evidence yet. Signed bundles, remote
+installation, native Windows service/firewall integration, cross-platform
+discovery, and every release Tier-1 conformance run remain required.
 
 A deterministic canonical server bundle is now implemented behind
 `.github/scripts/build-server-bundle.sh`. It stages only runtime files,
