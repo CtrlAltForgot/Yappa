@@ -42,6 +42,11 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install manifest validator dependencies
+        working-directory: server
+        shell: pwsh
+        run: npm ci --ignore-scripts
+
       - name: Parse installer and validate manifest
         shell: pwsh
         run: |
