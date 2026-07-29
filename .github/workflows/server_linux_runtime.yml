@@ -1,0 +1,79 @@
+name: Linux Server Runtime Contract
+
+on:
+  pull_request:
+    paths:
+      - ".github/runtime-fixtures/linux-systemd.Dockerfile"
+      - ".github/scripts/run-server-runtime-container.sh"
+      - ".github/scripts/test-server-runtime-contract.sh"
+      - ".github/workflows/server_linux_runtime.yml"
+      - "server/firewall-yappa.sh"
+      - "server/service-yappa.sh"
+      - "server/test/deployment_safety.js"
+      - "server/test/firewall_integration.js"
+      - "server/test/service_integration.js"
+  push:
+    branches: [main]
+    paths:
+      - ".github/runtime-fixtures/linux-systemd.Dockerfile"
+      - ".github/scripts/run-server-runtime-container.sh"
+      - ".github/scripts/test-server-runtime-contract.sh"
+      - ".github/workflows/server_linux_runtime.yml"
+      - "server/firewall-yappa.sh"
+      - "server/service-yappa.sh"
+      - "server/test/deployment_safety.js"
+      - "server/test/firewall_integration.js"
+      - "server/test/service_integration.js"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: yappa-server-runtime-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  isolated-runtime-contract:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Ubuntu 24.04 systemd + UFW
+            image: ubuntu@sha256:52df9b1ee71626e0088f7d400d5c6b5f7bb916f8f0c82b474289a4ece6cf3faf
+            package_manager: apt
+            backend: ufw
+            fixture: ubuntu-24.04
+          - name: Debian 13 systemd + UFW
+            image: debian@sha256:9bb8a3626890e084ab54e888fdd7c4b6d2f119071cd4c5dc5fecb4d73062aa5f
+            package_manager: apt
+            backend: ufw
+            fixture: debian-13
+          - name: Fedora 44 systemd + firewalld
+            image: fedora@sha256:89f61a124414261868224666aa7fb8df1b78397a53623774bdfb105d1612b48b
+            package_manager: dnf
+            backend: firewalld
+            fixture: fedora-44
+          - name: Rocky Linux 10 systemd + firewalld
+            image: rockylinux/rockylinux@sha256:86b31f19c0ce9c9153ad06e4f35c022901275b9c16683a1b27429f0178e494dc
+            package_manager: microdnf
+            backend: firewalld
+            fixture: rocky-10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Run isolated real-runtime contract
+        shell: bash
+        run: |
+          .github/scripts/run-server-runtime-container.sh \
+            "${{ matrix.image }}" \
+            "${{ matrix.package_manager }}" \
+            "${{ matrix.backend }}" \
+            "${{ matrix.fixture }}"

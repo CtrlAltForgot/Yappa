@@ -259,6 +259,17 @@ bounded packaging/lifecycle contract. They remain unpublished with no public
 install command until the omitted real-host and release-authenticity gates
 pass.
 
+A second non-optional runtime matrix now boots systemd as PID 1 in isolated,
+privileged, digest-pinned Ubuntu 24.04, Debian 13, Fedora 44, and Rocky Linux
+10 containers. It starts a real lingering per-user manager, installs and
+activates Yappa's actual service and recovery timer from a path containing a
+space, verifies their start/verify/stop lifecycle, removes them, and performs
+real UFW or firewalld rule application and removal inside the container
+network namespace. Local execution passes all four targets. Hosted evidence is
+pending. This closes neither full Docker-stack operation nor bare-metal boot,
+sleep, network-transition, reboot, firewall-policy, or unattended recovery
+testing.
+
 ### Canonical architecture
 
 - Keep one versioned configuration schema and one set of container images,

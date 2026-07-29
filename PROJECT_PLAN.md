@@ -1208,13 +1208,23 @@ Current implementation slice:
   `30411894908` passed all four non-optional jobs on commit `77397cb`; those
   targets are now `verified-development` for this bounded contract, while
   public support and install commands remain disabled.
+- A non-optional isolated Linux runtime workflow is implemented locally for
+  the same four digest-pinned distributions. Each job boots systemd as PID 1,
+  starts a real lingering unprivileged user manager, activates and removes the
+  generated Yappa service/recovery timer from a path containing a space, and
+  applies/removes real UFW or firewalld rules inside its disposable network
+  namespace. Local execution passes all four targets. It exposed and fixed two
+  release defects: invalid quoted systemd working directories and colon-form
+  firewalld port ranges. Service registration now also checks that both units
+  are active before claiming success. Hosted evidence is pending; this is not
+  full Docker/media, bare-metal reboot, sleep/network, or unattended recovery
+  evidence.
 
 Next work, in order:
 
-1. Add real-host UFW/firewalld, per-user systemd, unattended-service,
-   sleep/network, and recovery matrices; run the identical conformance
-   contract across every Tier-1 Linux target and implement Windows server
-   lifecycle parity.
+1. Obtain green hosted evidence for the isolated Linux runtime matrix, then
+   add full Docker workload, bare-metal/reboot, sleep/network, and unattended
+   recovery evidence and implement Windows server lifecycle parity.
 2. Obtain hosted Linux desktop evidence and finish signed release engineering:
    production versions, signing, SBOMs, provenance, tagged publication,
    supported-version/vulnerability policy, and update/distribution behavior.

@@ -55,6 +55,13 @@ systemd_quote() {
   printf '"%s"' "$value"
 }
 
+systemd_path() {
+  local value="$1"
+  value="${value//\\/\\x5c}"
+  value="${value//%/%%}"
+  printf '%s' "$value"
+}
+
 case "$ACTION" in
   install)
     if [[ -e "$UNIT_PATH" || -e "$RECOVERY_UNIT_PATH" ||
@@ -86,7 +93,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=$(systemd_quote "$SCRIPT_ROOT")
+WorkingDirectory=$(systemd_path "$SCRIPT_ROOT")
 ExecStart=$(systemd_quote "$SCRIPT_ROOT/install-yappa.sh") start
 ExecStartPost=$(systemd_quote "$SCRIPT_ROOT/install-yappa.sh") verify
 ExecStop=$(systemd_quote "$SCRIPT_ROOT/install-yappa.sh") stop
@@ -107,7 +114,7 @@ After=$UNIT_NAME
 
 [Service]
 Type=oneshot
-WorkingDirectory=$(systemd_quote "$SCRIPT_ROOT")
+WorkingDirectory=$(systemd_path "$SCRIPT_ROOT")
 ExecStart=$(systemd_quote "$SCRIPT_ROOT/install-yappa.sh") recover
 TimeoutStartSec=180
 NoNewPrivileges=yes
@@ -138,7 +145,9 @@ EOF
     chmod 600 "$REGISTRATION_PATH"
     trap - EXIT INT TERM
     if ! systemctl --user daemon-reload ||
-      ! systemctl --user enable --now "$UNIT_NAME" "$RECOVERY_TIMER_NAME"; then
+      ! systemctl --user enable --now "$UNIT_NAME" "$RECOVERY_TIMER_NAME" ||
+      ! systemctl --user is-active --quiet "$UNIT_NAME" ||
+      ! systemctl --user is-active --quiet "$RECOVERY_TIMER_NAME"; then
       systemctl --user disable --now \
         "$RECOVERY_TIMER_NAME" "$UNIT_NAME" >/dev/null 2>&1 || true
       systemctl --user stop "$RECOVERY_UNIT_NAME" >/dev/null 2>&1 || true

@@ -19,6 +19,10 @@ const serverHostWorkflow = fs.readFileSync(
   path.join(workflowRoot, 'server_linux_conformance.yml'),
   'utf8',
 );
+const serverRuntimeWorkflow = fs.readFileSync(
+  path.join(workflowRoot, 'server_linux_runtime.yml'),
+  'utf8',
+);
 const releaseVersions = fs.readFileSync(
   path.join(repositoryRoot, '.github', 'release-versions.json'),
   'utf8',
@@ -54,6 +58,14 @@ const serverBundleBuild = fs.readFileSync(
 );
 const serverHostContract = fs.readFileSync(
   path.join(releaseScriptRoot, 'test-server-host-contract.sh'),
+  'utf8',
+);
+const serverRuntimeLauncher = fs.readFileSync(
+  path.join(releaseScriptRoot, 'run-server-runtime-container.sh'),
+  'utf8',
+);
+const serverRuntimeContract = fs.readFileSync(
+  path.join(releaseScriptRoot, 'test-server-runtime-contract.sh'),
   'utf8',
 );
 const startup = fs.readFileSync(path.join(serverRoot, 'start-yappa.sh'), 'utf8');
@@ -262,6 +274,11 @@ assert.match(firewallInstaller, /A requested firewall rule already exists/);
 assert.match(firewallInstaller, /rollback_partial_apply/);
 assert.match(firewallInstaller, /ufw must already be active/);
 assert.match(firewallInstaller, /firewalld must already be running/);
+assert.equal(
+  (firewallInstaller.match(/port="\$\{port\/:\/-\}"/g) || []).length,
+  3,
+  'Every firewalld query/mutation path must translate colon ranges to hyphens.',
+);
 assert.match(firewallInstaller, /This script never invokes sudo/);
 assert.doesNotMatch(
   firewallInstaller,
@@ -572,6 +589,33 @@ for (const image of [
     `Server host matrix must digest-pin ${image}`,
   );
 }
+for (const image of [
+  'ubuntu@sha256:',
+  'debian@sha256:',
+  'fedora@sha256:',
+  'rockylinux/rockylinux@sha256:',
+]) {
+  assert.ok(
+    serverRuntimeWorkflow.includes(image),
+    `Server runtime matrix must digest-pin ${image}`,
+  );
+}
+assert.match(
+  serverRuntimeWorkflow,
+  /actions\/checkout@[a-f0-9]{40}/,
+  'Server runtime checkout action must be commit-pinned.',
+);
+assert.match(serverRuntimeWorkflow, /run-server-runtime-container\.sh/);
+assert.match(serverRuntimeWorkflow, /backend: ufw/);
+assert.match(serverRuntimeWorkflow, /backend: firewalld/);
+assert.doesNotMatch(serverRuntimeWorkflow, /continue-on-error:\s*true/);
+assert.match(serverRuntimeLauncher, /--privileged/);
+assert.match(serverRuntimeLauncher, /\/workspace:ro/);
+assert.match(serverRuntimeLauncher, /docker rm -f/);
+assert.match(serverRuntimeContract, /\/proc\/1\/comm/);
+assert.match(serverRuntimeContract, /systemctl --user is-active/);
+assert.match(serverRuntimeContract, /firewall-yappa\.sh" apply/);
+assert.match(serverRuntimeContract, /firewall-yappa\.sh" remove/);
 assert.match(
   serverHostWorkflow,
   /actions\/checkout@[a-f0-9]{40}/,

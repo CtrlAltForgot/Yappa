@@ -211,6 +211,13 @@ creating an infinite restart loop. Removal deletes the main unit, timer,
 recovery unit, and registration together. Real sleep, network transition, and
 distribution-specific systemd conformance remain release work.
 
+The development runtime contract now boots real per-user systemd managers on
+Ubuntu 24.04, Debian 13, Fedora 44, and Rocky Linux 10 in disposable isolated
+containers. It verifies paths containing spaces and refuses to report
+registration success unless both the server unit and recovery timer become
+active. Bare-metal boot, sleep/network transitions, and full Docker workload
+recovery remain release gates.
+
 ## Explicit host firewall lifecycle
 
 Preview firewall changes as an ordinary user before authorizing anything:

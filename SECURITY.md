@@ -983,6 +983,20 @@ jobs on commit `77397cb`; the manifest records only
 `verified-development`, while public support and install commands remain
 disabled.
 
+The isolated Linux runtime contract uses a read-only repository mount and a
+disposable privileged container because real systemd, UFW, and firewalld
+mutation require cgroup and network-administration capabilities. It verifies
+systemd is PID 1, exercises a real unprivileged user manager, activates and
+removes the generated Yappa service/timer, and applies/removes owned firewall
+rules on all four Tier-1 Linux distributions. Container deletion is mandatory
+cleanup. Local execution exposed and corrected two production defects that
+mocked tests missed: quoted `WorkingDirectory=` values broke installations in
+paths containing spaces, and firewalld requires hyphenated port ranges rather
+than UFW's colon syntax. Registration now verifies that both units are
+actually active before reporting success. Hosted runtime evidence remains
+pending, and isolated privilege is not evidence of a safe bare-metal firewall
+policy or full Docker/media operation.
+
 Local development bundle installation now requires a caller-supplied full
 lowercase SHA-256, one versioned archive root matching embedded metadata, a
 brand-new absolute destination, and a private installed root. Extraction occurs

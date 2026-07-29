@@ -156,6 +156,7 @@ print_plan() {
 
 firewalld_rule() {
   local protocol="$1" port="$2" source="$3"
+  port="${port/:/-}"
   printf 'rule family="ipv4" source address="%s" port port="%s" protocol="%s" accept' \
     "$source" "$port" "$protocol"
 }
@@ -171,6 +172,7 @@ query_rule() {
     fi
     ufw show added | grep -Fqx "$pattern"
   elif [[ "$source" == "any" ]]; then
+    port="${port/:/-}"
     firewall-cmd --permanent --zone="$FIREWALL_ZONE" \
       --query-port="$port/$protocol" >/dev/null
   else
@@ -192,6 +194,7 @@ mutate_rule() {
         port "$port" proto "$protocol"
     fi
   elif [[ "$source" == "any" ]]; then
+    port="${port/:/-}"
     firewall-cmd --permanent --zone="$FIREWALL_ZONE" \
       "--${operation}-port=$port/$protocol"
   else

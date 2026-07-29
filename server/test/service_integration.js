@@ -60,6 +60,9 @@ if [[ "\${SYSTEMCTL_FAIL_ENABLE:-false}" == "true" &&
   "$*" == *"enable --now"* ]]; then
   exit 27
 fi
+if [[ "$*" == *"is-active --quiet"* ]]; then
+  exit "\${SYSTEMCTL_ACTIVE_STATUS:-0}"
+fi
 if [[ "$*" == *"status"* ]]; then
   printf 'active (exited)\\n'
 fi
@@ -114,6 +117,7 @@ fi
   assert.equal(fs.statSync(unitPath).mode & 0o777, 0o600);
   assert.equal(fs.statSync(registration).mode & 0o777, 0o600);
   assert.match(unit, /^Type=oneshot$/m);
+  assert.match(unit, /^WorkingDirectory=.*Yappa Server$/m);
   assert.match(unit, /^RemainAfterExit=yes$/m);
   assert.match(unit, /^NoNewPrivileges=yes$/m);
   assert.match(unit, /^PrivateTmp=yes$/m);
@@ -164,6 +168,12 @@ fi
   const failed = run('install', {SYSTEMCTL_FAIL_ENABLE: 'true'});
   assert.notEqual(failed.status, 0);
   assert.match(failed.stderr, /registration failed and was removed/);
+  assert.equal(fs.existsSync(unitPath), false);
+  assert.equal(fs.existsSync(registration), false);
+
+  const inactive = run('install', {SYSTEMCTL_ACTIVE_STATUS: '3'});
+  assert.notEqual(inactive.status, 0);
+  assert.match(inactive.stderr, /registration failed and was removed/);
   assert.equal(fs.existsSync(unitPath), false);
   assert.equal(fs.existsSync(registration), false);
 } finally {
