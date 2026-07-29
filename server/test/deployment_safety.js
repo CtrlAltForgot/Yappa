@@ -77,6 +77,10 @@ const uninstallInstaller = fs.readFileSync(
   path.join(serverRoot, 'uninstall-yappa.sh'),
   'utf8',
 );
+const serviceInstaller = fs.readFileSync(
+  path.join(serverRoot, 'service-yappa.sh'),
+  'utf8',
+);
 const installManifest = JSON.parse(
   fs.readFileSync(path.join(serverRoot, 'install-manifest.json'), 'utf8'),
 );
@@ -157,6 +161,7 @@ for (const [name, script] of [
   ['upgrade-yappa.sh', upgradeInstaller],
   ['rollback-yappa.sh', rollbackInstaller],
   ['uninstall-yappa.sh', uninstallInstaller],
+  ['service-yappa.sh', serviceInstaller],
   ['verify-yappa-backup.sh', restoreVerifier],
 ]) {
   assert.match(script, /^umask 077$/m, `${name} must create private files`);
@@ -215,6 +220,20 @@ assert.match(uninstallInstaller, /server installation was restored/);
 assert.match(
   uninstallInstaller,
   /Resolve the retained \.\$retained_suffix installation/,
+);
+assert.match(serviceInstaller, /if \(\(EUID == 0\)\)/);
+assert.match(serviceInstaller, /systemctl --user enable --now/);
+assert.match(serviceInstaller, /systemctl --user disable --now/);
+assert.match(serviceInstaller, /ExecStart=.*install-yappa\.sh.*start/);
+assert.match(serviceInstaller, /ExecStartPost=.*install-yappa\.sh.*verify/);
+assert.match(serviceInstaller, /ExecStop=.*install-yappa\.sh.*stop/);
+assert.match(serviceInstaller, /NoNewPrivileges=yes/);
+assert.match(serviceInstaller, /PrivateTmp=yes/);
+assert.match(serviceInstaller, /UMask=0077/);
+assert.doesNotMatch(
+  serviceInstaller,
+  /loginctl|enable-linger|sudo|pkexec/,
+  'User autostart must not silently request persistence or privilege.',
 );
 assert.match(startup, /Public join address: \$\{YAPPA_ADVERTISED_ADDRESS\}/);
 assert.match(
@@ -280,6 +299,11 @@ assert.equal(
   (compose.match(/no-new-privileges:true/g) || []).length,
   4,
   'Every production container must forbid privilege escalation.',
+);
+assert.equal(
+  (compose.match(/restart:\s*unless-stopped/g) || []).length,
+  4,
+  'Every canonical container must recover after an unexpected process exit.',
 );
 assert.equal(
   (compose.match(/cap_drop:\s*\n\s+- ALL/g) || []).length,

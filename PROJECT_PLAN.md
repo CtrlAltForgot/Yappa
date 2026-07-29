@@ -1154,15 +1154,26 @@ Current implementation slice:
   destination, and no unresolved lifecycle snapshots. Runtime removal occurs
   only after `.env` and `data/` are privately preserved; placement failure
   restores the installation. Focused tests and the complete local
-  backend/security suite pass; fresh-CI evidence is still required.
+  backend/security suite pass. Exact-head run `30409845909` passed all jobs for
+  uninstall commit `2d7fee3`, including backend/bundle, Flutter/native MLS,
+  official vectors, and dependency audits.
+- Explicit Linux sign-in autostart is implemented locally for per-user systemd
+  hosts. It refuses root and privilege escalation, creates a deterministic
+  hardened user unit, requires operational verification on start, stops
+  cleanly, removes registration without deleting data, and does not silently
+  enable lingering or change firewall state. Container exit/daemon recovery is
+  defined by `restart: unless-stopped`. Focused tests pass; full-suite and
+  the complete local backend/security suite pass; fresh-CI evidence is still
+  required. Unattended boot, hung-container,
+  sleep/network, Unraid, and Windows recovery remain open.
 
 Next work, in order:
 
 1. Finish full validation, commit, and obtain fresh-checkout CI evidence for
    restore, upgrade/rollback, and the operational verifier; exercise them on
    Unraid if deployment access becomes available.
-2. Implement service/autostart, firewall, and crash-recovery behavior; run the
-   identical conformance
+2. Finish firewall, unattended-service, and bounded health/crash-recovery
+   behavior; run the identical conformance
    contract across every Tier-1 Linux/Windows target.
 3. Finish hosted Linux desktop evidence and signed release engineering:
    production versions, signing, SBOMs, provenance, tagged publication,

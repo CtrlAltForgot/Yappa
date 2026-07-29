@@ -75,6 +75,7 @@ RUNTIME_FILES=(
   "package.json"
   "restore-yappa-backup.sh"
   "rollback-yappa.sh"
+  "service-yappa.sh"
   "setup-domain.sh"
   "src/auth.js"
   "src/config.js"
@@ -105,6 +106,7 @@ for executable_name in \
   backup-yappa.sh \
   restore-yappa-backup.sh \
   rollback-yappa.sh \
+  service-yappa.sh \
   upgrade-yappa.sh \
   uninstall-yappa.sh \
   verify-yappa-install.sh \

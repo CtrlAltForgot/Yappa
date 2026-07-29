@@ -175,6 +175,31 @@ and refuses to proceed while `.rollback`, `.pre-rollback`, or
 and restarts the original installation. The preservation directory is not
 directly runnable; restore it only through a checksum-pinned bundle.
 
+## Explicit sign-in autostart on systemd Linux
+
+On a Linux desktop with a working per-user systemd manager, an unprivileged
+operator may explicitly opt into visible sign-in autostart:
+
+```bash
+./install-yappa.sh service-install
+./install-yappa.sh service-status
+./install-yappa.sh service-remove
+```
+
+Registration refuses root, writes a mode-`0600` unit under the current user's
+`systemd/user` configuration, and calls only `systemctl --user`. The unit
+starts the canonical lifecycle, requires operational verification before
+systemd considers startup successful, and stops the stack when disabled.
+Removal leaves all server data intact. It does not enable user lingering,
+change the firewall, or request privilege; therefore it starts at user sign-in
+rather than claiming unattended boot support.
+
+Every canonical container has `restart: unless-stopped`, so Docker restarts a
+container whose process exits unexpectedly and restores it after Docker daemon
+restart. This does not yet detect a process that remains alive but unhealthy;
+bounded health-based recovery and sleep/network-change tests remain release
+work.
+
 ## Start a public server
 
 Run:

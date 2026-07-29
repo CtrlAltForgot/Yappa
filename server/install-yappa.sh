@@ -31,6 +31,9 @@ Usage:
   ./install-yappa.sh uninstall \
     --backup /absolute/new/pre-uninstall-backup.tar.gz.age \
     --preserve-data /absolute/new/preserved-state
+  ./install-yappa.sh service-install
+  ./install-yappa.sh service-status
+  ./install-yappa.sh service-remove
 
 This development installer operates only on the locally present server tree or
 an explicitly supplied local bundle and checksum. Remote installation remains
@@ -518,6 +521,14 @@ case "$COMMAND" in
       exit 1
     fi
     "$SCRIPT_ROOT/rollback-yappa.sh" "$BACKUP_PATH"
+    ;;
+  service-install | service-status | service-remove)
+    require_initialized
+    if [[ $# -ne 0 ]]; then
+      usage
+      exit 1
+    fi
+    "$SCRIPT_ROOT/service-yappa.sh" "${COMMAND#service-}"
     ;;
   uninstall)
     BACKUP_PATH=""

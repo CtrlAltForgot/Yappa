@@ -1084,6 +1084,17 @@ Before public DMs, Yappa must additionally define and verify:
   installation. Tests confirm permissions, attachment/state continuity,
   refusal paths, and cleanup. Service/firewall registration removal and
   Windows ACL parity remain open.
+- Linux sign-in autostart is now an explicit, reversible, least-privilege
+  per-user systemd registration. It refuses root, invokes no `sudo`, `pkexec`,
+  or `loginctl`, stores a deterministic mode-`0600` unit, and uses only
+  `systemctl --user`. Startup must pass the full operational verifier;
+  disabling the unit stops the stack, removal preserves data, and uninstall
+  refuses active registration. Unit hardening enables `NoNewPrivileges`,
+  `PrivateTmp`, and a private umask without embedding configuration or
+  credentials. Every container has `restart: unless-stopped` for exited-process
+  and Docker-daemon recovery. Unattended boot, unhealthy-but-running recovery,
+  sleep/network transitions, systemd distribution matrices, Unraid, and
+  Windows service parity remain unproven.
 - Ensure production secrets never live in the repository or images.
 - Add dependency auditing, secret scanning, static analysis, and reproducible
   release provenance to CI.

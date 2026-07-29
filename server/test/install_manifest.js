@@ -186,6 +186,9 @@ for (const command of [
   'upgrade',
   'rollback',
   'uninstall',
+  'service-install',
+  'service-status',
+  'service-remove',
 ]) {
   assert.ok(
     manifest.lifecycleCommands.includes(command),
@@ -204,6 +207,9 @@ assert.deepEqual(manifest.implementedLifecycleCommands.linux, [
   'upgrade',
   'rollback',
   'uninstall',
+  'service-install',
+  'service-status',
+  'service-remove',
   'verify',
   'verify-backup',
 ]);

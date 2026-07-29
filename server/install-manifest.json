@@ -203,7 +203,10 @@
     "verify-backup",
     "upgrade",
     "rollback",
-    "uninstall"
+    "uninstall",
+    "service-install",
+    "service-status",
+    "service-remove"
   ],
   "implementedLifecycleCommands": {
     "linux": [
@@ -218,6 +221,9 @@
       "upgrade",
       "rollback",
       "uninstall",
+      "service-install",
+      "service-status",
+      "service-remove",
       "verify",
       "verify-backup"
     ],

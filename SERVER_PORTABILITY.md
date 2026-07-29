@@ -181,7 +181,21 @@ after the preserved state is placed. It refuses unresolved rollback or failed
 candidate directories instead of orphaning them. Tests cover successful
 removal, state/permission preservation, existing-target refusal, retained
 rollback refusal, and temporary-path cleanup. OS service and firewall removal
-will be added with their registration implementation.
+are required before runtime removal; user-systemd service removal is now
+implemented, while firewall registration remains open.
+
+Explicit Linux sign-in autostart is now implemented for hosts with a per-user
+systemd manager. Registration is rejected as root, uses only
+`systemctl --user`, creates one deterministic mode-`0600` unit per installation,
+and never enables lingering or mutates a firewall. The unit starts through the
+canonical lifecycle, must pass the operational verifier, stops cleanly when
+disabled, is visible in OS controls, and is completely removable without
+deleting data. Duplicate and failed registration cleanly refuse/remove state.
+All four containers use `restart: unless-stopped` for unexpected process and
+Docker-daemon recovery. Automated tests prove unit hardening, path quoting,
+opt-in registration/status/removal, duplicate refusal, failed-enable cleanup,
+and uninstall refusal while registered. Unraid, Windows, unattended boot,
+sleep/network recovery, and unhealthy-but-running remediation remain open.
 
 ## Supported-Host Target
 
