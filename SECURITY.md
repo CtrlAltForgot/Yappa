@@ -1001,8 +1001,11 @@ The complete contract and negative-test matrix are in
 recovery-key directory: registration verifies the YUID signature for the
 authenticated active device, exact retry is idempotent, conflicting rebinding
 fails closed, and directory reads expose only active devices belonging to the
-same account. Transfer storage/client recovery and a release claim remain
-incomplete.
+same account. The client stores a separate per-server/device X25519 private key
+through OS-protected storage, pins registration, verifies every directory
+signature with the local YUID key, rejects duplicate/substituted entries, and
+requires its own exact key. Transfer storage/history recovery and a release
+claim remain incomplete.
 
 Verified plaintext reconnect increment, 2026-07-28:
 

@@ -10,6 +10,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../data/api_client.dart';
 import '../data/audio_preferences.dart';
 import '../data/encrypted_attachment_failure.dart';
+import '../data/history_recovery_identity.dart';
+import '../data/history_recovery_key_service.dart';
 import '../data/mic_input_service.dart';
 import '../data/media_device_identity_service.dart';
 import '../data/media_e2ee_coordinator.dart';
@@ -57,6 +59,8 @@ class AppState extends ChangeNotifier {
   );
   late final MediaDeviceIdentityService _mediaDeviceIdentity =
       MediaDeviceIdentityService(secretStorage: _secretStorage);
+  late final HistoryRecoveryIdentityService _historyRecoveryIdentity =
+      HistoryRecoveryIdentityService(secretStorage: _secretStorage);
   final MicInputService _micInput = MicInputService();
   final VoiceTransportService _voiceTransport = VoiceTransportService();
   late final MediaE2eeCoordinator _mediaE2ee;
@@ -71,6 +75,7 @@ class AppState extends ChangeNotifier {
   final Set<String> _loadingOlderMessageChannelIds = {};
   final Set<String> _rotatedSessionServerIds = {};
   final Set<String> _registeredMediaDeviceServerIds = {};
+  final Set<String> _registeredHistoryRecoveryServerIds = {};
   final Map<String, MlsServerRuntime> _mlsRuntimesByServerId = {};
   final Map<String, Future<MlsServerRuntime>> _mlsRuntimeFuturesByServerId = {};
   final Map<String, MlsChannelRuntime> _mlsChannelsByChannelId = {};
@@ -732,6 +737,10 @@ class AppState extends ChangeNotifier {
       _tokensByServerId[auth.server.id] = auth.token;
       _registeredMediaDeviceServerIds.add(auth.server.id);
       _rememberedUsersByServer[auth.server.id] = auth.user.username;
+      await _registerHistoryRecoveryKeyForSession(
+        server: auth.server,
+        token: auth.token,
+      );
 
       _activateSession(
         serverId: auth.server.id,
@@ -2107,6 +2116,10 @@ class AppState extends ChangeNotifier {
     _permissionsByServerId[me.server.id] = me.permissions;
     _userIdByServerId[me.server.id] = me.user.id;
     _localVoiceStateByServerId[me.server.id] = me.user.voiceState;
+    await _registerHistoryRecoveryKeyForSession(
+      server: me.server,
+      token: token,
+    );
 
     if (me.permissions.isOwner) {
       try {
@@ -2181,6 +2194,32 @@ class AppState extends ChangeNotifier {
       mediaPublicKey: mediaDevice.publicKeyBase64Url,
       mediaDeviceSignature: mediaSignature,
     );
+  }
+
+  Future<void> _registerHistoryRecoveryKeyForSession({
+    required ChatServer server,
+    required String token,
+  }) async {
+    if (_registeredHistoryRecoveryServerIds.contains(server.id) ||
+        !_channelsForServer(server.id).any(
+          (channel) =>
+              channel.type == ChannelType.text &&
+              channel.encryptionMode == ChannelEncryptionMode.e2ee &&
+              channel.encryptionVersion == 1,
+        )) {
+      return;
+    }
+    final mediaDevice = await _mediaDeviceIdentity.getOrCreateIdentity();
+    await HistoryRecoveryKeyService(
+      api: _api,
+      recoveryIdentity: _historyRecoveryIdentity,
+      yuidIdentity: _yuidIdentity,
+      baseUrl: server.address,
+      token: token,
+      serverId: server.id,
+      deviceId: mediaDevice.deviceId,
+    ).registerAndVerify();
+    _registeredHistoryRecoveryServerIds.add(server.id);
   }
 
   Future<ChatServer> _resolveVerifiedServerRoute(ChatServer server) async {

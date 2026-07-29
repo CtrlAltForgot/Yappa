@@ -4,8 +4,11 @@
 
 This document defines the first-public-release design for recovering encrypted
 channel history on a new or reinstalled device. The schema-5 recovery-key
-directory and authenticated registration/read APIs are implemented; opaque
-transfer storage and the client transfer runtime remain incomplete.
+directory and authenticated registration/read APIs are implemented. The client
+creates a separate per-server/device X25519 key in OS-protected storage, signs
+its canonical binding with YUID, pins registration responses, independently
+verifies the same-account directory, and registers during encrypted-server
+session setup. Opaque transfer storage and history transfer remain incomplete.
 
 Yappa will use explicit, same-account, device-assisted recovery. An existing
 authorized device decrypts its authenticated local event history and

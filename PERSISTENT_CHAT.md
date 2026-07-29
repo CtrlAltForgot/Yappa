@@ -66,7 +66,7 @@ client must not make the conversation look complete when it is not.
   by account/server-secret change fails closed and refreshes from a new
   authenticated newest page.
 - The complete backend/security/deployment-policy suite, Flutter analysis, and
-  all 63 Flutter tests pass with this increment. Production deployment remains
+  all 64 Flutter tests pass with this increment. Production deployment remains
   unverified because approved Unraid SSH access is unavailable.
 - The client stores its decrypted MLS event view in an authenticated encrypted
   local store protected by an OS-vault key, and fails closed if that key or

@@ -192,6 +192,27 @@ class YuidIdentityService {
     return _base64UrlNoPad(signature.bytes);
   }
 
+  Future<String> signHistoryRecoveryDeviceBinding({
+    required String serverId,
+    required String deviceId,
+    required String recoveryPublicKey,
+  }) async {
+    if (serverId.trim().isEmpty ||
+        !RegExp(r'^device_[A-Za-z0-9_-]{24}$').hasMatch(deviceId) ||
+        !RegExp(r'^[A-Za-z0-9_-]{43}$').hasMatch(recoveryPublicKey)) {
+      throw ArgumentError('Invalid encrypted-history recovery key binding.');
+    }
+    final identity = await getOrCreateIdentity();
+    final signature = await _algorithm.sign(
+      utf8.encode(
+        'yappa-history-recovery-device-v1|${serverId.trim()}|'
+        '${identity.yuid}|$deviceId|$recoveryPublicKey',
+      ),
+      keyPair: await keyPair(),
+    );
+    return _base64UrlNoPad(signature.bytes);
+  }
+
   Future<SimpleKeyPairData> keyPair() async {
     final identity = await getOrCreateIdentity();
     return SimpleKeyPairData(

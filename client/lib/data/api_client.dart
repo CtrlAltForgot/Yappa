@@ -127,6 +127,54 @@ class YuidChallenge {
   }
 }
 
+class HistoryRecoveryDeviceKey {
+  final String deviceId;
+  final String publicKey;
+  final String yuidAuthorizationSignature;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  const HistoryRecoveryDeviceKey({
+    required this.deviceId,
+    required this.publicKey,
+    required this.yuidAuthorizationSignature,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  factory HistoryRecoveryDeviceKey.fromJson(Map<String, dynamic> json) {
+    final deviceId = json['deviceId']?.toString() ?? '';
+    final publicKey = json['publicKey']?.toString() ?? '';
+    final signature = json['yuidAuthorizationSignature']?.toString() ?? '';
+    final createdAt = DateTime.tryParse(json['createdAt']?.toString() ?? '');
+    final updatedAt = DateTime.tryParse(json['updatedAt']?.toString() ?? '');
+    if (!RegExp(r'^device_[A-Za-z0-9_-]{24}$').hasMatch(deviceId) ||
+        !RegExp(r'^[A-Za-z0-9_-]{43}$').hasMatch(publicKey) ||
+        !RegExp(r'^[A-Za-z0-9_-]{86}$').hasMatch(signature) ||
+        createdAt == null ||
+        updatedAt == null) {
+      throw const FormatException('Invalid history recovery device key.');
+    }
+    return HistoryRecoveryDeviceKey(
+      deviceId: deviceId,
+      publicKey: publicKey,
+      yuidAuthorizationSignature: signature,
+      createdAt: createdAt,
+      updatedAt: updatedAt,
+    );
+  }
+}
+
+class HistoryRecoveryKeyDirectory {
+  final String accountYuid;
+  final List<HistoryRecoveryDeviceKey> keys;
+
+  const HistoryRecoveryKeyDirectory({
+    required this.accountYuid,
+    required this.keys,
+  });
+}
+
 class SessionBundle {
   final ChatServer server;
   final List<ChatChannel> channels;
@@ -1090,6 +1138,80 @@ class ApiClient {
         .toList();
 
     return membersJson.map(Member.fromJson).toList();
+  }
+
+  Future<HistoryRecoveryDeviceKey> registerHistoryRecoveryDeviceKey({
+    required String baseUrl,
+    required String token,
+    required String expectedDeviceId,
+    required String publicKey,
+    required String yuidAuthorizationSignature,
+  }) async {
+    final normalized = normalizeBaseUrl(baseUrl);
+    final json = await _requestJson(
+      'POST',
+      '$normalized/api/mls/history-recovery/keys',
+      token: token,
+      body: {
+        'publicKey': publicKey,
+        'yuidAuthorizationSignature': yuidAuthorizationSignature,
+      },
+    );
+    try {
+      final key = HistoryRecoveryDeviceKey.fromJson(
+        Map<String, dynamic>.from(json['key'] as Map),
+      );
+      if (key.deviceId != expectedDeviceId ||
+          key.publicKey != publicKey ||
+          key.yuidAuthorizationSignature != yuidAuthorizationSignature) {
+        throw const FormatException(
+          'History recovery key registration was substituted.',
+        );
+      }
+      return key;
+    } catch (_) {
+      throw ApiException(
+        'The server returned invalid encrypted-history recovery key metadata.',
+        code: 'invalid_history_recovery_response',
+      );
+    }
+  }
+
+  Future<HistoryRecoveryKeyDirectory> fetchHistoryRecoveryDeviceKeys({
+    required String baseUrl,
+    required String token,
+  }) async {
+    final normalized = normalizeBaseUrl(baseUrl);
+    final json = await _requestJson(
+      'GET',
+      '$normalized/api/mls/history-recovery/keys',
+      token: token,
+    );
+    try {
+      final accountYuid = json['accountYuid']?.toString() ?? '';
+      if (!RegExp(r'^[A-Za-z0-9_-]{20}$').hasMatch(accountYuid)) {
+        throw const FormatException('Invalid recovery account.');
+      }
+      final rawKeys = json['keys'];
+      if (rawKeys is! List || rawKeys.length > 100) {
+        throw const FormatException('Invalid recovery key directory.');
+      }
+      return HistoryRecoveryKeyDirectory(
+        accountYuid: accountYuid,
+        keys: rawKeys
+            .map(
+              (item) => HistoryRecoveryDeviceKey.fromJson(
+                Map<String, dynamic>.from(item as Map),
+              ),
+            )
+            .toList(growable: false),
+      );
+    } catch (_) {
+      throw ApiException(
+        'The server returned an invalid encrypted-history recovery directory.',
+        code: 'invalid_history_recovery_response',
+      );
+    }
   }
 
   Future<MlsKeyPackageInventory> fetchMlsKeyPackageInventory({

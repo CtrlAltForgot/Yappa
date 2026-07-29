@@ -1328,8 +1328,12 @@ Current implementation slice:
   authenticated APIs now store and list dedicated device recovery keys only
   after verifying their YUID signatures; exact retries are idempotent,
   conflicting rebinding fails closed, and accounts cannot enumerate each
-  other's keys. Backend transfer storage, client cryptography, staged merge,
-  UI, and the full negative/real device matrix remain to be implemented.
+  other's keys. The client creates a separate per-server/device X25519 key in
+  OS-protected storage, signs it with YUID, pins registration, independently
+  verifies the full directory, and registers during encrypted-server session
+  setup. Flutter analysis and all 64 tests pass. Backend transfer storage,
+  chunk cryptography, staged merge, UI, and the full negative/real-device
+  matrix remain to be implemented.
   Threads are not implemented.
 
 Next work, in order:
