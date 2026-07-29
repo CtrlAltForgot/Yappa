@@ -57,7 +57,11 @@ chmod 700 "$INSTALLATION/install-yappa.sh"
 install -m 600 -o "$TEST_UID" -g "$TEST_UID" /dev/null "$ACTION_LOG"
 
 loginctl enable-linger "$TEST_USER"
-systemctl start "user@$TEST_UID.service"
+if ! systemctl start "user@$TEST_UID.service"; then
+  systemctl status "user@$TEST_UID.service" --no-pager || true
+  journalctl -u "user@$TEST_UID.service" --no-pager -n 80 || true
+  exit 1
+fi
 RUNTIME_DIRECTORY="/run/user/$TEST_UID"
 for _ in {1..20}; do
   [[ -S "$RUNTIME_DIRECTORY/bus" ]] && break

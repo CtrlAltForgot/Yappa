@@ -1216,8 +1216,11 @@ Current implementation slice:
   namespace. Local execution passes all four targets. It exposed and fixed two
   release defects: invalid quoted systemd working directories and colon-form
   firewalld port ranges. Service registration now also checks that both units
-  are active before claiming success. Hosted evidence is pending; this is not
-  full Docker/media, bare-metal reboot, sleep/network, or unattended recovery
+  are active before claiming success. Initial hosted run `30412562488` passed
+  Ubuntu and Debian; Fedora and Rocky failed while their distribution
+  `user@.service` wrappers started, before any Yappa unit or firewall action.
+  Focused manager diagnostics are added for the follow-up. This is not full
+  Docker/media, bare-metal reboot, sleep/network, or unattended recovery
   evidence.
 
 Next work, in order:
