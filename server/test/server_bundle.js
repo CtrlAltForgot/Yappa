@@ -4,6 +4,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const {spawnSync} = require('child_process');
+const {
+  verifyServerRuntimeClosure,
+} = require('../../.github/scripts/verify-server-runtime-closure');
 
 const repositoryRoot = path.resolve(__dirname, '..', '..');
 const buildScript = path.join(
@@ -80,6 +83,7 @@ try {
     'yappa-server-0.1.0-dev/verify-yappa-install.sh',
     'yappa-server-0.1.0-dev/docker-compose.yml',
     'yappa-server-0.1.0-dev/src/server.js',
+    'yappa-server-0.1.0-dev/src/storage-capacity.js',
     'yappa-server-0.1.0-dev/src/verify-server-identity.js',
   ]) {
     assert.ok(listing.includes(required), `Bundle is missing ${required}.`);
@@ -101,6 +105,14 @@ try {
   fs.mkdirSync(extractedRoot);
   run('tar', ['-xzf', firstArchive, '-C', extractedRoot]);
   const bundleRoot = path.join(extractedRoot, 'yappa-server-0.1.0-dev');
+  verifyServerRuntimeClosure(bundleRoot);
+  const missingModuleRoot = path.join(temporaryRoot, 'missing-runtime-module');
+  fs.cpSync(bundleRoot, missingModuleRoot, {recursive: true});
+  fs.rmSync(path.join(missingModuleRoot, 'src', 'storage-capacity.js'));
+  assert.throws(
+    () => verifyServerRuntimeClosure(missingModuleRoot),
+    /server\.js requires missing \.\/storage-capacity/,
+  );
   const metadata = JSON.parse(
     fs.readFileSync(path.join(bundleRoot, 'BUILD-METADATA.json'), 'utf8'),
   );

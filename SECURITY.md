@@ -1235,6 +1235,13 @@ non-mutating installer. Security CI builds and inspects it after the backend
 suite. This checksum is not presented as authenticity: detached signing, SBOM,
 trusted provenance, tagged publication, and manifest activation remain release
 gates.
+The allowlist and staged runtime are additionally checked as a closed local
+CommonJS module set before archiving. This check was added on 2026-07-29 after
+the unpublished bundle omitted `storage-capacity.js` even though `server.js`
+required it. Automated coverage verifies the complete extracted bundle and
+proves that deleting the required module is rejected. The complete
+backend/security suite passes; this packaging correction did not change or
+deploy backend runtime behavior.
 
 The hosted Linux host-contract workflow uses exact digest-pinned x86-64
 containers for Ubuntu 24.04, Debian 13, Fedora 44, and Rocky Linux 10. It binds

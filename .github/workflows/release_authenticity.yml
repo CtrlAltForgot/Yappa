@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/release-versions.json"
       - ".github/scripts/build-server-bundle.sh"
+      - ".github/scripts/verify-server-runtime-closure.js"
       - ".github/scripts/generate-release-evidence.js"
       - ".github/scripts/test-release-evidence.js"
       - ".github/scripts/validate-release-ref.js"
@@ -20,6 +21,7 @@ on:
     paths:
       - ".github/release-versions.json"
       - ".github/scripts/build-server-bundle.sh"
+      - ".github/scripts/verify-server-runtime-closure.js"
       - ".github/scripts/generate-release-evidence.js"
       - ".github/scripts/test-release-evidence.js"
       - ".github/scripts/validate-release-ref.js"

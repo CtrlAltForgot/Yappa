@@ -50,8 +50,11 @@ timestamp, and emits a deterministic `tar.gz` plus a SHA-256 file under
 `dist/server/`. Ownership, order, timestamps, and gzip headers are normalized.
 It refuses overwrite and rejects generated `.env`, LiveKit credentials,
 databases, data, backups, dependencies, tests, and common private-key/token
-markers. The backend suite builds the same inputs twice and requires
+markers. Before archiving, it also verifies that every relative CommonJS
+dependency required by the staged JavaScript sources exists inside the staged
+source tree. The backend suite builds the same inputs twice and requires
 byte-identical output, verifies the checksum and metadata, extracts the bundle,
+repeats the runtime-closure check, proves a missing local module is rejected,
 and executes its non-mutating installer help path.
 
 The checksum is an integrity input, not release authenticity. This development

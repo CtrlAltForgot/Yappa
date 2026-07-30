@@ -1581,6 +1581,15 @@ the checksum/content/metadata, and runs the extracted non-mutating installer;
 security CI performs the real build. The artifact remains deliberately
 unpublished and unsigned. Signing, SBOM/provenance, tagged-release publication,
 manifest activation, and remote installer consumption remain open.
+On 2026-07-29, bundle coverage exposed that the explicit allowlist had fallen
+behind `server.js` and omitted its local `storage-capacity.js` dependency. The
+allowlist now includes that module, and bundle construction fails unless every
+relative CommonJS dependency reachable from the staged `src/*.js` files is
+present inside the staged source tree. The extracted-bundle regression test
+also removes the module deliberately and proves that verification fails. The
+complete backend/security suite passes with this correction. This changes only
+the unpublished development artifact; no running backend or database contract
+changed, so no Unraid deployment was required.
 
 The Linux front end now consumes that development artifact locally: a caller
 must supply the bundle, exact SHA-256, and a new absolute install directory.

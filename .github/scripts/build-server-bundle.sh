@@ -85,6 +85,7 @@ RUNTIME_FILES=(
   "src/lan-discovery-relay.js"
   "src/safe-preview-lookup.js"
   "src/server.js"
+  "src/storage-capacity.js"
   "src/verify-server-identity.js"
   "start-yappa.sh"
   "upgrade-yappa.sh"
@@ -117,6 +118,9 @@ for executable_name in \
   verify-yappa-backup.sh; do
   chmod 0755 "$STAGING_ROOT/$executable_name"
 done
+
+node "$REPOSITORY_ROOT/.github/scripts/verify-server-runtime-closure.js" \
+  "$STAGING_ROOT"
 
 cat > "$STAGING_ROOT/BUILD-METADATA.json" <<EOF
 {
