@@ -1020,7 +1020,7 @@ is incomplete.
 
 Release stages are intentionally distinct:
 
-- A **friend-test build** is an explicitly unsigned or development-labeled
+- A **pretest build** is an explicitly unsigned or development-labeled
   artifact shared with a limited group for validation. It must not claim
   verified E2EE or general release readiness.
 - The **first full public release** is the supported public product milestone.
@@ -1448,7 +1448,7 @@ Work proceeds through the following ordered milestones. Safe preparation may
 run ahead, but a later milestone does not become release evidence until every
 earlier exit criterion is satisfied.
 
-#### Milestone 0 — Friend-test feedback and blocker triage
+#### Milestone 0 — Pretest feedback and blocker triage
 
 Use prerelease `v0.1.0-dev.20260802.1` to establish the first current Windows
 and Linux real-user baseline.
@@ -1465,7 +1465,7 @@ and Linux real-user baseline.
   post-release, and add a regression test before closing a release blocker.
 
 Exit criteria: at least one real Windows and one real Linux test pass are
-recorded; installation/launch blockers are fixed; no known friend-test defect
+recorded; installation/launch blockers are fixed; no known pretest defect
 can corrupt data, expose secrets, bypass identity/TLS/E2EE controls, or prevent
 ordinary join/message/session restoration.
 
@@ -1587,7 +1587,7 @@ explicitly authorizes the first supported public release.
 
 #### Immediate execution order
 
-1. Collect tomorrow's Windows/Linux friend-test results and fix any launch,
+1. Collect tomorrow's Windows/Linux pretest results and fix any launch,
    join, session, vault, messaging, or media blockers.
 2. Run the real two-device encrypted-history recovery matrix and production
    backup/restore/deployment drill.
@@ -1605,7 +1605,7 @@ external/TURN media, real multi-device E2EE, screen-sharing soak,
 persistent-history
 completion, threads, DMs, calendar, and music remain open.
 
-On 2026-08-02, the Linux friend-test artifact workflow was moved from the
+On 2026-08-02, the Linux pretest artifact workflow was moved from the
 unavailable private self-hosted runner to GitHub's hosted Ubuntu 24.04 x64
 runner. The workflow now installs its desktop compilation prerequisites
 explicitly before running the same shared native MLS/vector/Flutter validation,
@@ -1617,13 +1617,13 @@ scan, packaged startup, evidence, attestation, and upload gates on the same
 commit `2078d02`.
 Both downloaded archives matched their published SHA-256 sidecars and contained
 the required native runtime files. Ubuntu-hosted packaging does not replace
-KDE/other-distribution runtime validation, and these remain unsigned friend-test
+KDE/other-distribution runtime validation, and these remain unsigned pretest
 builds rather than supported public releases.
 
 The verified archives and their SHA-256, SPDX, evidence, and GitHub provenance
 sidecars were published on 2026-08-02 as GitHub prerelease
 `v0.1.0-dev.20260802`, targeting exact build commit `2078d02`. The prerelease is
-the approved friend-testing distribution surface; it is non-draft, explicitly
+the approved pretest distribution surface; it is non-draft, explicitly
 unsigned/development-labeled, and does not supersede any full-public-release
 security, signing, compatibility, or product gate.
 
@@ -1642,10 +1642,10 @@ Hosted Linux run `30739336303` and Windows run `30739337049` then passed the
 complete native/vector/client, package-isolation, startup-smoke, evidence,
 attestation, and upload gates from exact commit `87a883a`. Their downloaded
 archives matched the published checksums and GitHub provenance. Corrected
-prerelease `v0.1.0-dev.20260802.1` is the active friend-test download; the
+prerelease `v0.1.0-dev.20260802.1` is the active pretest download; the
 original prerelease is marked superseded.
 
-The 2026-08-02 Nobara friend test then exposed two Linux blockers. Server-hosted
+The 2026-08-02 Nobara pretest then exposed two Linux blockers. Server-hosted
 branding and ordinary attachment previews were still opened by Flutter's
 default image/download client, bypassing the signed LAN route even though API,
 realtime, upload, and LiveKit signaling already used it. Internet-hosted link
@@ -1847,7 +1847,7 @@ plaintext rejection, and downgrade failure. The backend change is deployed and
 healthy on Unraid. A real second-device join/removal/reinstall exercise remains
 part of release priority 4 above.
 
-### 2026-07-24 Friend-Test Checkpoint
+### 2026-07-24 Pretest Checkpoint
 
 The production node and current Linux release client now use literal public-IP
 HTTPS/WSS with no generated DNS connection. The trusted short-lived IP
@@ -1859,7 +1859,7 @@ blocking remains covered by the authorization suite.
 The manual Windows artifact workflow now pins and checksum-verifies the
 official libsodium runtime, validates the MLS and sodium DLLs are packaged, and
 launches the packaged executable for an eight-second runtime smoke test before
-including a friend-test README. It also separates Flutter debug symbols,
+including a pretest README. It also separates Flutter debug symbols,
 remaps Cargo registry paths out of the MLS DLL, and rejects builder-account,
 retired-hostname, Codex-key-label, and private-key markers across the bundle.
 A current hosted Windows workflow run and real Windows
@@ -1877,7 +1877,7 @@ Windows job must be rerun to prove compilation and packaging.
 ## First Public Release Product Pillars
 
 The following capabilities are part of the intended first full public
-release, not commitments for the next friend-test artifact. Their detailed
+release, not commitments for the next pretest artifact. Their detailed
 product and technical designs must be completed before implementation.
 
 ### Integrated Message Threads

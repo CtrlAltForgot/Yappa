@@ -2003,7 +2003,7 @@ class ApiClient {
     final pageJson = json['page'];
     // Servers deployed before bounded history pagination returned only the
     // latest messages. Accept that shape for the initial page so a newer
-    // friend-test client can still connect while the operator schedules the
+    // pretest client can still connect while the operator schedules the
     // backend migration. Never accept it for a cursor request: an old server
     // ignores cursors, which would make catch-up/paging ambiguous and could
     // repeat or omit history silently.

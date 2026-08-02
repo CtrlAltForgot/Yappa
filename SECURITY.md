@@ -73,7 +73,7 @@ native two-client, inspection, vector, and independent-review gates below pass.
   retry in place. Saved credentials are cleared only when the server explicitly
   rejects them with an authentication or authorization response.
 - A pre-pagination backend response may be accepted only for an initial
-  cursorless plaintext-history request so friend-test clients can display its
+  cursorless plaintext-history request so pretest clients can display its
   bounded latest-message window during a controlled backend rollout. The
   client synthesizes no authenticated cursor and claims no older/catch-up
   coverage. The same legacy shape on a cursor-bearing request remains an
@@ -85,7 +85,7 @@ native two-client, inspection, vector, and independent-review gates below pass.
   and Windows run `30739337049` passed their complete hosted validation,
   packaging, startup-smoke, evidence, attestation, and upload gates. The
   independently checksum/provenance-verified artifacts are published as
-  prerelease `v0.1.0-dev.20260802.1`; the earlier friend-test release is marked
+  prerelease `v0.1.0-dev.20260802.1`; the earlier pretest release is marked
   superseded.
 - The backend sends defensive browser/security headers, limits JSON request
   bodies to a configurable size, supports an explicit browser-origin allowlist,
@@ -1670,12 +1670,12 @@ Windows run `30736452716` likewise passed its native DLL, bundle scan, packaged
 startup, evidence, attestation, and upload gates on the same commit `2078d02`.
 Its downloaded archive also matched its SHA-256 sidecar and contained
 `yappa.exe`, `flutter_windows.dll`,
-`libsodium.dll`, and `yappa_mls.dll`. These unsigned friend-test artifacts are
+`libsodium.dll`, and `yappa_mls.dll`. These unsigned pretest artifacts are
 not distribution compatibility, platform signing, or public-release evidence.
 They and their SHA-256, SPDX, evidence, and GitHub provenance sidecars were
 published on 2026-08-02 as non-draft GitHub prerelease
 `v0.1.0-dev.20260802`, targeting exact build commit `2078d02`. This is a
-limited friend-testing distribution, not a supported secure release; the
+limited pretest distribution, not a supported secure release; the
 reporting and release-claim restrictions in this document remain in force.
 
 That inspection initially exposed absolute build-home paths in generated
