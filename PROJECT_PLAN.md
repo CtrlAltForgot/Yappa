@@ -1110,9 +1110,11 @@ Completed and evidenced:
 - Exact-commit Windows artifact run `30405281982`, macOS artifact run
   `30405281961`, and security run `30405285412` passed on commit `4140abd`.
   Windows/macOS produced inspected, smoke-tested development artifacts.
-- Local Linux neutral-source packaging, native dependency/path/marker
-  inspection, and startup smoke pass. Hosted Linux remains pending because its
-  self-hosted runner was unavailable.
+- Hosted Linux artifact run `30736129691` passed on commit `2078d02`, including
+  the shared client gate, neutral-source release build, native dependency/path/
+  marker inspection, startup smoke, checksum/SPDX evidence, provenance
+  attestation, and artifact upload. The downloaded archive and checksum were
+  independently rechecked locally.
 - The portable-server contract, JSON Schema, Tier-1 support truth, Linux and
   WSL2-dispatching Windows front ends, deterministic server bundle, and
   checksum-pinned fresh-directory local installation are implemented.
@@ -1443,9 +1445,8 @@ Next work, in order:
 2. Add bare-metal/reboot and sleep/network-transition evidence; validate the
    Windows bridge on real WSL2; then implement and test Windows Firewall and
    background-supervision parity.
-3. Obtain hosted Linux desktop evidence and finish signed release engineering:
-   production versions, platform/detached signing, binary/license SBOM review,
-   final provenance verification, tagged publication,
+3. Finish signed release engineering: production versions, platform/detached
+   signing, binary/license SBOM review, tagged publication,
    supported-version/vulnerability policy, and update/distribution behavior.
 4. Complete threads, unspoofable cross-server YUID/multi-device DMs, calendar,
    and the provider-neutral shared music room after their detailed security
@@ -1455,8 +1456,8 @@ Next work, in order:
    and all user/security/handoff documentation.
 
 No public-release claim is justified yet. In particular, real Windows/WSL2
-runtime mutation and native host integration, hosted Linux artifacts, public
-installer signing, external/TURN
+runtime mutation and native host integration, public installer signing,
+external/TURN
 media, real multi-device E2EE, screen-sharing soak, persistent-history
 completion, threads, DMs, calendar, and music remain open.
 
@@ -1465,11 +1466,15 @@ unavailable private self-hosted runner to GitHub's hosted Ubuntu 24.04 x64
 runner. The workflow now installs its desktop compilation prerequisites
 explicitly before running the same shared native MLS/vector/Flutter validation,
 neutral-source packaging, bundle inspection, smoke test, checksum, SBOM, and
-provenance-attestation path. This makes Linux and Windows development artifacts
-independently dispatchable from the current branch. A successful hosted run is
-still required before recording either current artifact as usable evidence;
-Ubuntu-hosted packaging also does not replace KDE/other-distribution runtime
-validation.
+provenance-attestation path. Hosted Linux run `30736129691` then passed this
+complete path on commit `2078d02` and uploaded the `0.1.0-dev` x64 archive.
+Hosted Windows run `30736452716` passed the corresponding native DLL, bundle
+scan, packaged startup, evidence, attestation, and upload gates on the same
+commit `2078d02`.
+Both downloaded archives matched their published SHA-256 sidecars and contained
+the required native runtime files. Ubuntu-hosted packaging does not replace
+KDE/other-distribution runtime validation, and these remain unsigned friend-test
+builds rather than supported public releases.
 
 As of 2026-07-28, the local workflow replacement is implemented. The retired
 `build_desktop.yml` has been replaced by independent manual Linux, Windows, and

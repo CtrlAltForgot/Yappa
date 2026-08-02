@@ -1495,8 +1495,9 @@ Before public DMs, Yappa must additionally define and verify:
   deployment policy test. Security CI uses the same shared native
   MLS/vector/Flutter entry point as every artifact workflow, preventing the
   security and packaging gates from drifting apart. Exact-candidate Windows,
-  macOS, and security runs now pass; hosted Linux, production signing,
-  provenance, and publishing policy remain release gates.
+  macOS, and security runs now pass. The later hosted Linux run recorded below
+  closes the development-artifact availability gap; production signing and
+  publishing policy remain release gates.
 - GitHub run history was inspected on 2026-07-24. Workflow run
   `23470775087` successfully built Linux, Windows, and macOS artifacts for
   revision `d3e2ebeead049a96d6cac5cf7b41e799cd045246` on 2026-03-24. That
@@ -1634,9 +1635,17 @@ GitHub-hosted Ubuntu 24.04 x64 runner instead of the unavailable private
 self-hosted runner. Its native build prerequisites are installed explicitly;
 the existing locked validation, artifact isolation, startup smoke, checksum,
 SPDX evidence, and GitHub provenance-attestation gates remain mandatory.
-This improves artifact availability but is not distribution compatibility,
-platform signing, or public-release evidence until the exact hosted run passes
-and its output is inspected.
+Hosted run `30736129691` passed the complete path on commit `2078d02`, including
+the native MLS/vector/Flutter gate, neutral-source build, native dependency and
+artifact-isolation scans, packaged startup smoke, checksum/SPDX generation,
+GitHub provenance attestation, and artifact upload. The downloaded archive
+matched its SHA-256 sidecar and contained the executable and MLS runtime.
+Windows run `30736452716` likewise passed its native DLL, bundle scan, packaged
+startup, evidence, attestation, and upload gates on the same commit `2078d02`.
+Its downloaded archive also matched its SHA-256 sidecar and contained
+`yappa.exe`, `flutter_windows.dll`,
+`libsodium.dll`, and `yappa_mls.dll`. These unsigned friend-test artifacts are
+not distribution compatibility, platform signing, or public-release evidence.
 
 That inspection initially exposed absolute build-home paths in generated
 plugin runtime metadata and Rust dependency panic-location strings. Linux
