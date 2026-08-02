@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:ffi/ffi.dart';
+import 'package:flutter/foundation.dart';
 
 typedef _VerifyNative =
     Int32 Function(Pointer<Uint8>, Pointer<Uint8>, Uint64, Pointer<Uint8>);
@@ -46,6 +47,12 @@ class Ed25519Verifier {
         calloc.free(publicKeyPointer);
       }
     }
+    if (kReleaseMode &&
+        (Platform.isLinux || Platform.isWindows || Platform.isMacOS)) {
+      throw StateError(
+        'Yappa could not load its required desktop cryptography runtime.',
+      );
+    }
     return _fallback.verify(
       message,
       signature: Signature(
@@ -80,6 +87,11 @@ class Ed25519Verifier {
         'libsodium.dylib',
       ];
     }
-    return const ['libsodium.so.26', 'libsodium.so.23', 'libsodium.so'];
+    return [
+      '${File(Platform.resolvedExecutable).parent.path}/lib/libsodium.so.26',
+      'libsodium.so.26',
+      'libsodium.so.23',
+      'libsodium.so',
+    ];
   }
 }

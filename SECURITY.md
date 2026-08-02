@@ -70,6 +70,13 @@ native two-client, inspection, vector, and independent-review gates below pass.
   adding a plaintext media fallback. Automated two-device key sharing,
   rotation, signature, and tamper tests pass; real cross-platform validation
   remains required.
+- Linux release archives now carry checksum-pinned libsodium 1.0.20 rather
+  than depending on an undiscovered distribution ABI. Both media crypto
+  loaders resolve the executable-relative runtime first, and release-mode
+  desktop verification refuses to use the stack-overflow-prone fallback if the
+  native runtime is missing. Packaging verifies the required symbols and the
+  archive's `$ORIGIN/lib` resolution. Real Nobara/Windows validation remains a
+  release gate.
 - Passwords are hashed with bcrypt.
 - Session tokens are cryptographically random. The server stores only SHA-256
   token digests and upgrades legacy raw-token rows on successful use. The

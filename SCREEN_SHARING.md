@@ -49,6 +49,17 @@ is temporarily unavailable until its native capture path passes repeated
 start/stop and two-client tests. Linux portal video/system audio behavior is
 unchanged.
 
+The following Nobara retest still overflowed immediately while Windows stayed
+connected for more than 30 minutes. Linux packaging, unlike Windows packaging,
+had not carried its own libsodium runtime and could silently use the pure-Dart
+fallback when the distribution ABI was absent or undiscoverable. Linux
+archives now bundle checksum-pinned libsodium 1.0.20 under `lib/`, verify its
+required symbols, and load it through the executable-relative path. Release
+desktop builds fail closed if native crypto is unavailable. Local native
+agreement/signing, complete archive construction, symbol/RPATH inspection, and
+packaged startup smoke pass; Nobara/Windows call and screen-share confirmation
+is still pending.
+
 ## Product Requirements
 
 Screen sharing is a community-broadcast feature, not a short-call

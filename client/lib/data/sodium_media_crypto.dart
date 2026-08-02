@@ -180,6 +180,11 @@ class SodiumMediaCrypto {
         'libsodium.dylib',
       ];
     }
-    return const ['libsodium.so.26', 'libsodium.so.23', 'libsodium.so'];
+    return [
+      '${File(Platform.resolvedExecutable).parent.path}/lib/libsodium.so.26',
+      'libsodium.so.26',
+      'libsodium.so.23',
+      'libsodium.so',
+    ];
   }
 }

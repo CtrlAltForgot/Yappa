@@ -1694,6 +1694,20 @@ instead of decoding at CPU speed. Flutter analysis and all 86 routine Flutter
 tests pass locally. Hosted artifacts and a real Nobara/Windows retest remain
 required.
 
+The next Nobara run still produced an immediate `Stack Overflow` while the
+equivalent Windows build remained in a call for more than 30 minutes. Package
+inspection identified platform drift: Windows carried the verified
+`libsodium.dll`, but Linux relied on whichever libsodium ABI happened to be
+installed by the distribution and could silently return to the pure-Dart path.
+The Linux release builder now compiles checksum-pinned libsodium 1.0.20 from
+the shared release manifest, bundles `lib/libsodium.so.26`, verifies the exact
+agreement/signing symbols, and retains `$ORIGIN/lib` resolution. Release-mode
+desktop verification fails with an actionable missing-runtime error rather
+than silently falling back. A native signing/agreement smoke test and the
+actual relocatable Linux archive build pass locally; the packaged Yappa process
+also remained alive through its startup smoke window. Hosted builds and the
+real Nobara/Windows call and screen-share matrix remain required.
+
 As of 2026-07-28, the local workflow replacement is implemented. The retired
 `build_desktop.yml` has been replaced by independent manual Linux, Windows, and
 macOS workflows. Each is a thin wrapper around repository-owned scripts and

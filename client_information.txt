@@ -218,7 +218,8 @@ Current pretest fixes:
 
 - Voice room-key setup now uses Yappa's packaged desktop cryptography runtime
   for both agreement and signing, fixing a stack overflow that could disconnect
-  callers when another device joined.
+  callers when another device joined. Linux downloads now include that runtime
+  directly instead of relying on the Linux distribution to provide it.
 - Windows screen sharing now starts display or window video without the
   unstable experimental system-audio capture path. Windows system audio is
   temporarily unavailable while that native path is stabilized.
