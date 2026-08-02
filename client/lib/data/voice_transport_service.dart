@@ -647,7 +647,10 @@ class VoiceTransportService extends ChangeNotifier {
             sourceId: sourceId,
             maxFrameRate: quality.framesPerSecond.toDouble(),
             params: captureParameters,
-            captureScreenAudio: true,
+            // Windows loopback capture is still unstable and can tear down the
+            // entire display-capture request. Establish proven screen video
+            // first; system audio remains enabled on the validated Linux path.
+            captureScreenAudio: !Platform.isWindows,
           ),
         );
       } else if (_useManualNativePortalScreenShareTrack) {
@@ -692,8 +695,15 @@ class VoiceTransportService extends ChangeNotifier {
     livekit.LocalParticipant localParticipant,
     livekit.ScreenShareCaptureOptions captureOptions,
   ) async {
-    final tracks = await livekit
-        .LocalVideoTrack.createScreenShareTracksWithAudio(captureOptions);
+    final tracks = captureOptions.captureScreenAudio
+        ? await livekit.LocalVideoTrack.createScreenShareTracksWithAudio(
+            captureOptions,
+          )
+        : <livekit.LocalTrack>[
+            await livekit.LocalVideoTrack.createScreenShareTrack(
+              captureOptions,
+            ),
+          ];
     livekit.LocalVideoTrack? videoTrack;
 
     for (final track in tracks) {

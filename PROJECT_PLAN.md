@@ -1680,6 +1680,20 @@ selected data-image replaces the fallback avatar, model coverage verifies
 explicit removal, Flutter analysis passes, and all 85 routine Flutter tests
 pass. A replacement prerelease and real Linux retest remain required.
 
+A subsequent Nobara/Windows pretest confirmed that verifier-only native crypto
+was insufficient: when a second device joined, room-key-envelope X25519
+agreement or Ed25519 signing could still hit a Dart `Stack Overflow`, after
+which mandatory encryption setup timed out and both capture and call state were
+torn down. Envelope agreement and signing now prefer packaged libsodium while
+preserving the existing authenticated protocol. Windows screen sharing is also
+video-first because forcing unvalidated WASAPI loopback audio into the same
+capture request could crash, leave the call, or produce no video; Windows
+system audio is temporarily disabled pending real validation. GIF avatars now
+clamp omitted/zero frame delays to the browser-compatible 100 ms behavior
+instead of decoding at CPU speed. Flutter analysis and all 86 routine Flutter
+tests pass locally. Hosted artifacts and a real Nobara/Windows retest remain
+required.
+
 As of 2026-07-28, the local workflow replacement is implemented. The retired
 `build_desktop.yml` has been replaced by independent manual Linux, Windows, and
 macOS workflows. Each is a thin wrapper around repository-owned scripts and

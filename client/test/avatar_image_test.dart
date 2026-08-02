@@ -6,6 +6,21 @@ import 'package:yappa/shared/avatar_image.dart';
 import 'package:yappa/shared/network_asset_scope.dart';
 
 void main() {
+  test('zero-delay GIF frames use a browser-compatible delay', () {
+    expect(
+      normalizedGifFrameDuration(Duration.zero),
+      const Duration(milliseconds: 100),
+    );
+    expect(
+      normalizedGifFrameDuration(const Duration(milliseconds: 10)),
+      const Duration(milliseconds: 100),
+    );
+    expect(
+      normalizedGifFrameDuration(const Duration(milliseconds: 120)),
+      const Duration(milliseconds: 120),
+    );
+  });
+
   testWidgets('avatar updates immediately from a newly selected data image', (
     tester,
   ) async {

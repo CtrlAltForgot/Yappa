@@ -64,6 +64,12 @@ native two-client, inspection, vector, and independent-review gates below pass.
   coverage and exact-commit hosted Linux/Windows package gates pass in
   prerelease `v0.1.0-dev.20260802.2`; real two-client validation is still
   pending.
+- Desktop room-key-envelope X25519 agreement and Ed25519 signing now also
+  prefer packaged libsodium. This removes the remaining observed pure-Dart
+  stack-overflow path without changing the authenticated envelope protocol or
+  adding a plaintext media fallback. Automated two-device key sharing,
+  rotation, signature, and tamper tests pass; real cross-platform validation
+  remains required.
 - Passwords are hashed with bcrypt.
 - Session tokens are cryptographically random. The server stores only SHA-256
   token digests and upgrades legacy raw-token rows on successful use. The

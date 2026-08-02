@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:cryptography/cryptography.dart';
 
 import 'ed25519_verifier.dart';
+import 'sodium_media_crypto.dart';
 
 const mediaEnvelopeProtocol = 'yappa-media-envelope-v1';
 
@@ -16,6 +17,14 @@ Uint8List _decodeBase64Url(String value) {
     '=',
   );
   return Uint8List.fromList(base64Url.decode(normalized));
+}
+
+Future<List<int>> _extractSimplePrivateKey(KeyPair keyPair) async {
+  final extracted = await keyPair.extract();
+  if (extracted is! SimpleKeyPairData) {
+    throw const FormatException('Media envelope requires a simple key pair.');
+  }
+  return extracted.bytes;
 }
 
 void _addField(BytesBuilder builder, List<int> value) {
@@ -175,6 +184,7 @@ class MediaKeyEnvelopeCryptor {
   final AesGcm _cipher = AesGcm.with256bits();
   final Hkdf _kdf = Hkdf(hmac: Hmac.sha256(), outputLength: 32);
   final Sha256 _hash = Sha256();
+  final SodiumMediaCrypto? _native = SodiumMediaCrypto.tryLoad();
 
   Future<MediaKeyEnvelope> seal({
     required MediaRoomContext context,
@@ -196,12 +206,24 @@ class MediaKeyEnvelopeCryptor {
       throw const FormatException('Recipient media key must use X25519.');
     }
 
-    final ephemeralKeyPair = await _agreement.newKeyPair();
-    final ephemeralPublicKey = await ephemeralKeyPair.extractPublicKey();
-    final sharedSecret = await _agreement.sharedSecretKey(
-      keyPair: ephemeralKeyPair,
-      remotePublicKey: recipientMediaPublicKey,
-    );
+    final nativeKeyPair = _native?.newX25519KeyPair();
+    final ephemeralKeyPair = nativeKeyPair == null
+        ? await _agreement.newKeyPair()
+        : null;
+    final ephemeralPublicKey =
+        nativeKeyPair?.publicKey ??
+        (await ephemeralKeyPair!.extractPublicKey()).bytes;
+    final sharedSecret = nativeKeyPair == null
+        ? await _agreement.sharedSecretKey(
+            keyPair: ephemeralKeyPair!,
+            remotePublicKey: recipientMediaPublicKey,
+          )
+        : SecretKeyData(
+            _native!.sharedSecret(
+              privateKey: nativeKeyPair.privateKey,
+              publicKey: recipientMediaPublicKey.bytes,
+            ),
+          );
     final envelopeKey = await _deriveEnvelopeKey(
       context: context,
       sharedSecret: sharedSecret,
@@ -210,7 +232,7 @@ class MediaKeyEnvelopeCryptor {
       ..buffer.asUint8List(0, 32).setAll(0, roomKey)
       ..setUint32(32, keyIndex, Endian.big)
       ..setInt64(36, createdAt.toUtc().millisecondsSinceEpoch, Endian.big);
-    final aad = context.associatedData(ephemeralPublicKey.bytes);
+    final aad = context.associatedData(ephemeralPublicKey);
     final secretBox = await _cipher.encrypt(
       plaintext.buffer.asUint8List(),
       secretKey: envelopeKey,
@@ -225,16 +247,23 @@ class MediaKeyEnvelopeCryptor {
       messageSequence: messageSequence,
       senderDeviceId: context.senderDeviceId,
       recipientDeviceId: context.recipientDeviceId,
-      ephemeralPublicKey: _encodeBase64Url(ephemeralPublicKey.bytes),
+      ephemeralPublicKey: _encodeBase64Url(ephemeralPublicKey),
       nonce: _encodeBase64Url(secretBox.nonce),
       ciphertext: _encodeBase64Url(secretBox.cipherText),
       authenticationTag: _encodeBase64Url(secretBox.mac.bytes),
       signature: '',
     );
-    final signature = await _signatures.sign(
-      unsigned.signedPayload(),
-      keyPair: senderYuidKeyPair,
-    );
+    final signedPayload = unsigned.signedPayload();
+    final nativeSigner = _native;
+    final signatureBytes = nativeSigner == null
+        ? (await _signatures.sign(
+            signedPayload,
+            keyPair: senderYuidKeyPair,
+          )).bytes
+        : nativeSigner.sign(
+            message: signedPayload,
+            seed: await _extractSimplePrivateKey(senderYuidKeyPair),
+          );
     return MediaKeyEnvelope(
       protocol: unsigned.protocol,
       serverId: unsigned.serverId,
@@ -247,7 +276,7 @@ class MediaKeyEnvelopeCryptor {
       nonce: unsigned.nonce,
       ciphertext: unsigned.ciphertext,
       authenticationTag: unsigned.authenticationTag,
-      signature: _encodeBase64Url(signature.bytes),
+      signature: _encodeBase64Url(signatureBytes),
     );
   }
 
@@ -281,10 +310,18 @@ class MediaKeyEnvelopeCryptor {
       _decodeBase64Url(envelope.ephemeralPublicKey),
       type: KeyPairType.x25519,
     );
-    final sharedSecret = await _agreement.sharedSecretKey(
-      keyPair: recipientMediaKeyPair,
-      remotePublicKey: ephemeralPublicKey,
-    );
+    final nativeAgreement = _native;
+    final sharedSecret = nativeAgreement == null
+        ? await _agreement.sharedSecretKey(
+            keyPair: recipientMediaKeyPair,
+            remotePublicKey: ephemeralPublicKey,
+          )
+        : SecretKeyData(
+            nativeAgreement.sharedSecret(
+              privateKey: await _extractSimplePrivateKey(recipientMediaKeyPair),
+              publicKey: ephemeralPublicKey.bytes,
+            ),
+          );
     final envelopeKey = await _deriveEnvelopeKey(
       context: expectedContext,
       sharedSecret: sharedSecret,

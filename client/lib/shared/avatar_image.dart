@@ -2,6 +2,7 @@ import 'dart:collection';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 
@@ -308,13 +309,85 @@ class _AnimatedGifLayer extends StatefulWidget {
 
 class _AnimatedGifLayerState extends State<_AnimatedGifLayer> {
   bool _firstAnimatedFrameReady = false;
+  ui.Codec? _codec;
+  ui.Image? _frameImage;
+  Timer? _frameTimer;
+  int _decodeGeneration = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _startDecoder();
+  }
 
   @override
   void didUpdateWidget(covariant _AnimatedGifLayer oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.animatedBytes, widget.animatedBytes)) {
-      _firstAnimatedFrameReady = false;
+      _startDecoder();
     }
+  }
+
+  Future<void> _startDecoder() async {
+    final generation = ++_decodeGeneration;
+    _frameTimer?.cancel();
+    _codec?.dispose();
+    _codec = null;
+    _frameImage?.dispose();
+    _frameImage = null;
+    _firstAnimatedFrameReady = false;
+    try {
+      final codec = await ui.instantiateImageCodec(
+        widget.animatedBytes,
+        targetWidth: widget.gifExtent,
+        targetHeight: widget.gifExtent,
+      );
+      if (!mounted || generation != _decodeGeneration) {
+        codec.dispose();
+        return;
+      }
+      _codec = codec;
+      await _decodeNextFrame(generation);
+    } catch (_) {
+      if (mounted && generation == _decodeGeneration) {
+        setState(() => _firstAnimatedFrameReady = false);
+      }
+    }
+  }
+
+  Future<void> _decodeNextFrame(int generation) async {
+    final codec = _codec;
+    if (!mounted || generation != _decodeGeneration || codec == null) return;
+    try {
+      final frame = await codec.getNextFrame();
+      if (!mounted || generation != _decodeGeneration) {
+        frame.image.dispose();
+        return;
+      }
+      final previous = _frameImage;
+      setState(() {
+        _frameImage = frame.image;
+        _firstAnimatedFrameReady = true;
+      });
+      previous?.dispose();
+      _frameTimer = Timer(
+        normalizedGifFrameDuration(frame.duration),
+        () => _decodeNextFrame(generation),
+      );
+    } catch (_) {
+      if (mounted && generation == _decodeGeneration) {
+        setState(() => _firstAnimatedFrameReady = false);
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _decodeGeneration += 1;
+    _frameTimer?.cancel();
+    _codec?.dispose();
+    _frameImage?.dispose();
+    super.dispose();
   }
 
   @override
@@ -328,33 +401,31 @@ class _AnimatedGifLayerState extends State<_AnimatedGifLayer> {
           duration: const Duration(milliseconds: 80),
           curve: Curves.easeOut,
           child: RepaintBoundary(
-            child: Image.memory(
-              widget.animatedBytes,
-              fit: widget.fit,
-              width: widget.size,
-              height: widget.size,
-              cacheWidth: widget.gifExtent,
-              cacheHeight: widget.gifExtent,
-              filterQuality: FilterQuality.medium,
-              gaplessPlayback: true,
-              frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
-                if ((wasSynchronouslyLoaded || frame != null) &&
-                    !_firstAnimatedFrameReady) {
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (mounted) {
-                      setState(() => _firstAnimatedFrameReady = true);
-                    }
-                  });
-                }
-                return child;
-              },
-              errorBuilder: (context, error, stackTrace) => widget.fallback(),
-            ),
+            child: _frameImage == null
+                ? widget.fallback()
+                : RawImage(
+                    image: _frameImage,
+                    fit: widget.fit,
+                    width: widget.size,
+                    height: widget.size,
+                    filterQuality: FilterQuality.medium,
+                  ),
           ),
         ),
       ],
     );
   }
+}
+
+@visibleForTesting
+Duration normalizedGifFrameDuration(Duration encoded) {
+  // GIF permits an omitted/zero delay. Browsers clamp that case instead of
+  // spinning through frames as fast as the decoder can run; match that
+  // behavior so uploaded avatars have consistent timing on desktop.
+  if (encoded < const Duration(milliseconds: 20)) {
+    return const Duration(milliseconds: 100);
+  }
+  return encoded;
 }
 
 class _GifCacheEntry {

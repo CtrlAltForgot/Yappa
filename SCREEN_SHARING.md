@@ -33,6 +33,22 @@ Windows packaging/smoke gates and is available in prerelease
 `v0.1.0-dev.20260802.2`, but it still requires the same real Nobara/Windows
 two-client call before the Linux defect is considered closed.
 
+A later Nobara/Windows pretest showed that the remaining pure-Dart X25519 and
+Ed25519-signing operations used to create and open room-key envelopes could
+still overflow the desktop Dart stack when a second device joined. Media
+envelope agreement and signing now prefer the packaged libsodium runtime while
+retaining the existing authenticated envelope wire format and fail-closed
+verification. The automated two-device share/rotation test passes through the
+native path on Linux; a real Nobara/Windows call is still required.
+
+The same pretest found Windows source selection could crash, leave the caller,
+or create no visible stream while experimental WASAPI loopback capture was
+forced into the same native request. Windows screen sharing is now video-first:
+display/window video is established without system audio. Windows system audio
+is temporarily unavailable until its native capture path passes repeated
+start/stop and two-client tests. Linux portal video/system audio behavior is
+unchanged.
+
 ## Product Requirements
 
 Screen sharing is a community-broadcast feature, not a short-call
@@ -224,8 +240,9 @@ validation.
 - Explicit portal teardown stops both the video capture and system-audio
   pipeline. If loopback initialization fails, screen video continues and the
   native client logs the audio failure.
-- `flutter_webrtc` 1.5.2 also provides the separate Windows WASAPI loopback
-  implementation.
+- `flutter_webrtc` 1.5.2 also provides a Windows WASAPI loopback implementation,
+  but Yappa temporarily disables it because real pretesting found it could
+  destabilize the combined Windows display-capture request.
 
 Do not call Linux desktop audio confirmed until a second client hears it,
 microphone audio remains independent, and repeated start/stop is clean.
