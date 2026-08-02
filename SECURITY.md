@@ -69,6 +69,13 @@ native two-client, inspection, vector, and independent-review gates below pass.
   invalid response, preventing cursor-ignoring servers from creating loops,
   duplicate pages, or silent history gaps. The current backend contract and
   migration remain required for durable pagination.
+  The fix passed focused compatibility/fail-closed tests, Flutter analysis, and
+  all 82 routine Flutter tests. Exact-commit `87a883a` Linux run `30739336303`
+  and Windows run `30739337049` passed their complete hosted validation,
+  packaging, startup-smoke, evidence, attestation, and upload gates. The
+  independently checksum/provenance-verified artifacts are published as
+  prerelease `v0.1.0-dev.20260802.1`; the earlier friend-test release is marked
+  superseded.
 - The backend sends defensive browser/security headers, limits JSON request
   bodies to a configurable size, supports an explicit browser-origin allowlist,
   and rate-limits identity challenges and sign-in attempts by client address.

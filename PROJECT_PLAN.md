@@ -1450,8 +1450,8 @@ earlier exit criterion is satisfied.
 
 #### Milestone 0 — Friend-test feedback and blocker triage
 
-Use prerelease `v0.1.0-dev.20260802` to establish the first current Windows and
-Linux real-user baseline.
+Use prerelease `v0.1.0-dev.20260802.1` to establish the first current Windows
+and Linux real-user baseline.
 
 - Test clean extraction and first launch on Windows 10/11 and at least two
   current x86-64 Linux desktop environments, including KDE Wayland.
@@ -1637,8 +1637,13 @@ accepts that legacy shape only for a cursorless initial load, presents the
 latest messages as one non-pageable window, and continues to reject legacy
 responses to cursor requests. Full paging and reconnect catch-up still require
 the backend migration and production verification. Focused compatibility and
-fail-closed tests plus Flutter analysis pass; replacement friend-test artifacts
-are required before this fix reaches testers.
+fail-closed tests, Flutter analysis, and all 82 routine Flutter tests pass.
+Hosted Linux run `30739336303` and Windows run `30739337049` then passed the
+complete native/vector/client, package-isolation, startup-smoke, evidence,
+attestation, and upload gates from exact commit `87a883a`. Their downloaded
+archives matched the published checksums and GitHub provenance. Corrected
+prerelease `v0.1.0-dev.20260802.1` is the active friend-test download; the
+original prerelease is marked superseded.
 
 As of 2026-07-28, the local workflow replacement is implemented. The retired
 `build_desktop.yml` has been replaced by independent manual Linux, Windows, and
