@@ -61,7 +61,9 @@ native two-client, inspection, vector, and independent-review gates below pass.
   Yappa's packaged libsodium runtime after a Nobara client reported a pure-Dart
   `Stack Overflow`. Verification remains fail-closed and the pure-Dart verifier
   is only a runtime fallback. Automated valid-signature and tamper-rejection
-  coverage passes; real two-client Linux/Windows validation is still pending.
+  coverage and exact-commit hosted Linux/Windows package gates pass in
+  prerelease `v0.1.0-dev.20260802.2`; real two-client validation is still
+  pending.
 - Passwords are hashed with bcrypt.
 - Session tokens are cryptographically random. The server stores only SHA-256
   token digests and upgrades legacy raw-token rows on successful use. The

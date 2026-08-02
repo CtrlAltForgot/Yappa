@@ -1661,9 +1661,12 @@ already-required libsodium runtime, with the package implementation retained
 only as a fallback where libsodium is unavailable. Signature verification is
 still mandatory; no media-encryption downgrade was added. Focused media,
 transport, and envelope tests, Flutter analysis, and all 83 routine Flutter
-tests pass locally. A replacement hosted Linux/Windows prerelease build and a
-real Nobara/Windows two-client retest are required before either blocker is
-closed.
+tests pass locally. Exact-commit `9f9d637` hosted Linux run `30760003169` and
+Windows run `30760008346` passed validation, package inspection, startup smoke,
+evidence, attestation, and artifact upload. Their independently verified
+archives and sidecars are published as prerelease
+`v0.1.0-dev.20260802.2`; `.1` is marked superseded. A real Nobara/Windows
+two-client retest is still required before either blocker is closed.
 
 As of 2026-07-28, the local workflow replacement is implemented. The retired
 `build_desktop.yml` has been replaced by independent manual Linux, Windows, and

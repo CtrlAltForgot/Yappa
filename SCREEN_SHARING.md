@@ -28,8 +28,10 @@ the Linux client reported a Dart `Stack Overflow` while verifying the signed
 device roster and then timed out without obtaining a room key. Desktop roster
 and media-envelope Ed25519 verification now use the packaged libsodium runtime
 and retain a pure-Dart fallback. Automated coordination, tamper-rejection, and
-publication-gate tests pass, but the fix still requires the same real
-Nobara/Windows two-client call before the Linux defect is considered closed.
+publication-gate tests pass. The exact fix commit passed hosted Linux and
+Windows packaging/smoke gates and is available in prerelease
+`v0.1.0-dev.20260802.2`, but it still requires the same real Nobara/Windows
+two-client call before the Linux defect is considered closed.
 
 ## Product Requirements
 
