@@ -1435,30 +1435,174 @@ Current implementation slice:
   and restored-server exercises rather than more local authorization wiring.
   Threads are not implemented.
 
-Next work, in order:
+### Roadmap to the First Public Release — Updated 2026-08-02
 
-1. Continue `PERSISTENT_CHAT.md` with real two-device encrypted-history
-   evidence and a production backup/restore drill,
-   real constrained-filesystem/concurrency capacity evidence, scale, and
-   restore gates. Deploy and verify these history changes on Unraid when
-   approved access becomes available.
-2. Add bare-metal/reboot and sleep/network-transition evidence; validate the
-   Windows bridge on real WSL2; then implement and test Windows Firewall and
-   background-supervision parity.
-3. Finish signed release engineering: production versions, platform/detached
-   signing, binary/license SBOM review, tagged publication,
-   supported-version/vulnerability policy, and update/distribution behavior.
-4. Complete threads, unspoofable cross-server YUID/multi-device DMs, calendar,
-   and the provider-neutral shared music room after their detailed security
-   and product contracts are approved.
-5. Complete native networking/media E2EE, Windows/KDE screen-sharing soak,
-   cross-feature product readiness, exact-tag matrix, production deployment,
-   and all user/security/handoff documentation.
+The public-release scope remains the product contract above: durable E2EE
+communication, reliable self-hosting, threads, cross-server identity and DMs,
+calendar, and the provider-neutral shared music experience. Removing one of
+those commitments from the first release is a product-scope decision, not an
+engineering shortcut, and requires explicit owner approval plus synchronized
+documentation.
+
+Work proceeds through the following ordered milestones. Safe preparation may
+run ahead, but a later milestone does not become release evidence until every
+earlier exit criterion is satisfied.
+
+#### Milestone 0 — Friend-test feedback and blocker triage
+
+Use prerelease `v0.1.0-dev.20260802` to establish the first current Windows and
+Linux real-user baseline.
+
+- Test clean extraction and first launch on Windows 10/11 and at least two
+  current x86-64 Linux desktop environments, including KDE Wayland.
+- Exercise public-IP join, server-identity trust, saved-session restoration,
+  OS credential storage, messages, encrypted attachments, presence, website
+  cards, voice, camera, and screen sharing.
+- Record OS/build, reproduction steps, exact visible errors, and sanitized
+  diagnostics. Never collect credentials, tokens, private keys, production
+  environment files, or private conversation content.
+- Classify every confirmed defect as release-blocking, platform-specific, or
+  post-release, and add a regression test before closing a release blocker.
+
+Exit criteria: at least one real Windows and one real Linux test pass are
+recorded; installation/launch blockers are fixed; no known friend-test defect
+can corrupt data, expose secrets, bypass identity/TLS/E2EE controls, or prevent
+ordinary join/message/session restoration.
+
+#### Milestone 1 — Durable encrypted communication
+
+Finish `PERSISTENT_CHAT.md` and `ENCRYPTED_HISTORY_RECOVERY.md` before adding
+new communication surfaces.
+
+- Prove encrypted-history transfer between two real devices, including source
+  restart/resume, explicit destination acceptance, durable merge before relay
+  consumption, reinstall/new-device recovery, wrong-key/tamper rejection,
+  device revocation, account ban, and expired/cancelled transfer cleanup.
+- Run the representative ceiling-scale gate and real constrained-filesystem/
+  concurrent-write recovery tests without unbounded memory, partial state, or
+  silent message loss.
+- Perform an encrypted production backup, destructive fresh restore, signed
+  attachment download, and post-restore client/history verification.
+- Deploy the accumulated schema, capacity, recovery, and authorization changes
+  to Unraid; verify migrations, health, existing users, and rollback/backup
+  boundaries without exposing production secrets.
+
+Exit criteria: the required persistent-chat evidence matrix passes locally,
+on two real clients, and against the deployed production-like node; current
+handoff/security documents record exact results rather than inferred parity.
+
+#### Milestone 2 — Network, media E2EE, and screen sharing
+
+Complete `MEDIA_E2EE.md` and `SCREEN_SHARING.md` on real clients and networks.
+
+- Prove two-client microphone, camera, screen video, and screen/system audio
+  with correct keys; prove wrong/no-key and cryptor-failure paths stop media;
+  inspect RTP/SFU traffic to show LiveKit cannot decode protected frames.
+- Validate epoch rotation for join, leave, removal, reconnect, and overlapping
+  device changes with no silent downgrade or stale publication.
+- Test public-IP joining off LAN, routers without NAT loopback, signed LAN
+  fallback, public-IP changes, and a forced TURN/UDP relay call. Decide and
+  document whether TURN/TLS is required for the first supported matrix.
+- Complete KDE Wayland, Linux X11, and Windows screen-share matrices: chooser
+  cancel/retry, repeated start/stop, independent microphone/system audio,
+  1080p60, reconnect, 30-minute and multi-hour soaks, bounded CPU/memory/
+  queues, and clean teardown.
+- Obtain independent review of the messaging and media cryptographic claims
+  before changing user-facing language to verified E2EE.
+
+Exit criteria: every required real-device/media/network negative and soak test
+has retained evidence; supported and unsupported network/platform behavior is
+documented accurately; no security claim exceeds the verified result.
+
+#### Milestone 3 — Supported server installation and operations
+
+Complete `SERVER_PORTABILITY.md` with one canonical signed server release.
+
+- Finish real bare-metal Linux reboot, sleep/network transition, firewall,
+  autostart/recovery, upgrade/rollback, backup/restore, and uninstall evidence
+  across the declared Tier-1 distributions.
+- Run the PowerShell bridge against real WSL2 Docker, then implement and test
+  Windows Firewall, background supervision, restart/network recovery, LAN
+  discovery, lifecycle parity, and a supported Windows host matrix.
+- Publish a signed, checksum-pinned, provenance-attested server bundle and
+  installers; enable support targets and install-command generation only after
+  each target reaches `verified-release`.
+- Implement the client Create Server paths for local supervision and guided
+  remote installation, including preflight, health verification, backup,
+  update, error recovery, and honest unsupported-host guidance.
+
+Exit criteria: a new user can install, verify, operate, update, back up,
+restore, and uninstall the same server contract on every advertised Tier-1
+host without raw-port exposure, secret leakage, or undocumented manual repair.
+
+#### Milestone 4 — Remaining first-release product scope
+
+Implement each promised experience only after its focused security, storage,
+authorization, realtime, migration, and recovery contract is approved.
+
+1. Integrated message threads with E2EE inheritance, permissions, pagination,
+   unread/notification/search behavior, deletion lifecycle, and cross-device
+   recovery.
+2. Unspoofable cross-server YUID discovery and multi-device E2EE DMs with key
+   change, reinstall/recovery, blocking/reporting, metadata privacy, and
+   compromised-server handling.
+3. Integrated server calendar with durable backend storage, authorization,
+   realtime synchronization, reminders, migrations, offline/error states, and
+   connections back to conversations and voice.
+4. Provider-neutral shared music rooms with a legally valid provider model,
+   synchronized state, moderation, linked-account protection, reconnect, and
+   coherent presence/navigation.
+
+Exit criteria: each subsystem passes its backend/client/migration/realtime/
+cross-device matrix and feels integrated with identity, roles, presence,
+notifications, navigation, empty/error states, and accessibility. No subsystem
+is accepted as an isolated screen or command-only prototype.
+
+#### Milestone 5 — Release candidate engineering and product readiness
+
+Finish `RELEASE_ENGINEERING.md` only after the product and security behavior is
+frozen for the candidate.
+
+- Freeze production version/schema/protocol numbers and publish supported-
+  version, update, vulnerability, rollback, and end-of-support policies.
+- Complete binary/native dependency and license review; produce final SBOMs,
+  checksums, detached signatures, GitHub provenance, Windows code signing,
+  macOS Developer ID/notarization, and the selected Linux signing/package
+  policy. Signing secrets remain outside the repository.
+- Run onboarding, join, administration, accessibility, keyboard/screen-reader,
+  empty/error/offline, migration, backup/restore, and cross-feature product
+  passes on every supported desktop and server target.
+- Cut one exact release-candidate commit. From that same commit, run security,
+  native MLS/vectors, E2EE, media, screen sharing, Windows, macOS, hosted Linux,
+  server conformance, installer, upgrade/rollback, and product-readiness gates.
+- Download the final assets independently and re-verify signatures, checksums,
+  attestations, contents, version metadata, update behavior, and absence of
+  secrets/builder paths. Perform the final production deployment and smoke
+  test before publishing immutable release notes and assets.
+
+Exit criteria: every advertised platform has a signed, independently verified
+artifact from the exact tag; the production-like deployment runs that tag;
+all documents and in-app release information match observed behavior; a human
+explicitly authorizes the first supported public release.
+
+#### Immediate execution order
+
+1. Collect tomorrow's Windows/Linux friend-test results and fix any launch,
+   join, session, vault, messaging, or media blockers.
+2. Run the real two-device encrypted-history recovery matrix and production
+   backup/restore/deployment drill.
+3. Run the two-client media-E2EE, off-LAN/TURN, and Windows/KDE screen-sharing
+   matrices.
+4. Complete real-host Linux/Windows server parity and the Create Server flow.
+5. Approve and build threads, cross-server DMs, calendar, and shared music in
+   that order.
+6. Freeze the candidate, finish signing/policy work, run the exact-tag matrix,
+   deploy, independently verify, and publish.
 
 No public-release claim is justified yet. In particular, real Windows/WSL2
 runtime mutation and native host integration, public installer signing,
-external/TURN
-media, real multi-device E2EE, screen-sharing soak, persistent-history
+external/TURN media, real multi-device E2EE, screen-sharing soak,
+persistent-history
 completion, threads, DMs, calendar, and music remain open.
 
 On 2026-08-02, the Linux friend-test artifact workflow was moved from the
