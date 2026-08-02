@@ -1460,6 +1460,17 @@ installer signing, external/TURN
 media, real multi-device E2EE, screen-sharing soak, persistent-history
 completion, threads, DMs, calendar, and music remain open.
 
+On 2026-08-02, the Linux friend-test artifact workflow was moved from the
+unavailable private self-hosted runner to GitHub's hosted Ubuntu 24.04 x64
+runner. The workflow now installs its desktop compilation prerequisites
+explicitly before running the same shared native MLS/vector/Flutter validation,
+neutral-source packaging, bundle inspection, smoke test, checksum, SBOM, and
+provenance-attestation path. This makes Linux and Windows development artifacts
+independently dispatchable from the current branch. A successful hosted run is
+still required before recording either current artifact as usable evidence;
+Ubuntu-hosted packaging also does not replace KDE/other-distribution runtime
+validation.
+
 As of 2026-07-28, the local workflow replacement is implemented. The retired
 `build_desktop.yml` has been replaced by independent manual Linux, Windows, and
 macOS workflows. Each is a thin wrapper around repository-owned scripts and

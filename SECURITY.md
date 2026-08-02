@@ -1629,6 +1629,15 @@ executable and MLS-library SHA-256 values were recorded during validation, but
 they are not published provenance and must not be treated as reproducible CI
 artifacts.
 
+As of 2026-08-02, the Linux development-artifact workflow targets a clean
+GitHub-hosted Ubuntu 24.04 x64 runner instead of the unavailable private
+self-hosted runner. Its native build prerequisites are installed explicitly;
+the existing locked validation, artifact isolation, startup smoke, checksum,
+SPDX evidence, and GitHub provenance-attestation gates remain mandatory.
+This improves artifact availability but is not distribution compatibility,
+platform signing, or public-release evidence until the exact hosted run passes
+and its output is inspected.
+
 That inspection initially exposed absolute build-home paths in generated
 plugin runtime metadata and Rust dependency panic-location strings. Linux
 packaging now uses only bundle-relative `$ORIGIN` runtime paths, remaps the
