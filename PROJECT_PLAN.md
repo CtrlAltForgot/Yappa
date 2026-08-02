@@ -1627,6 +1627,19 @@ the approved friend-testing distribution surface; it is non-draft, explicitly
 unsigned/development-labeled, and does not supersede any full-public-release
 security, signing, compatibility, or product gate.
 
+The first real Linux launch of that prerelease against the production-like
+Unraid node exposed a client/backend synchronization gap: the current client
+required the authenticated `page` metadata added by the July 28 history API,
+while the still-schema-3 deployed backend returned the older messages-only
+shape. The exact result was the visible error “The server returned an invalid
+message history page.” SSH deployment remained unavailable. The client now
+accepts that legacy shape only for a cursorless initial load, presents the
+latest messages as one non-pageable window, and continues to reject legacy
+responses to cursor requests. Full paging and reconnect catch-up still require
+the backend migration and production verification. Focused compatibility and
+fail-closed tests plus Flutter analysis pass; replacement friend-test artifacts
+are required before this fix reaches testers.
+
 As of 2026-07-28, the local workflow replacement is implemented. The retired
 `build_desktop.yml` has been replaced by independent manual Linux, Windows, and
 macOS workflows. Each is a thin wrapper around repository-owned scripts and

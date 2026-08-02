@@ -1,4 +1,4 @@
-📝 Yappa Update — July 28, 2026 📝
+📝 Yappa Update — August 2, 2026 📝
 
 This release brings Yappa’s client and self-hosted server back into sync and
 makes major progress toward a dependable first public release.
@@ -30,6 +30,9 @@ independent review justify that claim.
   its bounded on-screen history, Yappa can move backward or forward again
   without losing the server’s permanent record or silently growing local
   storage forever.
+- New clients can still open the latest messages on a server that has not yet
+  received the history-pagination update. Older-page navigation and reconnect
+  catch-up become available after that server is upgraded.
 - After reconnecting, ordinary text feeds now resume from an authenticated
   history checkpoint and retrieve every missed page in order instead of merely
   replacing the screen with the latest batch.

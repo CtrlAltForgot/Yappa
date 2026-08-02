@@ -1970,6 +1970,22 @@ class ApiClient {
         .map((message) => _resolveMessageUrls(message, normalized))
         .toList();
     final pageJson = json['page'];
+    // Servers deployed before bounded history pagination returned only the
+    // latest messages. Accept that shape for the initial page so a newer
+    // friend-test client can still connect while the operator schedules the
+    // backend migration. Never accept it for a cursor request: an old server
+    // ignores cursors, which would make catch-up/paging ambiguous and could
+    // repeat or omit history silently.
+    if (pageJson == null && (cursor == null || cursor.isEmpty)) {
+      return MessageHistoryPage(
+        messages: messages,
+        direction: 'before',
+        hasMore: false,
+        nextCursor: null,
+        forwardCursor: null,
+        backwardCursor: null,
+      );
+    }
     if (pageJson is! Map) {
       throw ApiException(
         'The server returned an invalid message history page.',

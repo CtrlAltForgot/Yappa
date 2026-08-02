@@ -49,6 +49,14 @@ client must not make the conversation look complete when it is not.
   either scroll edge can shift that bounded window while retaining an
   authenticated cursor back toward the evicted side; evicted rows remain
   authoritative and recoverable from the server.
+- A compatibility path accepts the pre-pagination server response only for an
+  initial request with no cursor. It treats that bounded latest-message result
+  as a single page and exposes no fabricated older/forward cursor. A legacy
+  response to any cursor-bearing request remains invalid, preventing a server
+  that ignores cursors from causing loops, duplicated pages, or silent gaps.
+  Focused tests cover both the initial compatibility response and the
+  cursor-bearing rejection. Full durable paging still requires the current
+  backend contract.
 - Before shifting either edge, the client records a visible retained message
   boundary. It restores that boundary after the lazy list is rebuilt, including
   when the retained item must first be materialized from its new approximate

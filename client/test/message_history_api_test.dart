@@ -102,6 +102,72 @@ void main() {
     );
   });
 
+  test('accepts a legacy cursorless initial history response', () async {
+    final api = ApiClient(
+      clientFactory: (_) => MockClient(
+        (_) async => http.Response(
+          jsonEncode({
+            'ok': true,
+            'messages': [
+              {
+                'id': '41',
+                'channelId': '7',
+                'content': 'legacy server message',
+                'createdAt': '2026-07-28T12:00:00.000Z',
+                'author': {'id': '3', 'username': 'Mira', 'role': 'member'},
+                'attachments': [],
+                'reactions': [],
+              },
+            ],
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        ),
+      ),
+    );
+
+    final page = await api.fetchMessages(
+      baseUrl: 'http://127.0.0.1:4100',
+      token: 'session-token',
+      channelId: '7',
+    );
+
+    expect(page.messages.single.content, 'legacy server message');
+    expect(page.direction, 'before');
+    expect(page.hasMore, false);
+    expect(page.nextCursor, isNull);
+    expect(page.forwardCursor, isNull);
+    expect(page.backwardCursor, isNull);
+  });
+
+  test('rejects a legacy response to a cursor request', () async {
+    final api = ApiClient(
+      clientFactory: (_) => MockClient(
+        (_) async => http.Response(
+          jsonEncode({'ok': true, 'messages': []}),
+          200,
+          headers: {'content-type': 'application/json'},
+        ),
+      ),
+    );
+
+    await expectLater(
+      api.fetchMessages(
+        baseUrl: 'http://127.0.0.1:4100',
+        token: 'session-token',
+        channelId: '7',
+        cursor: 'opaque_payload.opaque_signature',
+      ),
+      throwsA(
+        isA<ApiException>().having(
+          (error) => error.code,
+          'code',
+          'invalid_history_response',
+        ),
+      ),
+    );
+  });
+
   test('creates a pinned cursor for an exact message boundary', () async {
     late http.Request captured;
     final api = ApiClient(

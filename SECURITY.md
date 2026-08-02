@@ -61,6 +61,14 @@ native two-client, inspection, vector, and independent-review gates below pass.
 - Temporary connection failures preserve the saved client session so users can
   retry in place. Saved credentials are cleared only when the server explicitly
   rejects them with an authentication or authorization response.
+- A pre-pagination backend response may be accepted only for an initial
+  cursorless plaintext-history request so friend-test clients can display its
+  bounded latest-message window during a controlled backend rollout. The
+  client synthesizes no authenticated cursor and claims no older/catch-up
+  coverage. The same legacy shape on a cursor-bearing request remains an
+  invalid response, preventing cursor-ignoring servers from creating loops,
+  duplicate pages, or silent history gaps. The current backend contract and
+  migration remain required for durable pagination.
 - The backend sends defensive browser/security headers, limits JSON request
   bodies to a configurable size, supports an explicit browser-origin allowlist,
   and rate-limits identity challenges and sign-in attempts by client address.
