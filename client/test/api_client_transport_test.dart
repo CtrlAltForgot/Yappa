@@ -1,3 +1,5 @@
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yappa/data/api_client.dart';
 import 'package:yappa/models/server_model.dart';
@@ -98,5 +100,23 @@ void main() {
     );
 
     expect(custom.joinAddress, 'https://chat.example.com');
+  });
+
+  test('network assets use the API client transport', () async {
+    late Uri requestedUri;
+    final api = ApiClient(
+      clientFactory: (_) => MockClient((request) async {
+        requestedUri = request.url;
+        return http.Response.bytes(<int>[1, 2, 3, 4], 200);
+      }),
+    );
+
+    final bytes = await api.downloadNetworkAsset(
+      'https://203.0.113.10/api/attachments/7?grant=signed',
+    );
+
+    expect(requestedUri.host, '203.0.113.10');
+    expect(requestedUri.queryParameters['grant'], 'signed');
+    expect(bytes, <int>[1, 2, 3, 4]);
   });
 }

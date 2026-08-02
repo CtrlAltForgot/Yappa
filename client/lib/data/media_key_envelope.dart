@@ -3,6 +3,8 @@ import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
 
+import 'ed25519_verifier.dart';
+
 const mediaEnvelopeProtocol = 'yappa-media-envelope-v1';
 
 String _encodeBase64Url(List<int> bytes) =>
@@ -169,6 +171,7 @@ class OpenedMediaRoomKey {
 class MediaKeyEnvelopeCryptor {
   final X25519 _agreement = X25519();
   final Ed25519 _signatures = Ed25519();
+  final Ed25519Verifier _signatureVerifier = Ed25519Verifier();
   final AesGcm _cipher = AesGcm.with256bits();
   final Hkdf _kdf = Hkdf(hmac: Hmac.sha256(), outputLength: 32);
   final Sha256 _hash = Sha256();
@@ -265,12 +268,10 @@ class MediaKeyEnvelopeCryptor {
       throw const FormatException('Media envelope context does not match.');
     }
 
-    final signatureValid = await _signatures.verify(
-      envelope.signedPayload(),
-      signature: Signature(
-        _decodeBase64Url(envelope.signature),
-        publicKey: authorizedSenderYuidPublicKey,
-      ),
+    final signatureValid = await _signatureVerifier.verify(
+      message: envelope.signedPayload(),
+      signature: _decodeBase64Url(envelope.signature),
+      publicKey: authorizedSenderYuidPublicKey.bytes,
     );
     if (!signatureValid) {
       throw SecretBoxAuthenticationError();

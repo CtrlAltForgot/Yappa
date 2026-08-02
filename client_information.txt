@@ -33,6 +33,14 @@ independent review justify that claim.
 - New clients can still open the latest messages on a server that has not yet
   received the history-pagination update. Older-page navigation and reconnect
   catch-up become available after that server is upgraded.
+- Fixed server logos, banners, profile pictures, chat images, text previews,
+  and file downloads on home networks whose routers cannot loop back to the
+  server's public address. These assets now follow Yappa's verified local route
+  without weakening HTTPS or signed download protection.
+- Changed desktop call-key signature checks to use Yappa's packaged native
+  cryptography runtime, addressing a Linux stack overflow that could leave a
+  call stuck on “Establishing encryption.” Calls still fail closed if a device
+  or room-key signature cannot be verified.
 - After reconnecting, ordinary text feeds now resume from an authenticated
   history checkpoint and retrieve every missed page in order instead of merely
   replacing the screen with the latest batch.

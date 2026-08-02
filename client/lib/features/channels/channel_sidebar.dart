@@ -8,6 +8,7 @@ import '../../models/member_model.dart';
 import '../../models/server_model.dart';
 import '../../models/voice_models.dart';
 import '../../shared/avatar_image.dart';
+import '../../shared/network_asset_scope.dart';
 
 class ChannelSidebar extends StatefulWidget {
   final ChatServer server;
@@ -1193,7 +1194,7 @@ class _ServerHeader extends StatelessWidget {
           children: [
             if (hasBanner)
               ClipRect(
-                child: Image.network(
+                child: RoutedNetworkImage(
                   bannerUrl!,
                   fit: BoxFit.cover,
                   errorBuilder: (context, error, stackTrace) {

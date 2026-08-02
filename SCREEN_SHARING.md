@@ -6,7 +6,7 @@ This is the architecture, status, and handoff document for desktop capture,
 desktop audio, LiveKit publication, and screen-sharing UI state. Read it before
 changing any of those areas and update it whenever behavior or plans change.
 
-Last updated: 2026-07-24.
+Last updated: 2026-08-02.
 
 Realtime media E2EE is specified in `MEDIA_E2EE.md` and its device registry,
 room-key coordination, signed envelope relay, epoch rotation, and LiveKit GCM
@@ -22,6 +22,14 @@ switching servers, or losing realtime coordination cannot later revive a
 screen or system-audio publication. Native two-client screen video/system-audio
 validation, wrong/no-key tests, packet inspection, deployment, and independent
 review remain incomplete, so this is not yet a verified E2EE claim.
+
+A 2026-08-02 Nobara/Windows voice test reached encrypted-room coordination but
+the Linux client reported a Dart `Stack Overflow` while verifying the signed
+device roster and then timed out without obtaining a room key. Desktop roster
+and media-envelope Ed25519 verification now use the packaged libsodium runtime
+and retain a pure-Dart fallback. Automated coordination, tamper-rejection, and
+publication-gate tests pass, but the fix still requires the same real
+Nobara/Windows two-client call before the Linux defect is considered closed.
 
 ## Product Requirements
 

@@ -1645,6 +1645,26 @@ archives matched the published checksums and GitHub provenance. Corrected
 prerelease `v0.1.0-dev.20260802.1` is the active friend-test download; the
 original prerelease is marked superseded.
 
+The 2026-08-02 Nobara friend test then exposed two Linux blockers. Server-hosted
+branding and ordinary attachment previews were still opened by Flutter's
+default image/download client, bypassing the signed LAN route even though API,
+realtime, upload, and LiveKit signaling already used it. Internet-hosted link
+thumbnails therefore loaded while the same server's assets failed on a router
+without NAT loopback. All client-fetched network assets now use the ApiClient
+transport, retain the logical public HTTPS origin and signed attachment grant,
+and dial the verified private TLS endpoint when LAN fallback is active.
+
+The same test reported a Dart `Stack Overflow` while Linux verified the
+Ed25519-authorized media-device roster, followed by the fail-closed media-key
+timeout. Desktop media roster and envelope signature verification now use the
+already-required libsodium runtime, with the package implementation retained
+only as a fallback where libsodium is unavailable. Signature verification is
+still mandatory; no media-encryption downgrade was added. Focused media,
+transport, and envelope tests, Flutter analysis, and all 83 routine Flutter
+tests pass locally. A replacement hosted Linux/Windows prerelease build and a
+real Nobara/Windows two-client retest are required before either blocker is
+closed.
+
 As of 2026-07-28, the local workflow replacement is implemented. The retired
 `build_desktop.yml` has been replaced by independent manual Linux, Windows, and
 macOS workflows. Each is a thin wrapper around repository-owned scripts and

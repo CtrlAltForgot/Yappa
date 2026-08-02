@@ -4,7 +4,8 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+
+import 'network_asset_scope.dart';
 
 class AvatarImage extends StatefulWidget {
   final String? source;
@@ -39,8 +40,8 @@ class _AvatarImageState extends State<AvatarImage> {
   String? _gifFutureKey;
 
   @override
-  void initState() {
-    super.initState();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
     _startWarmup();
   }
 
@@ -82,7 +83,7 @@ class _AvatarImageState extends State<AvatarImage> {
       _gifFutureKey = cacheKey;
       _gifFuture = _loadGifEntry(
         cacheKey,
-        () => _downloadBytes(resolved),
+        () => _downloadBytes(context, resolved),
         gifExtent,
       );
       return;
@@ -110,8 +111,9 @@ class _AvatarImageState extends State<AvatarImage> {
       }
 
       final entry = _GifCacheEntry(
-        animatedBytes:
-            gifBytes.lengthInBytes <= _maxAnimatedGifBytes ? gifBytes : null,
+        animatedBytes: gifBytes.lengthInBytes <= _maxAnimatedGifBytes
+            ? gifBytes
+            : null,
         firstFramePng: firstFramePng,
       );
       _storeInCache(cacheKey, entry);
@@ -200,13 +202,13 @@ class _AvatarImageState extends State<AvatarImage> {
       final cacheKey = '$resolved@$gifExtent';
       return _buildGifFromFuture(
         cacheKey,
-        () => _downloadBytes(resolved),
+        () => _downloadBytes(context, resolved),
         gifExtent,
       );
     }
 
     return RepaintBoundary(
-      child: Image.network(
+      child: RoutedNetworkImage(
         resolved,
         fit: widget.fit,
         width: widget.size,
@@ -278,12 +280,9 @@ class _AvatarImageState extends State<AvatarImage> {
   }
 
   Widget _fallback() => Text(
-        widget.fallbackInitial,
-        style: TextStyle(
-          fontSize: widget.size * 0.4,
-          fontWeight: FontWeight.w900,
-        ),
-      );
+    widget.fallbackInitial,
+    style: TextStyle(fontSize: widget.size * 0.4, fontWeight: FontWeight.w900),
+  );
 }
 
 class _AnimatedGifLayer extends StatefulWidget {
@@ -375,10 +374,7 @@ class _ParsedDataUri {
   final String mimeType;
   final Uint8List bytes;
 
-  const _ParsedDataUri({
-    required this.mimeType,
-    required this.bytes,
-  });
+  const _ParsedDataUri({required this.mimeType, required this.bytes});
 }
 
 _ParsedDataUri? _tryParseDataUri(String source) {
@@ -396,10 +392,7 @@ _ParsedDataUri? _tryParseDataUri(String source) {
     final mimeType = header.split(';').first.trim().toLowerCase();
     final bytes = base64Decode(source.substring(comma + 1));
 
-    return _ParsedDataUri(
-      mimeType: mimeType,
-      bytes: bytes,
-    );
+    return _ParsedDataUri(mimeType: mimeType, bytes: bytes);
   } catch (_) {
     return null;
   }
@@ -416,18 +409,10 @@ bool _looksLikeGifUrl(String source) {
   }
 }
 
-Future<Uint8List> _downloadBytes(String url) async {
-  final response = await http.get(Uri.parse(url));
-  if (response.statusCode < 200 || response.statusCode >= 300) {
-    throw Exception('Failed to load avatar');
-  }
-  return response.bodyBytes;
-}
+Future<Uint8List> _downloadBytes(BuildContext context, String url) =>
+    NetworkAssetScope.of(context)(url);
 
-Future<Uint8List?> _extractFirstFramePng(
-  Uint8List bytes,
-  int gifExtent,
-) async {
+Future<Uint8List?> _extractFirstFramePng(Uint8List bytes, int gifExtent) async {
   final codec = await ui.instantiateImageCodec(
     bytes,
     targetWidth: gifExtent,
@@ -437,8 +422,9 @@ Future<Uint8List?> _extractFirstFramePng(
   try {
     final frame = await codec.getNextFrame();
     try {
-      final byteData =
-          await frame.image.toByteData(format: ui.ImageByteFormat.png);
+      final byteData = await frame.image.toByteData(
+        format: ui.ImageByteFormat.png,
+      );
       return byteData?.buffer.asUint8List();
     } finally {
       frame.image.dispose();

@@ -8,6 +8,7 @@ import '../../app/theme.dart';
 import '../../models/member_model.dart';
 import '../../models/server_model.dart';
 import '../../shared/avatar_image.dart';
+import '../../shared/network_asset_scope.dart';
 import '../admin/server_admin_dialog.dart';
 import '../channels/channel_sidebar.dart';
 import '../chat/chat_area.dart';
@@ -878,7 +879,7 @@ class _RailIconButton extends StatelessWidget {
     } else if (imageUrl != null && imageUrl!.isNotEmpty) {
       content = ClipRRect(
         borderRadius: BorderRadius.circular(cornerRadius - 1),
-        child: Image.network(
+        child: RoutedNetworkImage(
           imageUrl!,
           fit: BoxFit.cover,
           width: 56,

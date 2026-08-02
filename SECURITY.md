@@ -53,6 +53,15 @@ native two-client, inspection, vector, and independent-review gates below pass.
   attachments are secretstream ciphertext whose key and display metadata live
   only inside the authenticated MLS event. Branding assets remain public so
   nodes can render before login.
+- Server-hosted branding, avatars, ordinary attachment previews, text previews,
+  and downloads use the same certificate-preserving signed LAN route as API
+  traffic. Signed attachment grants remain in the logical public HTTPS URL;
+  only the verified TCP dial target changes on the LAN.
+- Desktop media-device roster and room-key-envelope Ed25519 verification prefer
+  Yappa's packaged libsodium runtime after a Nobara client reported a pure-Dart
+  `Stack Overflow`. Verification remains fail-closed and the pure-Dart verifier
+  is only a runtime fallback. Automated valid-signature and tamper-rejection
+  coverage passes; real two-client Linux/Windows validation is still pending.
 - Passwords are hashed with bcrypt.
 - Session tokens are cryptographically random. The server stores only SHA-256
   token digests and upgrades legacy raw-token rows on successful use. The

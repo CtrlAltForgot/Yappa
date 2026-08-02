@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
@@ -275,6 +276,9 @@ class AppState extends ChangeNotifier {
 
   bool get isBusy => _isBusy;
   String? get lastError => _lastError;
+
+  Future<Uint8List> downloadNetworkAsset(String url) =>
+      _api.downloadNetworkAsset(url);
   bool get isSelectedServerUnreachable =>
       selectedServerId.isNotEmpty && _unreachableServerId == selectedServerId;
   String get currentUsername => _currentUsername ?? 'Offline';

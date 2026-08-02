@@ -6,6 +6,7 @@ import '../../app/app_state.dart';
 import '../../app/theme.dart';
 import '../../data/api_client.dart';
 import '../../shared/pick_and_adjust_image.dart';
+import '../../shared/network_asset_scope.dart';
 
 Future<void> showServerAdminDialog(
   BuildContext context, {
@@ -943,7 +944,7 @@ class _ServerAdminDialogState extends State<_ServerAdminDialog> {
                         color: NewChatColors.textMuted,
                       ),
                     )
-                  : Image.network(
+                  : RoutedNetworkImage(
                       resolvedUrl,
                       fit: BoxFit.cover,
                       errorBuilder: (context, error, stackTrace) {
@@ -1023,7 +1024,7 @@ class _ServerAdminDialogState extends State<_ServerAdminDialog> {
                             ),
                           ),
                         )
-                      : Image.network(
+                      : RoutedNetworkImage(
                           resolvedBannerUrl,
                           fit: BoxFit.cover,
                           errorBuilder: (context, error, stackTrace) {
@@ -1071,7 +1072,7 @@ class _ServerAdminDialogState extends State<_ServerAdminDialog> {
                                   color: NewChatColors.textMuted,
                                   size: 28,
                                 )
-                              : Image.network(
+                              : RoutedNetworkImage(
                                   resolvedIconUrl,
                                   fit: BoxFit.cover,
                                   errorBuilder: (context, error, stackTrace) {

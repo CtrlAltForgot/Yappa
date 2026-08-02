@@ -3,6 +3,8 @@ import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
 
+import 'ed25519_verifier.dart';
+
 class MediaDevicePublicIdentity {
   final String id;
   final String userId;
@@ -86,7 +88,7 @@ class MediaRoomState {
 
 class MediaRoomStateVerifier {
   static const _protocol = 'yappa-media-room-v1';
-  final Ed25519 _signatures = Ed25519();
+  final Ed25519Verifier _signatures = Ed25519Verifier();
   final Sha256 _hash = Sha256();
 
   Future<void> verify(
@@ -152,11 +154,9 @@ class MediaRoomStateVerifier {
         '${device.authorizationNonce}|${device.publicKey}|${device.id}',
       );
       final verified = await _signatures.verify(
-        message,
-        signature: Signature(
-          authorization,
-          publicKey: SimplePublicKey(yuidPublicKey, type: KeyPairType.ed25519),
-        ),
+        message: message,
+        signature: authorization,
+        publicKey: yuidPublicKey,
       );
       if (!verified) {
         throw const FormatException('Media device authorization is invalid.');

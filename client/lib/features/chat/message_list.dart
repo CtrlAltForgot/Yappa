@@ -4,7 +4,6 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_all/webview_all.dart';
 
@@ -15,6 +14,7 @@ import '../../models/link_preview_model.dart';
 import '../../models/member_model.dart';
 import '../../models/message_model.dart';
 import '../../shared/avatar_image.dart';
+import '../../shared/network_asset_scope.dart';
 
 final RegExp _messageUrlRegex = RegExp(
   r'((?:https?:\/\/|www\.)[^\s<>()]+)',
@@ -1088,7 +1088,7 @@ class _LinkPreviewLoadedState extends State<_LinkPreviewLoaded> {
               if (imageUrl.isEmpty && iconUrl.isNotEmpty) ...[
                 ClipRRect(
                   borderRadius: BorderRadius.circular(9),
-                  child: Image.network(
+                  child: RoutedNetworkImage(
                     iconUrl,
                     width: 44,
                     height: 44,
@@ -1162,7 +1162,7 @@ class _LinkPreviewLoadedState extends State<_LinkPreviewLoaded> {
                 children: [
                   AspectRatio(
                     aspectRatio: 16 / 9,
-                    child: Image.network(
+                    child: RoutedNetworkImage(
                       imageUrl,
                       fit: BoxFit.cover,
                       errorBuilder: (context, error, stackTrace) {
@@ -1623,7 +1623,7 @@ class _ImageAttachmentTileState extends State<_ImageAttachmentTile> {
                     maxWidth: 520,
                     maxHeight: 360,
                   ),
-                  child: Image.network(
+                  child: RoutedNetworkImage(
                     widget.attachment.url,
                     fit: BoxFit.contain,
                     errorBuilder: (context, error, stackTrace) {
@@ -1895,12 +1895,8 @@ class _TextFilePreviewState extends State<_TextFilePreview> {
       throw Exception('Invalid preview URL.');
     }
 
-    final response = await http.get(uri);
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw Exception('Could not load preview.');
-    }
-
-    final text = response.body;
+    final bytes = await NetworkAssetScope.of(context)(uri.toString());
+    final text = String.fromCharCodes(bytes);
     if (text.isEmpty) return '(empty file)';
     return text.length > 12000 ? '${text.substring(0, 12000)}\n\n…' : text;
   }
@@ -1992,46 +1988,42 @@ class _ImagePreviewDialog extends StatefulWidget {
 
 class _ImagePreviewDialogState extends State<_ImagePreviewDialog> {
   final TransformationController _controller = TransformationController();
-  ImageStream? _imageStream;
-  ImageStreamListener? _imageStreamListener;
   Size? _sourceImageSize;
   bool _zoomed = false;
+  bool _loadingSourceSize = false;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_imageStream != null) {
-      return;
-    }
+    if (_loadingSourceSize || _sourceImageSize != null) return;
+    _loadingSourceSize = true;
+    _loadSourceSize();
+  }
 
-    final stream = NetworkImage(
-      widget.attachment.url,
-    ).resolve(createLocalImageConfiguration(context));
-    late final ImageStreamListener listener;
-    listener = ImageStreamListener((info, synchronousCall) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _sourceImageSize = Size(
-          info.image.width.toDouble(),
-          info.image.height.toDouble(),
-        );
+  Future<void> _loadSourceSize() async {
+    try {
+      final bytes = await NetworkAssetScope.of(context)(widget.attachment.url);
+      if (!mounted) return;
+      final stream = MemoryImage(
+        bytes,
+      ).resolve(createLocalImageConfiguration(context));
+      late final ImageStreamListener listener;
+      listener = ImageStreamListener((info, synchronousCall) {
+        if (!mounted) return;
+        setState(() {
+          _sourceImageSize = Size(
+            info.image.width.toDouble(),
+            info.image.height.toDouble(),
+          );
+        });
+        stream.removeListener(listener);
       });
-      stream.removeListener(listener);
-      _imageStreamListener = null;
-    });
-    _imageStream = stream;
-    _imageStreamListener = listener;
-    stream.addListener(listener);
+      stream.addListener(listener);
+    } catch (_) {}
   }
 
   @override
   void dispose() {
-    final listener = _imageStreamListener;
-    if (listener != null) {
-      _imageStream?.removeListener(listener);
-    }
     _controller.dispose();
     super.dispose();
   }
@@ -2104,7 +2096,7 @@ class _ImagePreviewDialogState extends State<_ImagePreviewDialog> {
                         child: SizedBox(
                           width: imageSize.width,
                           height: imageSize.height,
-                          child: Image.network(
+                          child: RoutedNetworkImage(
                             widget.attachment.url,
                             fit: BoxFit.fill,
                             errorBuilder: (context, error, stackTrace) {
@@ -2212,12 +2204,7 @@ Future<void> _downloadAttachmentToDisk(
       throw Exception('Invalid file URL.');
     }
 
-    final response = await http.get(uri);
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw Exception('Download failed with status ${response.statusCode}.');
-    }
-
-    final bytes = response.bodyBytes;
+    final bytes = await NetworkAssetScope.of(context)(uri.toString());
     final path = await FilePicker.platform.saveFile(
       dialogTitle: 'Save file',
       fileName: attachment.name,

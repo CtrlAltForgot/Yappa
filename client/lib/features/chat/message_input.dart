@@ -10,6 +10,7 @@ import '../../app/theme.dart';
 import '../../data/encrypted_attachment_failure.dart';
 import '../../models/channel_model.dart';
 import '../../models/message_model.dart';
+import '../../shared/network_asset_scope.dart';
 
 class MessageInput extends StatefulWidget {
   final ChatChannel channel;
@@ -679,7 +680,7 @@ class _PendingAttachmentChip extends StatelessWidget {
                 height: 110,
                 width: double.infinity,
                 color: Colors.transparent,
-                child: Image.network(
+                child: RoutedNetworkImage(
                   attachment.url,
                   fit: BoxFit.contain,
                   errorBuilder: (context, error, stackTrace) {

@@ -714,6 +714,37 @@ class ApiClient {
     return _lanRoutes.containsKey(publicUri.origin);
   }
 
+  Future<Uint8List> downloadNetworkAsset(String rawUrl) async {
+    final uri = Uri.parse(rawUrl);
+    if (uri.scheme != 'http' && uri.scheme != 'https') {
+      throw ApiException(
+        'The asset URL is invalid.',
+        code: 'invalid_asset_url',
+      );
+    }
+    final client = _clientFor(uri);
+    try {
+      final response = await client
+          .get(uri)
+          .timeout(const Duration(seconds: 20));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw ApiException(
+          'Asset download failed with status ${response.statusCode}.',
+          statusCode: response.statusCode,
+          code: 'asset_download_failed',
+        );
+      }
+      return response.bodyBytes;
+    } on TimeoutException {
+      throw ApiException(
+        'The asset download timed out.',
+        code: 'connection_timeout',
+      );
+    } finally {
+      client.close();
+    }
+  }
+
   bool _isPrivateOrDevelopmentHost(String input) {
     final host = input.trim().toLowerCase();
     if (host == 'localhost' ||
