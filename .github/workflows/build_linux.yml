@@ -63,6 +63,7 @@ jobs:
       - name: Validate Linux server install contract
         run: |
           bash -n server/install-yappa.sh
+          npm ci --ignore-scripts --prefix server
           node server/test/install_manifest.js
 
       - name: Build, inspect, and package Linux

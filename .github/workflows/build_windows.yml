@@ -48,6 +48,7 @@ jobs:
       - name: Validate Windows server install contract
         shell: pwsh
         run: |
+          npm ci --ignore-scripts --prefix server
           $tokens = $null
           $errors = $null
           [void][System.Management.Automation.Language.Parser]::ParseFile(
