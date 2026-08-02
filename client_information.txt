@@ -104,6 +104,9 @@ independent review justify that claim.
   crown as an actual color emoji.
 - Fixed transparent member-list profile pictures so they no longer reveal a
   brown owner-avatar background.
+- Fixed profile pictures that could remain blank after choosing them. A
+  successful change now appears immediately in User Settings and throughout
+  Yappa without losing your online or voice status.
 - Added an in-place Retry connection action when a saved server is temporarily
   unreachable. Yappa now keeps the remembered session during network outages
   instead of making you back out and sign in again.

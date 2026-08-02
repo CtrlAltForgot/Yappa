@@ -48,12 +48,14 @@ class Member {
           ? null
           : DateTime.tryParse(json['voiceJoinedAt'].toString()),
       voiceState: json['voiceState'] is Map<String, dynamic>
-          ? VoicePresenceState.fromJson(json['voiceState'] as Map<String, dynamic>)
+          ? VoicePresenceState.fromJson(
+              json['voiceState'] as Map<String, dynamic>,
+            )
           : json['voiceState'] is Map
-              ? VoicePresenceState.fromJson(
-                  Map<String, dynamic>.from(json['voiceState'] as Map),
-                )
-              : const VoicePresenceState.defaults(),
+          ? VoicePresenceState.fromJson(
+              Map<String, dynamic>.from(json['voiceState'] as Map),
+            )
+          : const VoicePresenceState.defaults(),
       createdAt: json['createdAt'] == null
           ? null
           : DateTime.tryParse(json['createdAt'].toString()),
@@ -93,6 +95,7 @@ class Member {
     VoicePresenceState? voiceState,
     DateTime? createdAt,
     DateTime? lastLoginAt,
+    bool clearAvatarUrl = false,
     bool clearVoiceChannelId = false,
     bool clearVoiceJoinedAt = false,
   }) {
@@ -100,14 +103,16 @@ class Member {
       id: id ?? this.id,
       username: username ?? this.username,
       name: name ?? this.name,
-      avatarUrl: avatarUrl ?? this.avatarUrl,
+      avatarUrl: clearAvatarUrl ? null : (avatarUrl ?? this.avatarUrl),
       role: role ?? this.role,
       isOnline: isOnline ?? this.isOnline,
       status: status ?? this.status,
-      voiceChannelId:
-          clearVoiceChannelId ? null : (voiceChannelId ?? this.voiceChannelId),
-      voiceJoinedAt:
-          clearVoiceJoinedAt ? null : (voiceJoinedAt ?? this.voiceJoinedAt),
+      voiceChannelId: clearVoiceChannelId
+          ? null
+          : (voiceChannelId ?? this.voiceChannelId),
+      voiceJoinedAt: clearVoiceJoinedAt
+          ? null
+          : (voiceJoinedAt ?? this.voiceJoinedAt),
       voiceState: voiceState ?? this.voiceState,
       createdAt: createdAt ?? this.createdAt,
       lastLoginAt: lastLoginAt ?? this.lastLoginAt,

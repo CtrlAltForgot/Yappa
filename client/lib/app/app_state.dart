@@ -2458,12 +2458,23 @@ class AppState extends ChangeNotifier {
         _membersByServer[serverId] ?? const <Member>[],
       );
       final userId = _userIdByServerId[serverId];
+      final requestedAvatar = updateAvatar
+          ? (avatarSource == null || avatarSource.trim().isEmpty
+                ? null
+                : avatarSource)
+          : null;
       var replaced = false;
       for (var i = 0; i < members.length; i++) {
         final member = members[i];
         if ((userId != null && member.id == userId) ||
             member.username == username) {
-          members[i] = updatedUser;
+          members[i] = _mergeProfileUpdate(
+            member,
+            updatedUser,
+            requestedDisplayName: cleaned,
+            requestedAvatar: requestedAvatar,
+            avatarWasUpdated: updateAvatar,
+          );
           replaced = true;
         }
       }
@@ -2506,12 +2517,21 @@ class AppState extends ChangeNotifier {
         _membersByServer[serverId] ?? const <Member>[],
       );
       final userId = _userIdByServerId[serverId];
+      final requestedAvatar =
+          avatarSource == null || avatarSource.trim().isEmpty
+          ? null
+          : avatarSource;
       var replaced = false;
       for (var i = 0; i < members.length; i++) {
         final member = members[i];
         if ((userId != null && member.id == userId) ||
             member.username == username) {
-          members[i] = updatedUser;
+          members[i] = _mergeProfileUpdate(
+            member,
+            updatedUser,
+            requestedAvatar: requestedAvatar,
+            avatarWasUpdated: true,
+          );
           replaced = true;
         }
       }
@@ -2527,6 +2547,26 @@ class AppState extends ChangeNotifier {
     } catch (_) {
       return 'Could not update your profile picture right now.';
     }
+  }
+
+  Member _mergeProfileUpdate(
+    Member existing,
+    Member response, {
+    String? requestedDisplayName,
+    String? requestedAvatar,
+    bool avatarWasUpdated = false,
+  }) {
+    final responseName = response.name.trim();
+    return existing.copyWith(
+      name:
+          requestedDisplayName ??
+          (responseName.isEmpty ? existing.name : responseName),
+      avatarUrl: avatarWasUpdated
+          ? requestedAvatar
+          : (response.avatarUrl ?? existing.avatarUrl),
+      clearAvatarUrl: avatarWasUpdated && requestedAvatar == null,
+      role: response.role.trim().isEmpty ? existing.role : response.role,
+    );
   }
 
   Future<void> _loadMembers({

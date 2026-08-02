@@ -1668,6 +1668,18 @@ archives and sidecars are published as prerelease
 `v0.1.0-dev.20260802.2`; `.1` is marked superseded. A real Nobara/Windows
 two-client retest is still required before either blocker is closed.
 
+The same Nobara pass found that a successfully selected profile picture could
+remain blank and never visibly update. The settings dialog's routed asset
+scope was below Flutter's root navigator, and the client replaced its complete
+current-member record with the profile PATCH response instead of merging the
+confirmed profile fields into existing identity and presence. The asset scope
+now wraps every navigator route, and successful profile changes immediately
+merge the requested avatar/display name while preserving member identity,
+role, online state, and voice presence. Widget coverage verifies a newly
+selected data-image replaces the fallback avatar, model coverage verifies
+explicit removal, Flutter analysis passes, and all 85 routine Flutter tests
+pass. A replacement prerelease and real Linux retest remain required.
+
 As of 2026-07-28, the local workflow replacement is implemented. The retired
 `build_desktop.yml` has been replaced by independent manual Linux, Windows, and
 macOS workflows. Each is a thin wrapper around repository-owned scripts and

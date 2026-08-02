@@ -65,12 +65,13 @@ class _YappaAppState extends State<YappaApp> {
               title: 'Yappa',
               debugShowCheckedModeBanner: false,
               theme: buildYappaTheme(),
-              home: NetworkAssetScope(
+              builder: (context, child) => NetworkAssetScope(
                 loader: appState.downloadNetworkAsset,
-                child: appState.hasActiveSession
-                    ? ShellScreen(appState: appState)
-                    : ConnectScreen(appState: appState),
+                child: child ?? const SizedBox.shrink(),
               ),
+              home: appState.hasActiveSession
+                  ? ShellScreen(appState: appState)
+                  : ConnectScreen(appState: appState),
             );
           },
         );
