@@ -1646,6 +1646,11 @@ Its downloaded archive also matched its SHA-256 sidecar and contained
 `yappa.exe`, `flutter_windows.dll`,
 `libsodium.dll`, and `yappa_mls.dll`. These unsigned friend-test artifacts are
 not distribution compatibility, platform signing, or public-release evidence.
+They and their SHA-256, SPDX, evidence, and GitHub provenance sidecars were
+published on 2026-08-02 as non-draft GitHub prerelease
+`v0.1.0-dev.20260802`, targeting exact build commit `2078d02`. This is a
+limited friend-testing distribution, not a supported secure release; the
+reporting and release-claim restrictions in this document remain in force.
 
 That inspection initially exposed absolute build-home paths in generated
 plugin runtime metadata and Rust dependency panic-location strings. Linux

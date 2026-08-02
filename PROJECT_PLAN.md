@@ -1476,6 +1476,13 @@ the required native runtime files. Ubuntu-hosted packaging does not replace
 KDE/other-distribution runtime validation, and these remain unsigned friend-test
 builds rather than supported public releases.
 
+The verified archives and their SHA-256, SPDX, evidence, and GitHub provenance
+sidecars were published on 2026-08-02 as GitHub prerelease
+`v0.1.0-dev.20260802`, targeting exact build commit `2078d02`. The prerelease is
+the approved friend-testing distribution surface; it is non-draft, explicitly
+unsigned/development-labeled, and does not supersede any full-public-release
+security, signing, compatibility, or product gate.
+
 As of 2026-07-28, the local workflow replacement is implemented. The retired
 `build_desktop.yml` has been replaced by independent manual Linux, Windows, and
 macOS workflows. Each is a thin wrapper around repository-owned scripts and
