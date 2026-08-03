@@ -1705,8 +1705,23 @@ agreement/signing symbols, and retains `$ORIGIN/lib` resolution. Release-mode
 desktop verification fails with an actionable missing-runtime error rather
 than silently falling back. A native signing/agreement smoke test and the
 actual relocatable Linux archive build pass locally; the packaged Yappa process
-also remained alive through its startup smoke window. Hosted builds and the
-real Nobara/Windows call and screen-share matrix remain required.
+also remained alive through its startup smoke window. Exact-commit `99441b4`
+hosted Linux run `30769721831` and Windows run `30769722581` passed their
+validation, packaging, and startup-smoke gates.
+
+The installed Nobara process then reproduced the immediate overflow. Inspection
+of its live process mappings confirmed it was loading the archive's bundled
+`lib/libsodium.so.26`, disproving missing or undiscoverable native crypto as the
+remaining cause. The solo-room leader path still performed unnecessary
+pure-Dart YUID key reconstruction even though there was no recipient to sign an
+envelope for, and room-key generation plus identity hashing still used
+pure-Dart implementations. The coordinator now skips signing work when it has
+no recipients, reads the stored 32-byte signing seed directly when delivery is
+needed, and uses packaged libsodium for room-key randomness and SHA-256 hashing.
+Failures are labeled by encryption stage so a remaining platform fault reports
+where it occurred instead of only `Stack Overflow`. All 87 routine Flutter
+tests and Flutter analysis pass locally. Fresh hosted artifacts and the real
+Nobara/Windows call and screen-share matrix remain required.
 
 As of 2026-07-28, the local workflow replacement is implemented. The retired
 `build_desktop.yml` has been replaced by independent manual Linux, Windows, and

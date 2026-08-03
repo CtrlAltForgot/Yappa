@@ -60,6 +60,18 @@ agreement/signing, complete archive construction, symbol/RPATH inspection, and
 packaged startup smoke pass; Nobara/Windows call and screen-share confirmation
 is still pending.
 
+The subsequent Nobara run still overflowed immediately. `/proc` inspection of
+the running release client confirmed that its mapped sodium library was the
+archive-relative `lib/libsodium.so.26`, so the packaged runtime was present and
+active. The remaining solo-leader setup path has now been reduced further:
+room-key randomness and YUID identity hashing use packaged libsodium, no YUID
+signing key is reconstructed when a room has no envelope recipients, and
+multi-device delivery reads the stored signing seed directly. Encryption setup
+errors now retain their fail-closed behavior while naming room-state
+verification, key generation, installation, or delivery. All 87 routine
+Flutter tests and analysis pass locally; a new packaged Nobara/Windows retest
+is still required before call or screen-sharing behavior is considered fixed.
+
 ## Product Requirements
 
 Screen sharing is a community-broadcast feature, not a short-call

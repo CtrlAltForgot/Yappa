@@ -77,6 +77,16 @@ native two-client, inspection, vector, and independent-review gates below pass.
   native runtime is missing. Packaging verifies the required symbols and the
   archive's `$ORIGIN/lib` resolution. Real Nobara/Windows validation remains a
   release gate.
+- Live Nobara process mappings subsequently confirmed the release executable
+  loaded that bundled sodium library, so missing native runtime was not the
+  remaining overflow cause. Solo-room setup now avoids reconstructing a YUID
+  signing key when no envelope recipient exists; room-key randomness and YUID
+  hashing use packaged sodium; and multi-device signing consumes the stored
+  32-byte seed directly. The protocol, signature requirement, key sizes, and
+  fail-closed publication gate are unchanged. Stage-specific errors distinguish
+  roster verification, key generation, key installation, and envelope
+  delivery. Automated crypto/coordinator coverage and all 87 routine Flutter
+  tests pass locally; native cross-platform validation remains mandatory.
 - Passwords are hashed with bcrypt.
 - Session tokens are cryptographically random. The server stores only SHA-256
   token digests and upgrades legacy raw-token rows on successful use. The

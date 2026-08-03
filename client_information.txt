@@ -41,6 +41,11 @@ independent review justify that claim.
   cryptography runtime, addressing a Linux stack overflow that could leave a
   call stuck on “Establishing encryption.” Calls still fail closed if a device
   or room-key signature cannot be verified.
+- Reduced Linux call setup work further by using the packaged native
+  cryptography runtime for call-key randomness and identity hashing and by
+  avoiding unnecessary signing setup when you are alone in a voice deck.
+  Encryption errors now identify the setup stage that failed instead of only
+  showing a generic stack-overflow message.
 - After reconnecting, ordinary text feeds now resume from an authenticated
   history checkpoint and retrieve every missed page in order instead of merely
   replacing the screen with the latest batch.

@@ -183,7 +183,7 @@ class MediaKeyEnvelopeCryptor {
   final Ed25519Verifier _signatureVerifier = Ed25519Verifier();
   final AesGcm _cipher = AesGcm.with256bits();
   final Hkdf _kdf = Hkdf(hmac: Hmac.sha256(), outputLength: 32);
-  final Sha256 _hash = Sha256();
+  final Sha256 _fallbackHash = Sha256();
   final SodiumMediaCrypto? _native = SodiumMediaCrypto.tryLoad();
 
   Future<MediaKeyEnvelope> seal({
@@ -193,7 +193,7 @@ class MediaKeyEnvelopeCryptor {
     required int keyIndex,
     required DateTime createdAt,
     required SimplePublicKey recipientMediaPublicKey,
-    required KeyPair senderYuidKeyPair,
+    required List<int> senderYuidPrivateKeySeed,
   }) async {
     context.validate();
     if (roomKey.length != 32 ||
@@ -258,11 +258,13 @@ class MediaKeyEnvelopeCryptor {
     final signatureBytes = nativeSigner == null
         ? (await _signatures.sign(
             signedPayload,
-            keyPair: senderYuidKeyPair,
+            keyPair: await _signatures.newKeyPairFromSeed(
+              senderYuidPrivateKeySeed,
+            ),
           )).bytes
         : nativeSigner.sign(
             message: signedPayload,
-            seed: await _extractSimplePrivateKey(senderYuidKeyPair),
+            seed: senderYuidPrivateKeySeed,
           );
     return MediaKeyEnvelope(
       protocol: unsigned.protocol,
@@ -364,15 +366,13 @@ class MediaKeyEnvelopeCryptor {
       _text(context.channelId),
       _text(context.epoch.toString()),
     ]);
-    final salt = await _hash.hash(saltMaterial);
+    final salt =
+        _native?.sha256(saltMaterial) ??
+        (await _fallbackHash.hash(saltMaterial)).bytes;
     final info = _fields([
       _text(context.senderDeviceId),
       _text(context.recipientDeviceId),
     ]);
-    return _kdf.deriveKey(
-      secretKey: sharedSecret,
-      nonce: salt.bytes,
-      info: info,
-    );
+    return _kdf.deriveKey(secretKey: sharedSecret, nonce: salt, info: info);
   }
 }

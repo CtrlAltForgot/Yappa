@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:cryptography/cryptography.dart';
 
 import 'ed25519_verifier.dart';
+import 'sodium_media_crypto.dart';
 
 class MediaDevicePublicIdentity {
   final String id;
@@ -89,7 +90,8 @@ class MediaRoomState {
 class MediaRoomStateVerifier {
   static const _protocol = 'yappa-media-room-v1';
   final Ed25519Verifier _signatures = Ed25519Verifier();
-  final Sha256 _hash = Sha256();
+  final Sha256 _fallbackHash = Sha256();
+  final SodiumMediaCrypto? _native = SodiumMediaCrypto.tryLoad();
 
   Future<void> verify(
     MediaRoomState state, {
@@ -144,8 +146,10 @@ class MediaRoomStateVerifier {
           authorization.length != 64) {
         throw const FormatException('Invalid media device key material.');
       }
-      final digest = await _hash.hash(yuidPublicKey);
-      final expectedYuid = _encodeBase64Url(digest.bytes).substring(0, 20);
+      final digest =
+          _native?.sha256(yuidPublicKey) ??
+          (await _fallbackHash.hash(yuidPublicKey)).bytes;
+      final expectedYuid = _encodeBase64Url(digest).substring(0, 20);
       if (device.yuid != expectedYuid) {
         throw const FormatException('Media device YUID does not match.');
       }

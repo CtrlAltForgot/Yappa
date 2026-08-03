@@ -34,6 +34,8 @@ typedef _SignDetachedDart =
       int,
       Pointer<Uint8>,
     );
+typedef _Sha256Native = Int32 Function(Pointer<Uint8>, Pointer<Uint8>, Uint64);
+typedef _Sha256Dart = int Function(Pointer<Uint8>, Pointer<Uint8>, int);
 
 class SodiumMediaCrypto {
   static SodiumMediaCrypto? _instance;
@@ -43,6 +45,7 @@ class SodiumMediaCrypto {
   final _ScalarMultBaseDart _scalarMultBase;
   final _SignSeedKeyPairDart _signSeedKeyPair;
   final _SignDetachedDart _signDetached;
+  final _Sha256Dart _sha256;
 
   SodiumMediaCrypto._(
     this._randomBytes,
@@ -50,6 +53,7 @@ class SodiumMediaCrypto {
     this._scalarMultBase,
     this._signSeedKeyPair,
     this._signDetached,
+    this._sha256,
   );
 
   static SodiumMediaCrypto? tryLoad() {
@@ -78,6 +82,9 @@ class SodiumMediaCrypto {
           library.lookupFunction<_SignDetachedNative, _SignDetachedDart>(
             'crypto_sign_detached',
           ),
+          library.lookupFunction<_Sha256Native, _Sha256Dart>(
+            'crypto_hash_sha256',
+          ),
         );
       } catch (_) {}
     }
@@ -100,6 +107,37 @@ class SodiumMediaCrypto {
       privatePointer.asTypedList(32).fillRange(0, 32, 0);
       calloc.free(privatePointer);
       calloc.free(publicPointer);
+    }
+  }
+
+  Uint8List randomBytes(int length) {
+    if (length < 1 || length > 1024 * 1024) {
+      throw ArgumentError.value(length, 'length');
+    }
+    final pointer = calloc<Uint8>(length);
+    try {
+      _randomBytes(pointer.cast(), length);
+      return Uint8List.fromList(pointer.asTypedList(length));
+    } finally {
+      pointer.asTypedList(length).fillRange(0, length, 0);
+      calloc.free(pointer);
+    }
+  }
+
+  Uint8List sha256(List<int> message) {
+    final messagePointer = calloc<Uint8>(message.isEmpty ? 1 : message.length);
+    final outputPointer = calloc<Uint8>(32);
+    try {
+      if (message.isNotEmpty) {
+        messagePointer.asTypedList(message.length).setAll(0, message);
+      }
+      if (_sha256(outputPointer, messagePointer, message.length) != 0) {
+        throw StateError('Could not hash native media identity data.');
+      }
+      return Uint8List.fromList(outputPointer.asTypedList(32));
+    } finally {
+      calloc.free(messagePointer);
+      calloc.free(outputPointer);
     }
   }
 

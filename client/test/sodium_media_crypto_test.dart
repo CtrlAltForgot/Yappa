@@ -23,5 +23,15 @@ void main() {
       seed: List<int>.generate(32, (index) => index),
     );
     expect(signature, hasLength(64));
+
+    final random = sodium.randomBytes(32);
+    expect(random, hasLength(32));
+    expect(random, isNot(everyElement(0)));
+    expect(sodium.sha256(const [1, 2, 3]), hasLength(32));
+    expect(sodium.sha256(const [1, 2, 3]), sodium.sha256(const [1, 2, 3]));
+    expect(
+      sodium.sha256(const [1, 2, 3]),
+      isNot(sodium.sha256(const [3, 2, 1])),
+    );
   });
 }

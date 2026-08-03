@@ -225,6 +225,15 @@ class YuidIdentityService {
     );
   }
 
+  Future<Uint8List> privateKeySeed() async {
+    final identity = await getOrCreateIdentity();
+    final seed = _decodeBase64Url(identity.privateKeyBase64Url);
+    if (seed.length != 32) {
+      throw const FormatException('Invalid YUID signing seed.');
+    }
+    return Uint8List.fromList(seed);
+  }
+
   Future<YuidIdentity> _canonicalizeIdentity(YuidIdentity identity) async {
     final canonicalYuid = await _buildYuidFromPublicKeyBase64Url(
       identity.publicKeyBase64Url,
