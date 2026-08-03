@@ -86,7 +86,10 @@ native two-client, inspection, vector, and independent-review gates below pass.
   fail-closed publication gate are unchanged. Stage-specific errors distinguish
   roster verification, key generation, key installation, and envelope
   delivery. Automated crypto/coordinator coverage and all 87 routine Flutter
-  tests pass locally; native cross-platform validation remains mandatory.
+  tests pass. Exact-commit `58955c9` hosted Linux run `30781786846` and Windows
+  run `30781788007` passed package inspection, startup smoke, evidence, and
+  provenance gates; their independently verified artifacts are prerelease
+  `v0.1.0-dev.20260802.3`. Native cross-platform validation remains mandatory.
 - Passwords are hashed with bcrypt.
 - Session tokens are cryptographically random. The server stores only SHA-256
   token digests and upgrades legacy raw-token rows on successful use. The

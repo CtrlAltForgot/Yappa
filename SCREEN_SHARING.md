@@ -69,8 +69,11 @@ signing key is reconstructed when a room has no envelope recipients, and
 multi-device delivery reads the stored signing seed directly. Encryption setup
 errors now retain their fail-closed behavior while naming room-state
 verification, key generation, installation, or delivery. All 87 routine
-Flutter tests and analysis pass locally; a new packaged Nobara/Windows retest
-is still required before call or screen-sharing behavior is considered fixed.
+Flutter tests and analysis pass. Exact-commit `58955c9` hosted Linux run
+`30781786846` and Windows run `30781788007` passed complete packaging and
+startup-smoke gates, and the independently verified artifacts are published in
+prerelease `v0.1.0-dev.20260802.3`. A packaged Nobara/Windows retest is still
+required before call or screen-sharing behavior is considered fixed.
 
 ## Product Requirements
 

@@ -1720,8 +1720,12 @@ no recipients, reads the stored 32-byte signing seed directly when delivery is
 needed, and uses packaged libsodium for room-key randomness and SHA-256 hashing.
 Failures are labeled by encryption stage so a remaining platform fault reports
 where it occurred instead of only `Stack Overflow`. All 87 routine Flutter
-tests and Flutter analysis pass locally. Fresh hosted artifacts and the real
-Nobara/Windows call and screen-share matrix remain required.
+tests and Flutter analysis pass locally. Exact-commit `58955c9` hosted Linux
+run `30781786846` and Windows run `30781788007` passed validation, package
+inspection, startup smoke, checksum/SPDX evidence, provenance attestation, and
+artifact upload. The independently verified archives and sidecars are
+published as prerelease `v0.1.0-dev.20260802.3`; `.2` is marked superseded.
+The real Nobara/Windows call and screen-share matrix remains required.
 
 As of 2026-07-28, the local workflow replacement is implemented. The retired
 `build_desktop.yml` has been replaced by independent manual Linux, Windows, and
