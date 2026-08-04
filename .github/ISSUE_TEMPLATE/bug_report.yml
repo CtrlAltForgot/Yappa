@@ -1,0 +1,66 @@
+name: Bug report
+description: Report a reproducible Yappa defect (not a security vulnerability)
+title: "[Bug]: "
+labels: ["bug", "needs-reproduction"]
+body:
+  - type: markdown
+    attributes:
+      value: "Security vulnerabilities must use private vulnerability reporting. Sanitize everything you upload."
+  - type: input
+    id: version
+    attributes:
+      label: Yappa version or commit
+    validations:
+      required: true
+  - type: input
+    id: client_os
+    attributes:
+      label: Client operating system
+    validations:
+      required: true
+  - type: input
+    id: desktop
+    attributes:
+      label: Desktop environment
+      description: For example, KDE Plasma Wayland, GNOME X11, Windows 11, or macOS.
+  - type: input
+    id: server
+    attributes:
+      label: Server platform and installation method
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: dropdown
+    id: restart
+    attributes:
+      label: Does it reproduce after restarting client and server?
+      options: ["Yes", "No", "Not tested"]
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized logs or screenshots
+      description: Remove private information from logs and images before uploading.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy confirmation
+      options:
+        - label: I included no passwords, tokens, keys, private messages, production databases, private attachments, private addresses, or personal data.
+          required: true
