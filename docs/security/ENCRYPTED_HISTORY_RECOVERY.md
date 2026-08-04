@@ -282,3 +282,5 @@ The feature is incomplete until automated and real-device evidence covers:
    decryption;
 10. Linux and Windows OS-vault behavior plus an independent cryptographic
     review.
+
+[Project home](../../README.md) · [Documentation index](../README.md) · [Security plan](SECURITY_PLAN.md)

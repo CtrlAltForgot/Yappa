@@ -437,3 +437,5 @@ supplementary group can read mode-`0640` `livekit.yaml` beneath the private
 installation root. The backend image contains production dependencies and
 runtime source only, and its build context excludes secrets, data, databases,
 backups, tests, and host `node_modules`.
+
+[Project home](../README.md) · [Documentation index](../docs/README.md) · [Server overview](README.md)

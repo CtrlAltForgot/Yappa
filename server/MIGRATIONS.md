@@ -90,7 +90,7 @@ Every schema change must:
 - include a fixture beginning at the previous schema version;
 - test successful data preservation, failure rollback, and rejection by an
   older supported-version boundary;
-- update `PROJECT_PLAN.md`, `SECURITY.md`, this document, and deployment
+- update `../docs/internal/PROJECT_PLAN.md`, `../docs/security/SECURITY_PLAN.md`, this document, and deployment
   release notes;
 - be deployed only after an encrypted pre-upgrade backup is created and
   restorable.
@@ -169,3 +169,5 @@ isolated restore verifier. SQLite integrity, schema version 3, one user, ten
 legacy messages, the required `.env`, and the persistent server identity all
 passed. The verifier removed its restored copy, no partial backup remained,
 and the production backend automatically resumed healthy.
+
+[Project home](../README.md) · [Documentation index](../docs/README.md) · [Server overview](README.md)

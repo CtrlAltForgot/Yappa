@@ -28,7 +28,7 @@ Yappa is a privacy-first communication foundation that is:
 
 Security and privacy are release requirements, not optional polish. Do not
 market or label Yappa as secure, private, or end-to-end encrypted until the
-applicable acceptance criteria in `SECURITY.md` are implemented and verified.
+applicable acceptance criteria in `../security/SECURITY_PLAN.md` are implemented and verified.
 
 ## Product Experience Principle
 
@@ -142,8 +142,8 @@ loopback-only UDP `41201`; it holds no identity key or user data. The raw
 backend discovery socket is no longer directly published to the LAN.
 Automated relay routing and deployment-hardening tests pass. The relay was
 deployed to Unraid on 2026-07-24 and a workstation broadcast received the
-correct signed response from `192.168.1.254`. The real release client then
-removed its saved plaintext `192.168.1.254:4100` route and persisted the secure
+correct signed response from the private LAN host. The real release client then
+removed its saved plaintext private-LAN route and persisted the secure
 public transport origin.
 Legacy saved nodes that still name the retired raw LAN backend on port `4100`
 now use the signed response's advertised address to derive the secure public
@@ -508,7 +508,7 @@ Never use the production database as an experiment fixture.
 Current LAN host:
 
 ```text
-192.168.1.254
+PRIVATE_LAN_IP
 ```
 
 Deployment directory:
@@ -528,12 +528,12 @@ yappa-proxy
 Endpoints and media ports:
 
 ```text
-Backend HTTP / Socket.IO:  http://192.168.1.254:4100
-Caddy LAN API proxy:       http://192.168.1.254:8088
-LiveKit signaling:         ws://192.168.1.254:7880
-Caddy LAN voice proxy:     ws://192.168.1.254:7882
-LiveKit ICE/TCP:           192.168.1.254:7881
-LiveKit ICE/UDP:           192.168.1.254:50000-50100
+Backend HTTP / Socket.IO:  http://PRIVATE_LAN_IP:4100
+Caddy LAN API proxy:       http://PRIVATE_LAN_IP:8088
+LiveKit signaling:         ws://PRIVATE_LAN_IP:7880
+Caddy LAN voice proxy:     ws://PRIVATE_LAN_IP:7882
+LiveKit ICE/TCP:           PRIVATE_LAN_IP:7881
+LiveKit ICE/UDP:           PRIVATE_LAN_IP:50000-50100
 ```
 
 Persistent state lives under:
@@ -557,7 +557,7 @@ Do not store a permanent root password or private key in this repository.
 
 For a deployment session:
 
-1. Attempt a read-only SSH connection to `root@192.168.1.254`.
+1. Attempt a read-only SSH connection to `root@PRIVATE_LAN_IP`.
 2. If no approved key exists, create a temporary Ed25519 key under `/tmp`.
 3. Show only the `.pub` value to the user.
 4. Ask the user to append that public key to
@@ -633,7 +633,7 @@ that the repository is ahead of the deployed server.
 - LiveKit is pinned to `v1.13.4`.
 - LiveKit uses UDP range `50000-50100`; single-port UDP mux failed on this
   Unraid host and must not be restored without testing.
-- LiveKit binds to `0.0.0.0` and advertises `192.168.1.254` for LAN use.
+- LiveKit binds to `0.0.0.0` and advertises the private LAN address for LAN use.
 - The Unraid deployment has working public TLS certificates for its internal
   IP-derived API and LiveKit transport names. Direct LAN HTTP/WS listeners
   remain available for local compatibility.
@@ -712,10 +712,10 @@ that the repository is ahead of the deployed server.
   whole player is not inside the message scroll viewport. Flutter analysis and
   all 54 client tests pass; final playback/scroll confirmation in the launched
   Linux client remains pending. The backend embed URL is live on Unraid.
-- Read `SCREEN_SHARING.md` before changing the native capture stack.
-- Read `MEDIA_E2EE.md` before changing realtime encryption keys, device
+- Read `../platform/SCREEN_SHARING.md` before changing the native capture stack.
+- Read `../security/MEDIA_E2EE.md` before changing realtime encryption keys, device
   authorization, room epochs, key-envelope relay, or LiveKit frame encryption.
-- Read `MESSAGING_E2EE.md` before changing persisted message or attachment
+- Read `../security/MESSAGING_E2EE.md` before changing persisted message or attachment
   encryption, MLS delivery, encrypted history, previews, or recovery behavior.
 - Persisted messaging E2EE is specified around RFC 9420 MLS with a native
   OpenMLS bridge and libsodium secretstream attachments. OpenMLS 0.8.1,
@@ -1060,12 +1060,12 @@ The remaining full-public-release work is:
    1080p60, separate microphone/system audio, repeated start/stop, and
    hours-long broadcasts.
 7. Complete the cross-platform server deployment and parity contract in
-   `SERVER_PORTABILITY.md`: one canonical server, guided Linux and Windows
+   `../architecture/SERVER_PORTABILITY.md`: one canonical server, guided Linux and Windows
    installers, common-distribution validation, cross-platform LAN discovery,
    identical conformance tests, upgrades, backups, support matrix, and an
    integrated client “Create server” wizard for local supervised hosting or
    safe remote-install guidance.
-8. Complete the durable-chat contract in `PERSISTENT_CHAT.md`: indefinite
+8. Complete the durable-chat contract in `../architecture/PERSISTENT_CHAT.md`: indefinite
    default history and attachment retention, indexed cursor pagination,
    bounded client caching, explicit storage-full behavior, secure E2EE history
    continuity for new/reinstalled devices, and destructive backup/restore
@@ -1277,7 +1277,7 @@ Current implementation slice:
   targets lacking release verification. It cannot publish. Platform code
   signing, notarization, detached installer/server signatures, binary/license
   SBOM review, final-asset verification, and explicit publication remain open
-  as detailed in `RELEASE_ENGINEERING.md`.
+  as detailed in `../maintainers/RELEASE_ENGINEERING.md`.
 - Durable chat is the active implementation phase. The verified plaintext
   foundation stores messages indefinitely until an authorized deletion.
   Plaintext history now has bounded backward pagination using an opaque
@@ -1331,7 +1331,7 @@ Current implementation slice:
   flat attachment path to the production server-scoped storage layout and
   server-root-relative database metadata.
   Encrypted history recovery now has a selected architecture in
-  `ENCRYPTED_HISTORY_RECOVERY.md`: explicit same-account transfer from an
+  `../security/ENCRYPTED_HISTORY_RECOVERY.md`: explicit same-account transfer from an
   existing device to a dedicated YUID-bound destination X25519 key, using a
   signed manifest and bounded resumable authenticated chunks. It preserves MLS
   pre-join secrecy and provides no server/admin recovery key. Schema 5 and its
@@ -1471,7 +1471,7 @@ ordinary join/message/session restoration.
 
 #### Milestone 1 — Durable encrypted communication
 
-Finish `PERSISTENT_CHAT.md` and `ENCRYPTED_HISTORY_RECOVERY.md` before adding
+Finish `../architecture/PERSISTENT_CHAT.md` and `../security/ENCRYPTED_HISTORY_RECOVERY.md` before adding
 new communication surfaces.
 
 - Prove encrypted-history transfer between two real devices, including source
@@ -1493,7 +1493,7 @@ handoff/security documents record exact results rather than inferred parity.
 
 #### Milestone 2 — Network, media E2EE, and screen sharing
 
-Complete `MEDIA_E2EE.md` and `SCREEN_SHARING.md` on real clients and networks.
+Complete `../security/MEDIA_E2EE.md` and `../platform/SCREEN_SHARING.md` on real clients and networks.
 
 - Prove two-client microphone, camera, screen video, and screen/system audio
   with correct keys; prove wrong/no-key and cryptor-failure paths stop media;
@@ -1516,7 +1516,7 @@ documented accurately; no security claim exceeds the verified result.
 
 #### Milestone 3 — Supported server installation and operations
 
-Complete `SERVER_PORTABILITY.md` with one canonical signed server release.
+Complete `../architecture/SERVER_PORTABILITY.md` with one canonical signed server release.
 
 - Finish real bare-metal Linux reboot, sleep/network transition, firewall,
   autostart/recovery, upgrade/rollback, backup/restore, and uninstall evidence
@@ -1560,7 +1560,7 @@ is accepted as an isolated screen or command-only prototype.
 
 #### Milestone 5 — Release candidate engineering and product readiness
 
-Finish `RELEASE_ENGINEERING.md` only after the product and security behavior is
+Finish `../maintainers/RELEASE_ENGINEERING.md` only after the product and security behavior is
 frozen for the candidate.
 
 - Freeze production version/schema/protocol numbers and publish supported-
@@ -1876,7 +1876,7 @@ real Socket.IO HTTP/1.1 WebSocket upgrade, and a reachable guarded LiveKit
 route. Focused tests exercise the complete LAN verifier, tampered identity
 signature, wrong schema, and extracted bundle inclusion. External
 reachability, forced TURN, and real media remain explicit separate gates.
-The documented read-only SSH attempt to `root@192.168.1.254` on 2026-07-28
+The documented read-only SSH attempt to `root@PRIVATE_LAN_IP` on 2026-07-28
 was denied because no approved key was available. No password was requested.
 This verifier is therefore committed but not deployed to Unraid; the repository
 is ahead of production for these operator-only files.
@@ -2150,3 +2150,5 @@ authorization, API, realtime, migration, client, and verification path exists.
 Repository code, deployed backend behavior, database schema, and client
 expectations must move together. If one of those is behind, the feature is not
 finished.
+
+[Project home](../../README.md) · [Documentation index](../README.md)

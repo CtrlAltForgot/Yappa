@@ -385,3 +385,5 @@ networking is primarily a Linux-host capability and is opt-in and limited on
 Docker Desktop, which is why Yappa cannot treat the current Linux discovery
 container as Windows parity evidence. Recheck these constraints at each
 supported tooling update.
+
+[Project home](../../README.md) · [Documentation index](../README.md) · [Self-hosting](../installation/SELF_HOSTING.md)

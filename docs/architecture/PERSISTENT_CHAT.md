@@ -178,7 +178,7 @@ contract.
   history transfer or encrypted recovery package authorized by an existing
   account device. The server may store opaque transfer material but cannot
   possess a universal history-decryption key.
-- `ENCRYPTED_HISTORY_RECOVERY.md` defines the selected same-account,
+- `../security/ENCRYPTED_HISTORY_RECOVERY.md` defines the selected same-account,
   device-assisted protocol, its dedicated YUID-bound X25519 recovery keys,
   signed manifests, resumable encrypted chunks, destination merge rules,
   fail-closed states, limits, and required evidence.
@@ -260,4 +260,6 @@ Public-release persistence requires automated and real-system evidence for:
    users across pagination, mutations, attachments, cursors, and transfers.
 
 Confirmed implementation and verification results belong here and in
-`PROJECT_PLAN.md`; security-boundary changes also belong in `SECURITY.md`.
+`../internal/PROJECT_PLAN.md`; security-boundary changes also belong in `../security/SECURITY_PLAN.md`.
+
+[Project home](../../README.md) · [Documentation index](../README.md)

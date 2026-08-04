@@ -278,3 +278,5 @@ Completion requires:
 
 Only after these gates pass may the client label calls as end-to-end encrypted
 without qualification.
+
+[Project home](../../README.md) · [Documentation index](../README.md) · [Security plan](SECURITY_PLAN.md)

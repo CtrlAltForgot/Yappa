@@ -1,11 +1,11 @@
 # Yappa Agent Instructions
 
-Before changing this repository, read `PROJECT_PLAN.md`.
+Before changing this repository, read `docs/internal/PROJECT_PLAN.md`.
 For voice, camera, desktop audio, or screen-sharing work, also read
-`SCREEN_SHARING.md`.
+`docs/platform/SCREEN_SHARING.md`.
 For authentication, networking, encryption, messages, attachments, sessions,
 storage, deployment exposure, or release-readiness work, also read
-`SECURITY.md`.
+`docs/security/SECURITY_PLAN.md`.
 
 The deployment and client/backend synchronization rules in that file are part
 of the definition of done. In particular:
@@ -22,11 +22,11 @@ of the definition of done. In particular:
 
 Keep the repository handoff documents synchronized with the implementation:
 
-- Update `PROJECT_PLAN.md` when deployment state, architecture, release scope,
+- Update `docs/internal/PROJECT_PLAN.md` when deployment state, architecture, release scope,
   backend contracts, or major priorities change.
-- Update `SCREEN_SHARING.md` whenever capture state, native dependencies,
+- Update `docs/platform/SCREEN_SHARING.md` whenever capture state, native dependencies,
   platform behavior, known defects, or the test matrix changes.
-- Update `SECURITY.md` whenever Yappa's threat model, transport, encryption,
+- Update `docs/security/SECURITY_PLAN.md` whenever Yappa's threat model, transport, encryption,
   authentication, authorization, key management, storage protection, or
   security verification changes.
 - Update `client_information.txt` whenever user-visible client behavior
@@ -34,7 +34,7 @@ Keep the repository handoff documents synchronized with the implementation:
   replace superseded entries instead of accumulating a development diary, and
   write for ordinary Yappa users rather than developers.
 - Add a focused Markdown document for another subsystem when its design or
-  operational history is too detailed for `PROJECT_PLAN.md`.
+  operational history is too detailed for `docs/internal/PROJECT_PLAN.md`.
 - Record confirmed facts and verification results, not guesses.
 - Remove or clearly mark superseded plans so a future agent does not repeat an
   abandoned approach.

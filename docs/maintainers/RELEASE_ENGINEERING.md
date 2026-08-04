@@ -88,3 +88,5 @@ Public release engineering is incomplete until:
 
 Never store a PFX, Apple certificate/private key, signing password, API token,
 notarization credential, or production environment file in this repository.
+
+[Project home](../../README.md) · [Documentation index](../README.md) · [Releasing](RELEASING.md)

@@ -8,7 +8,7 @@ changing any of those areas and update it whenever behavior or plans change.
 
 Last updated: 2026-08-02.
 
-Realtime media E2EE is specified in `MEDIA_E2EE.md` and its device registry,
+Realtime media E2EE is specified in `../security/MEDIA_E2EE.md` and its device registry,
 room-key coordination, signed envelope relay, epoch rotation, and LiveKit GCM
 activation are implemented locally. Screen video and screen/system audio use
 the same mandatory client-held room epoch key as microphone and camera media
@@ -375,3 +375,5 @@ flutter build linux --debug --no-pub
 7. Run the Windows CI release build, then validate capture and loopback audio
    on real Windows 10 2004+ and Windows 11 hardware.
 8. Reduce debug logging only after the test matrix is stable.
+
+[Project home](../../README.md) · [Documentation index](../README.md) · [Media encryption](../security/MEDIA_E2EE.md)

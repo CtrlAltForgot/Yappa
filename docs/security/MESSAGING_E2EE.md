@@ -653,3 +653,5 @@ Persisted E2EE is not complete until:
 - migration and rollback tests prove an encrypted channel cannot silently
   become plaintext;
 - an independent cryptographic review has been completed and findings fixed.
+
+[Project home](../../README.md) · [Documentation index](../README.md) · [Security plan](SECURITY_PLAN.md)
