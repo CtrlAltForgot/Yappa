@@ -318,7 +318,13 @@ void main() {
       expect(errors, isNotEmpty);
       await expectLater(
         coordinator.waitForKey(),
-        throwsA(isA<FormatException>()),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            contains('room-state verification failed'),
+          ),
+        ),
       );
       coordinator.end();
     },

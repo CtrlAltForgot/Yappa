@@ -20,6 +20,7 @@ import '../../models/voice_models.dart';
 import '../../shared/avatar_image.dart';
 import 'message_input.dart';
 import 'message_list.dart';
+import 'history_recovery_notice.dart';
 
 class ChatArea extends StatefulWidget {
   final ChatChannel channel;
@@ -40,8 +41,18 @@ class ChatArea extends StatefulWidget {
   final Future<void> Function(ChatMessage message, String content)?
   onEditMessage;
   final Future<void> Function(ChatMessage message)? onDeleteMessage;
+  final Future<void> Function()? onLoadOlderMessages;
+  final Future<void> Function()? onLoadNewerMessages;
+  final bool hasOlderMessages;
+  final bool hasNewerMessages;
+  final bool loadingOlderMessages;
+  final bool loadingNewerMessages;
   final bool canDeleteAnyMessage;
   final MlsChannelStartup? textE2eeStartup;
+  final HistoryRecoveryUiState? historyRecovery;
+  final Future<void> Function(String? destinationDeviceId)?
+  onHistoryRecoveryAction;
+  final Future<void> Function()? onCancelHistoryRecovery;
 
   final List<Member> members;
   final List<Member> voiceMembers;
@@ -102,8 +113,17 @@ class ChatArea extends StatefulWidget {
     this.onLoadLinkPreview,
     this.onEditMessage,
     this.onDeleteMessage,
+    this.onLoadOlderMessages,
+    this.onLoadNewerMessages,
+    this.hasOlderMessages = false,
+    this.hasNewerMessages = false,
+    this.loadingOlderMessages = false,
+    this.loadingNewerMessages = false,
     this.canDeleteAnyMessage = false,
     this.textE2eeStartup,
+    this.historyRecovery,
+    this.onHistoryRecoveryAction,
+    this.onCancelHistoryRecovery,
     this.members = const [],
     this.voiceMembers = const [],
     this.voiceDeckState,
@@ -195,6 +215,7 @@ class _EncryptedTextLifecycleNotice extends StatelessWidget {
 class _ChatAreaState extends State<ChatArea> {
   final GlobalKey<MessageInputState> _messageInputKey =
       GlobalKey<MessageInputState>();
+  final Map<String, GlobalKey> _messageItemKeys = {};
   final FocusNode _voiceKeyboardFocusNode = FocusNode(
     debugLabel: 'yappa_voice_keyboard_focus',
   );
@@ -202,6 +223,8 @@ class _ChatAreaState extends State<ChatArea> {
 
   bool _isDragActive = false;
   bool _isNearMessageBottom = true;
+  bool _isNearMessageTop = false;
+  bool _historyViewportShiftInProgress = false;
   int _unseenMessageCount = 0;
   bool _forceScrollToLatestOnNextMessage = false;
   Timer? _ticker;
@@ -257,13 +280,16 @@ class _ChatAreaState extends State<ChatArea> {
       _editingMessage = null;
       _unseenMessageCount = 0;
       _isNearMessageBottom = true;
+      _isNearMessageTop = false;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _scrollToLatest(jump: true);
       });
       return;
     }
 
-    if (!_isVoiceDeck && _hasIncomingMessageChange(oldWidget)) {
+    if (!_isVoiceDeck &&
+        !_historyViewportShiftInProgress &&
+        _hasIncomingMessageChange(oldWidget)) {
       final shouldForceScroll = _forceScrollToLatestOnNextMessage;
       _forceScrollToLatestOnNextMessage = false;
 
@@ -295,7 +321,9 @@ class _ChatAreaState extends State<ChatArea> {
 
   bool _hasIncomingMessageChange(ChatArea oldWidget) {
     if (widget.messages.length != oldWidget.messages.length) {
-      return true;
+      return widget.messages.isEmpty ||
+          oldWidget.messages.isEmpty ||
+          widget.messages.last.id != oldWidget.messages.last.id;
     }
 
     if (widget.messages.isEmpty || oldWidget.messages.isEmpty) {
@@ -303,6 +331,153 @@ class _ChatAreaState extends State<ChatArea> {
     }
 
     return widget.messages.last.id != oldWidget.messages.last.id;
+  }
+
+  Future<void> _loadHistoryPreservingViewport({
+    required bool older,
+    required Future<void> Function()? load,
+  }) async {
+    if (load == null || widget.messages.isEmpty) {
+      return;
+    }
+    final anchorId = _visibleHistoryAnchorId(older: older);
+    if (anchorId == null) {
+      await load();
+      return;
+    }
+    final anchorContext = _messageItemKeys[anchorId]?.currentContext;
+    final anchorBox = anchorContext?.findRenderObject() as RenderBox?;
+    final originalY = anchorBox
+        ?.localToGlobal(Offset(0, anchorBox.size.height))
+        .dy;
+
+    _historyViewportShiftInProgress = true;
+    try {
+      await load();
+      if (!mounted || originalY == null) {
+        return;
+      }
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted || !_messageScrollController.hasClients) {
+        return;
+      }
+      var updatedContext = _messageItemKeys[anchorId]?.currentContext;
+      if (updatedContext == null) {
+        final sourceIndex = widget.messages.indexWhere(
+          (message) => message.id == anchorId,
+        );
+        if (sourceIndex < 0) {
+          return;
+        }
+        final position = _messageScrollController.position;
+        final reverseIndex = widget.messages.length - 1 - sourceIndex;
+        final denominator = (widget.messages.length - 1).clamp(1, 1 << 30);
+        position.jumpTo(
+          (position.maxScrollExtent * reverseIndex / denominator).clamp(
+            position.minScrollExtent,
+            position.maxScrollExtent,
+          ),
+        );
+        await WidgetsBinding.instance.endOfFrame;
+        if (!mounted) {
+          return;
+        }
+        updatedContext = _messageItemKeys[anchorId]?.currentContext;
+      }
+      final updatedBox = updatedContext?.findRenderObject() as RenderBox?;
+      if (updatedBox == null || !updatedBox.attached) {
+        return;
+      }
+      await _restoreHistoryAnchorY(anchorId, originalY);
+    } finally {
+      _historyViewportShiftInProgress = false;
+    }
+  }
+
+  Future<void> _restoreHistoryAnchorY(String anchorId, double targetY) async {
+    for (var attempt = 0; attempt < 3; attempt += 1) {
+      if (!mounted || !_messageScrollController.hasClients) {
+        return;
+      }
+      final context = _messageItemKeys[anchorId]?.currentContext;
+      final box = context?.findRenderObject() as RenderBox?;
+      if (box == null || !box.attached) {
+        return;
+      }
+      final currentY = box.localToGlobal(Offset(0, box.size.height)).dy;
+      if ((targetY - currentY).abs() < 0.5) {
+        return;
+      }
+
+      final position = _messageScrollController.position;
+      final positiveRoom = position.maxScrollExtent - position.pixels;
+      final negativeRoom = position.pixels - position.minScrollExtent;
+      final probeDelta = positiveRoom >= 8
+          ? 8.0
+          : negativeRoom >= 8
+          ? -8.0
+          : 0.0;
+      if (probeDelta == 0) {
+        return;
+      }
+      position.jumpTo(position.pixels + probeDelta);
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) {
+        return;
+      }
+      final probeContext = _messageItemKeys[anchorId]?.currentContext;
+      final probeBox = probeContext?.findRenderObject() as RenderBox?;
+      if (probeBox == null || !probeBox.attached) {
+        return;
+      }
+      final probeY = probeBox.localToGlobal(Offset(0, probeBox.size.height)).dy;
+      final slope = (probeY - currentY) / probeDelta;
+      if (slope.abs() < 0.01) {
+        return;
+      }
+      final correctedPixels = position.pixels + ((targetY - probeY) / slope);
+      position.jumpTo(
+        correctedPixels.clamp(
+          position.minScrollExtent,
+          position.maxScrollExtent,
+        ),
+      );
+      await WidgetsBinding.instance.endOfFrame;
+    }
+  }
+
+  String? _visibleHistoryAnchorId({required bool older}) {
+    if (!_messageScrollController.hasClients) {
+      return null;
+    }
+    final viewportBox =
+        _messageScrollController.position.context.storageContext
+                .findRenderObject()
+            as RenderBox?;
+    if (viewportBox == null || !viewportBox.hasSize) {
+      return null;
+    }
+    final viewport = viewportBox.localToGlobal(Offset.zero) & viewportBox.size;
+    String? selectedId;
+    double? selectedY;
+    for (final message in widget.messages) {
+      final box =
+          _messageItemKeys[message.id]?.currentContext?.findRenderObject()
+              as RenderBox?;
+      if (box == null || !box.attached || !box.hasSize) {
+        continue;
+      }
+      final bounds = box.localToGlobal(Offset.zero) & box.size;
+      if (bounds.intersect(viewport).isEmpty) {
+        continue;
+      }
+      final y = bounds.center.dy;
+      if (selectedY == null || (older ? y < selectedY : y > selectedY)) {
+        selectedId = message.id;
+        selectedY = y;
+      }
+    }
+    return selectedId;
   }
 
   bool _isScrolledNearBottom() {
@@ -314,15 +489,27 @@ class _ChatAreaState extends State<ChatArea> {
     return (position.pixels - position.minScrollExtent) <= 36;
   }
 
+  bool _isScrolledNearTop() {
+    if (!_messageScrollController.hasClients) {
+      return false;
+    }
+
+    final position = _messageScrollController.position;
+    return (position.maxScrollExtent - position.pixels) <= 36;
+  }
+
   void _handleMessageScroll() {
     final isNearBottom = _isScrolledNearBottom();
+    final isNearTop = _isScrolledNearTop();
     if (isNearBottom == _isNearMessageBottom &&
+        isNearTop == _isNearMessageTop &&
         (!isNearBottom || _unseenMessageCount == 0)) {
       return;
     }
 
     setState(() {
       _isNearMessageBottom = isNearBottom;
+      _isNearMessageTop = isNearTop;
       if (isNearBottom) {
         _unseenMessageCount = 0;
       }
@@ -876,6 +1063,16 @@ class _ChatAreaState extends State<ChatArea> {
                   ),
                 )
               else ...[
+                if (widget.hasOlderMessages)
+                  _HistoryPager(
+                    loading: widget.loadingOlderMessages,
+                    enabledAtBoundary: _isNearMessageTop,
+                    direction: 'older',
+                    onLoad: () => _loadHistoryPreservingViewport(
+                      older: true,
+                      load: widget.onLoadOlderMessages,
+                    ),
+                  ),
                 Expanded(
                   child: Stack(
                     clipBehavior: Clip.none,
@@ -885,6 +1082,7 @@ class _ChatAreaState extends State<ChatArea> {
                           messages: widget.messages,
                           members: widget.members,
                           controller: _messageScrollController,
+                          messageItemKeys: _messageItemKeys,
                           previewLoader: widget.onLoadLinkPreview,
                           currentUserId: widget.currentUserId,
                           canDeleteAnyMessage: widget.canDeleteAnyMessage,
@@ -917,9 +1115,29 @@ class _ChatAreaState extends State<ChatArea> {
                     ],
                   ),
                 ),
+                if (widget.hasNewerMessages)
+                  _HistoryPager(
+                    loading: widget.loadingNewerMessages,
+                    enabledAtBoundary: _isNearMessageBottom,
+                    direction: 'newer',
+                    onLoad: () => _loadHistoryPreservingViewport(
+                      older: false,
+                      load: widget.onLoadNewerMessages,
+                    ),
+                  ),
                 if (widget.channel.encryptionMode == ChannelEncryptionMode.e2ee)
                   _EncryptedTextLifecycleNotice(
                     startup: widget.textE2eeStartup,
+                  ),
+                if (widget.channel.encryptionMode ==
+                        ChannelEncryptionMode.e2ee &&
+                    widget.textE2eeStartup?.readiness ==
+                        MlsChannelReadiness.ready &&
+                    widget.historyRecovery != null)
+                  HistoryRecoveryNotice(
+                    state: widget.historyRecovery!,
+                    onAction: widget.onHistoryRecoveryAction,
+                    onCancel: widget.onCancelHistoryRecovery,
                   ),
                 if (widget.channel.encryptionMode !=
                         ChannelEncryptionMode.e2ee ||
@@ -1071,6 +1289,59 @@ class _ChatAreaState extends State<ChatArea> {
               ),
             )
           : content,
+    );
+  }
+}
+
+class _HistoryPager extends StatelessWidget {
+  final bool loading;
+  final bool enabledAtBoundary;
+  final String direction;
+  final Future<void> Function()? onLoad;
+
+  const _HistoryPager({
+    required this.loading,
+    required this.enabledAtBoundary,
+    required this.direction,
+    required this.onLoad,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      liveRegion: true,
+      label:
+          '${direction[0].toUpperCase()}${direction.substring(1)} messages '
+          'are available',
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        color: NewChatColors.background,
+        alignment: Alignment.center,
+        child: TextButton.icon(
+          onPressed: loading || !enabledAtBoundary || onLoad == null
+              ? null
+              : () => onLoad!(),
+          icon: loading
+              ? const SizedBox.square(
+                  dimension: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Icon(
+                  direction == 'older'
+                      ? Icons.history_rounded
+                      : Icons.update_rounded,
+                  size: 18,
+                ),
+          label: Text(
+            loading
+                ? 'Loading $direction messages…'
+                : enabledAtBoundary
+                ? 'Load $direction messages'
+                : 'Scroll to the $direction edge to continue',
+          ),
+        ),
+      ),
     );
   }
 }

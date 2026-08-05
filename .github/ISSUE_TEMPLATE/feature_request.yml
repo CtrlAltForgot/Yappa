@@ -1,0 +1,43 @@
+name: Feature request
+description: Propose a focused improvement to Yappa
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+    validations:
+      required: true
+  - type: textarea
+    id: experience
+    attributes:
+      label: Proposed user experience
+    validations:
+      required: true
+  - type: textarea
+    id: insufficient
+    attributes:
+      label: Why is current behavior insufficient?
+    validations:
+      required: true
+  - type: checkboxes
+    id: areas
+    attributes:
+      label: Areas affected
+      options:
+        - label: Client
+        - label: Server
+        - label: Voice/video
+        - label: Screen sharing
+        - label: Deployment
+        - label: Security/privacy
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: textarea
+    id: self_hosting
+    attributes:
+      label: Self-hosting impact
+      description: Consider configuration, storage, networking, migration, and operator complexity.

@@ -28,6 +28,22 @@ Keep the matching Yappa source/image revision with the backup. Do not copy a
 live SQLite file independently of its WAL; use the supplied backup command,
 which pauses the application backend and includes the complete `data/` tree.
 
+The Linux lifecycle performs this sequence with:
+
+```bash
+./install-yappa.sh upgrade \
+  --local-bundle /path/yappa-server-VERSION.tar.gz \
+  --sha256 FULL_LOWERCASE_SHA256 \
+  --backup /secure/path/yappa-before-upgrade-YYYY-MM-DD.tar.gz.age
+```
+
+It first verifies the running installation, creates and independently verifies
+the encrypted backup, stops the stack, installs the checksum-pinned candidate
+beside the active directory, copies the stopped state, checks its path, schema,
+and SQLite integrity, then swaps directory names. The candidate must start and
+pass operational verification. Otherwise, Yappa restores and verifies the
+previous installation and retains the failed candidate for investigation.
+
 ## Rollback
 
 Never point an older binary at a database that a newer version migrated. A
@@ -47,6 +63,21 @@ Do not merge selected tables from different schema versions. An encrypted
 channel also cannot be rolled back in place to plaintext; restoring an older
 whole-server backup intentionally loses all activity after that backup.
 
+After a lifecycle upgrade, the pre-upgrade installation is retained as the
+adjacent `.rollback` directory. An explicit rollback first backs up and
+verifies the newer state, then swaps back and requires the older installation
+to start and pass operational verification:
+
+```bash
+./install-yappa.sh rollback \
+  --backup /secure/path/yappa-before-rollback-YYYY-MM-DD.tar.gz.age
+```
+
+The newer installation is retained as `.pre-rollback`, so post-upgrade
+activity is not silently deleted. Rollback intentionally makes the older
+snapshot active; reconcile or restore newer activity only through a separately
+reviewed recovery procedure, never by merging databases.
+
 ## Requirements for future migrations
 
 Every schema change must:
@@ -59,7 +90,7 @@ Every schema change must:
 - include a fixture beginning at the previous schema version;
 - test successful data preservation, failure rollback, and rejection by an
   older supported-version boundary;
-- update `PROJECT_PLAN.md`, `SECURITY.md`, this document, and deployment
+- update `../docs/internal/PROJECT_PLAN.md`, `../docs/security/SECURITY_PLAN.md`, this document, and deployment
   release notes;
 - be deployed only after an encrypted pre-upgrade backup is created and
   restorable.
@@ -87,6 +118,32 @@ version-2 fixture proves the binding fields are preserved by the additive
 backfill. Rollback to schema 2 requires the normal complete pre-upgrade
 restore.
 
+Schema version `4` establishes indefinite chat-attachment retention as the
+only public-release policy. It changes fresh-server retention to `0`, resets
+existing server settings to `0`, and clears `expires_at` from every active
+ordinary and encrypted attachment so previously scheduled cleanup cannot
+silently remove chat history after upgrade. Explicitly deleted rows remain
+deleted and are not resurrected. A version-3 fixture proves the setting and
+active attachment are preserved while their implicit expiry is removed.
+Rollback to schema 3 requires the normal complete pre-upgrade restore; opening
+the migrated database with a schema-3 binary is forbidden.
+
+Schema 5 adds `history_recovery_device_keys`, a dedicated, YUID-authorized
+X25519 public-key directory for explicit same-account encrypted-history
+recovery. It contains no recovery private keys, transferred history, or
+plaintext.
+
+Schema 6 adds `history_recovery_transfers` and
+`history_recovery_transfer_chunks` for bounded opaque same-account
+device-assisted recovery delivery. The backend stores routing/range metadata,
+the signed manifest, hashes, and ciphertext chunks only. Source and destination
+authorization, exact-retry conflict detection, finalization, expiry,
+cancellation, and consumption are enforced by the API.
+
+The distributable install manifest must equal the backend's current schema.
+Upgrade, fresh-restore, and install verification fail closed for the next
+unknown schema until a matching backend migration is shipped.
+
 The production Unraid database migrated from version 1 to version 2 on
 2026-07-24 after its encrypted pre-upgrade archive checksum was verified.
 Post-migration inspection confirmed schema 2, the operation column and index,
@@ -100,9 +157,17 @@ and preservation of one user, ten legacy messages, and zero MLS deliveries.
 The backend health check passed and the container remained UID/GID 1000 with
 `no-new-privileges`.
 
+Schema version 4 has not been deployed to production because approved Unraid
+access is unavailable. Deployment requires the normal encrypted, verified
+pre-upgrade backup and post-migration checks for schema version, zero active
+attachment expiries, preserved attachment rows/files, SQLite integrity, and
+backend health.
+
 On 2026-07-24, the production schema-3 installation completed a real
 passphrase-encrypted backup with checksum-verified `age` v1.3.1 and the bundled
 isolated restore verifier. SQLite integrity, schema version 3, one user, ten
 legacy messages, the required `.env`, and the persistent server identity all
 passed. The verifier removed its restored copy, no partial backup remained,
 and the production backend automatically resumed healthy.
+
+[Project home](../README.md) · [Documentation index](../docs/README.md) · [Server overview](README.md)

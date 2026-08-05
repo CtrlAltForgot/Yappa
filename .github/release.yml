@@ -1,0 +1,13 @@
+changelog:
+  exclude:
+    labels:
+      - blocked
+  categories:
+    - title: User-visible changes
+      labels: [enhancement, client, server, voice-video, screen-sharing]
+    - title: Fixes
+      labels: [bug]
+    - title: Documentation and maintenance
+      labels: [documentation]
+    - title: Other changes
+      labels: ["*"]

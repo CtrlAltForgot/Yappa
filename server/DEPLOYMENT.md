@@ -4,6 +4,262 @@ The server bundle includes the application backend, LiveKit, and Caddy. Caddy
 is the only reverse proxy required and stores its automatically managed
 certificates in the persistent `caddy_data` Docker volume.
 
+## Development install entry point
+
+The locally present development server tree now has one Linux lifecycle front
+end:
+
+```bash
+./install-yappa.sh preflight
+./install-yappa.sh install --local-source
+```
+
+Use `--lan` after `--local-source` for private-network-only development. The
+preflight checks the current x86-64, memory, disk, Docker Compose, backup, and
+restore prerequisites before startup. It also dispatches `start`, `stop`,
+`status`, `logs`, `backup`, `restore`, `verify`, and `verify-backup` to the
+implemented hardened operations.
+
+This is not a remote public installer. `install-manifest.json` is explicitly
+an unpublished development manifest: it has no artifact URL, checksum,
+signature, release-validated host, client command-generation permission, or
+client-supervision permission. The wrapper requires an explicit
+`--local-source` flag and otherwise fails closed. Do not copy a command from a
+development checkout and describe it as a supported one-click install.
+
+`Install-Yappa.ps1` now runs preflight and the implemented canonical lifecycle
+inside one explicit WSL2 distribution. Development install/restore requires a
+local bundle, full SHA-256, and a new absolute Linux path outside `/mnt`; later
+commands require that same `-InstallDirectory`. Windows bundle and encrypted
+backup paths are converted without shell-string interpolation. This remains an
+unpublished bridge contract, not Windows support: real WSL2 Docker operation,
+Windows service and firewall integration, signed artifacts, and the Windows
+11/Windows Server conformance matrices are still required.
+
+## Development server bundle
+
+Release CI builds the canonical server tree with:
+
+```bash
+.github/scripts/build-server-bundle.sh
+```
+
+The script stages an explicit runtime allowlist, creates normalized build
+metadata containing the development version, full source commit, and source
+timestamp, and emits a deterministic `tar.gz` plus a SHA-256 file under
+`dist/server/`. Ownership, order, timestamps, and gzip headers are normalized.
+It refuses overwrite and rejects generated `.env`, LiveKit credentials,
+databases, data, backups, dependencies, tests, and common private-key/token
+markers. Before archiving, it also verifies that every relative CommonJS
+dependency required by the staged JavaScript sources exists inside the staged
+source tree. The backend suite builds the same inputs twice and requires
+byte-identical output, verifies the checksum and metadata, extracts the bundle,
+repeats the runtime-closure check, proves a missing local module is rejected,
+and executes its non-mutating installer help path.
+
+The checksum is an integrity input, not release authenticity. This development
+bundle is unsigned and the install manifest remains unpublished. A public
+release still requires a detached signature, SBOM, trusted provenance, and
+release-manifest publication from the tagged commit.
+
+For local development testing, an already-built bundle can be installed into
+a new private directory without merging into an existing server:
+
+```bash
+./install-yappa.sh install \
+  --local-bundle /path/yappa-server-0.1.0-dev.tar.gz \
+  --sha256 FULL_LOWERCASE_SHA256 \
+  --install-dir /absolute/new/yappa-server
+```
+
+The installer verifies the digest before extraction, requires one matching
+versioned archive root and build metadata, rejects traversal, links and special
+files, refuses every existing destination, and sets the new root to mode
+`0700`. It then runs the normal preflight and starts the installed server.
+`--no-start` exists for isolated packaging/conformance tests and leaves an
+explicitly unverified runtime state. A failed checksum or unsafe bundle creates
+no install directory.
+
+## Verify a running installation
+
+Run:
+
+```bash
+./install-yappa.sh verify
+```
+
+This is operational verification, not backup verification. It requires:
+
+- mode `0600` configuration and persistent identity plus mode `0700` data;
+- the database inside the data root at the manifest schema with SQLite
+  `quick_check` success;
+- writable persistent storage and exactly one server identity;
+- all four canonical services running and a healthy backend container;
+- a cryptographically valid Ed25519 identity proof from the backend;
+- matching identity through the configured LAN route or certificate-verified
+  public HTTPS route;
+- a successful Socket.IO WebSocket upgrade through Caddy; and
+- a guarded 4xx response from the LiveKit `/rtc` route, proving it reached the
+  media service instead of a dead reverse-proxy target.
+
+The verifier prints no private key, credential, database path, or server
+configuration. It explicitly leaves outside-network reachability, forced TURN,
+and real media calls to the release conformance matrix because those cannot be
+proved from inside the host.
+
+Encrypted backup restore inspection is a separate command:
+
+```bash
+./install-yappa.sh verify-backup /path/yappa-backup.tar.gz.age
+```
+
+To restore a backup with a checksum-pinned local bundle, choose a new absolute
+destination whose parent already exists:
+
+```bash
+./install-yappa.sh restore \
+  --backup /secure/path/yappa-backup-YYYY-MM-DD.tar.gz.age \
+  --local-bundle /path/yappa-server-0.1.0-dev.tar.gz \
+  --sha256 FULL_LOWERCASE_SHA256 \
+  --install-dir /absolute/new/yappa-server
+```
+
+Restore decrypts directly into a private assembly directory, validates the
+bundle before combining it with state, rejects links and special files,
+requires `.env`, the configured single database, and one persistent identity,
+and runs SQLite integrity and schema checks. It never writes a plaintext
+archive or merges into an existing destination. The completed installation is
+renamed into place and left stopped so its network configuration can be
+reviewed before `install-yappa.sh start`.
+
+## Upgrade and rollback
+
+Upgrade only from a healthy initialized installation and choose a new
+encrypted-backup path:
+
+```bash
+./install-yappa.sh upgrade \
+  --local-bundle /path/yappa-server-VERSION.tar.gz \
+  --sha256 FULL_LOWERCASE_SHA256 \
+  --backup /secure/path/yappa-before-upgrade.tar.gz.age
+```
+
+Yappa verifies the current server and encrypted recovery point, copies stopped
+state into a checksum-pinned candidate, checks the database path, schema, and
+integrity, then switches directory names. The candidate must start and pass
+the operational verifier. A failed candidate is retained as
+`.failed-upgrade`, while the previous installation is restored and verified.
+A successful upgrade retains the previous installation as `.rollback`.
+
+To deliberately return to that snapshot:
+
+```bash
+./install-yappa.sh rollback \
+  --backup /secure/path/yappa-before-rollback.tar.gz.age
+```
+
+Rollback first encrypts and verifies the newer state, then activates and
+verifies the older installation. The newer directory is retained as
+`.pre-rollback`. Activity created after the upgrade is therefore preserved but
+is not present in the active older snapshot. Never merge the two databases.
+
+## Data-preserving uninstall
+
+Uninstall requires two new absolute destinations and preserves server state by
+default:
+
+```bash
+./install-yappa.sh uninstall \
+  --backup /secure/path/yappa-before-uninstall.tar.gz.age \
+  --preserve-data /secure/path/yappa-preserved-state
+```
+
+The command verifies the running installation, creates and verifies an
+encrypted backup, stops the stack, copies `.env` and `data/` into a private
+preservation directory, then removes the active runtime. It refuses overwrite
+and refuses to proceed while `.rollback`, `.pre-rollback`, or
+`.failed-upgrade` installations remain unresolved. A placement failure restores
+and restarts the original installation. The preservation directory is not
+directly runnable; restore it only through a checksum-pinned bundle.
+
+## Explicit sign-in autostart on systemd Linux
+
+On a Linux desktop with a working per-user systemd manager, an unprivileged
+operator may explicitly opt into visible sign-in autostart:
+
+```bash
+./install-yappa.sh service-install
+./install-yappa.sh service-status
+./install-yappa.sh service-remove
+```
+
+Registration refuses root, writes a mode-`0600` unit under the current user's
+`systemd/user` configuration, and calls only `systemctl --user`. The unit
+starts the canonical lifecycle, requires operational verification before
+systemd considers startup successful, and stops the stack when disabled.
+Removal leaves all server data intact. It does not enable user lingering,
+change the firewall, or request privilege; therefore it starts at user sign-in
+rather than claiming unattended boot support.
+
+Every canonical container has `restart: unless-stopped`, so Docker restarts a
+container whose process exits unexpectedly and restores it after Docker daemon
+restart. Yappa also records whether the last lifecycle request was `running`
+or `stopped` in private host-local state. `install-yappa.sh recover` does
+nothing after an intentional stop. When running was requested, it acquires a
+single-instance lock, checks the canonical services and backend health, makes
+at most one Compose recovery, waits through twelve bounded verification
+attempts, and requires the full operational verifier. Three consecutive
+failures trigger a 15-minute cooldown.
+
+The explicit user-service registration includes a hardened one-minute systemd
+timer for that bounded recovery command. This catches exited, missing, and
+unhealthy services after ordinary crashes or a resumed user session without
+creating an infinite restart loop. Removal deletes the main unit, timer,
+recovery unit, and registration together. Real sleep, network transition, and
+distribution-specific systemd conformance remain release work.
+
+The development runtime contract now boots real per-user systemd managers on
+Ubuntu 24.04, Debian 13, Fedora 44, and Rocky Linux 10 in disposable isolated
+containers. It verifies paths containing spaces and refuses to report
+registration success unless both the server unit and recovery timer become
+active. Bare-metal boot, sleep/network transitions, and full Docker workload
+recovery remain release gates.
+
+## Explicit host firewall lifecycle
+
+Preview firewall changes as an ordinary user before authorizing anything:
+
+```bash
+./install-yappa.sh firewall-plan --backend ufw
+./install-yappa.sh firewall-plan \
+  --backend firewalld \
+  --lan-cidr 192.168.1.0/24
+```
+
+LAN mode requires an explicit IPv4 CIDR and scopes every rule to it. Public
+mode opens only the configured HTTP/HTTPS, authenticated TURN, ICE/TCP, and
+media UDP range; optional signed LAN discovery is CIDR-scoped. Raw backend
+TCP `4100`, raw LiveKit TCP `7880`, the LAN-only proxy outside LAN mode, and
+loopback discovery UDP `41201` are never opened.
+
+Application/removal are separate explicit root actions:
+
+```bash
+./install-yappa.sh firewall-apply \
+  --backend ufw \
+  --lan-cidr 192.168.1.0/24
+./install-yappa.sh firewall-remove
+```
+
+The script never invokes `sudo`, asks for a password, enables UFW, starts
+firewalld, changes default policy, or touches unrelated rules. It refuses a
+requested rule that already exists because ownership would be ambiguous,
+rolls back partial application, and records exact owned rules in a
+root-owned mode-`0600` file under mode-`0700` `/var/lib/yappa`. A non-secret
+local marker prevents uninstall until rules are removed. Host-local service
+and firewall state is excluded from encrypted portable backups and bundles;
+it is preserved only across same-host upgrades.
+
 ## Start a public server
 
 Run:
@@ -21,7 +277,9 @@ that literal IP; no DNS name or DNS account is required. API, Socket.IO, and
 LiveKit signaling share TCP `443`.
 
 The startup and custom-domain scripts use a private process umask and enforce
-mode `0600` on `.env` and the generated `livekit.yaml`. The repository does not
+mode `0600` on `.env`. The generated `livekit.yaml` is mode `0640` beneath the
+mode-`0700` installation root so only the installation owner and the explicitly
+supplemented LiveKit runtime group can read it. The repository does not
 ship a runnable LiveKit configuration with shared development credentials;
 `livekit.yaml` is created only from the installation's generated `.env`.
 
@@ -141,8 +399,9 @@ expected `.env`, database, and persistent server identity, runs SQLite's
 integrity check, prints only schema and row counts, and removes the restored
 copy on success or failure. It never writes a plaintext archive.
 
-Restore only into an empty, access-controlled server directory after stopping
-the stack:
+Prefer the fresh-install restore lifecycle above. For an older source-tree
+installation without that command, restore only into an empty,
+access-controlled server directory after stopping the stack:
 
 ```bash
 age --decrypt /secure/path/yappa-backup-YYYY-MM-DD.tar.gz.age | tar -xzf - -C /path/to/empty/yappa
@@ -166,11 +425,17 @@ refuses a database created by newer code. Rolling software back requires
 restoring the matching pre-upgrade `.env` and `data/` backup into an empty
 directory; never run an older image against an upgraded database.
 
-The packaged backend runs as unprivileged UID/GID `1000:1000`; the startup
-script creates, owns, and restricts `data/` for that account. All three
+The packaged backend and discovery relay run as the unprivileged numeric
+UID/GID of the installation owner; startup verifies and restricts `data/` for
+that account without requiring a privileged `chown`. All four
 containers use read-only root filesystems, bounded `noexec,nosuid,nodev`
 temporary mounts, dropped Linux capabilities, and `no-new-privileges`.
-Only Caddy and LiveKit regain `NET_BIND_SERVICE` for their intentional
-low-numbered listeners. The backend image contains production dependencies and
+Only Caddy and LiveKit regain `NET_BIND_SERVICE` for intentional low-numbered
+listeners. LiveKit is an explicit root exception for host-network TURN/UDP
+443, but has no writable host-data mount; its root is read-only and its only
+supplementary group can read mode-`0640` `livekit.yaml` beneath the private
+installation root. The backend image contains production dependencies and
 runtime source only, and its build context excludes secrets, data, databases,
 backups, tests, and host `node_modules`.
+
+[Project home](../README.md) · [Documentation index](../docs/README.md) · [Server overview](README.md)

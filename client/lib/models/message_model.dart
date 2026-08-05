@@ -168,6 +168,24 @@ class ChatReaction {
   }
 }
 
+class MessageHistoryPage {
+  final List<ChatMessage> messages;
+  final String direction;
+  final bool hasMore;
+  final String? nextCursor;
+  final String? forwardCursor;
+  final String? backwardCursor;
+
+  const MessageHistoryPage({
+    required this.messages,
+    required this.direction,
+    required this.hasMore,
+    required this.nextCursor,
+    required this.forwardCursor,
+    required this.backwardCursor,
+  });
+}
+
 class ChatMessage {
   final String id;
   final String channelId;

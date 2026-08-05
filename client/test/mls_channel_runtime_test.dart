@@ -108,7 +108,8 @@ Uint8List _decode(String value) => Uint8List.fromList(
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  final supportsNative = Platform.isLinux || Platform.isWindows;
+  final supportsNative =
+      Platform.isLinux || Platform.isWindows || Platform.isMacOS;
 
   test(
     'owner creates only newly allocated state and persists founder cursor',

@@ -5,6 +5,17 @@ umask 077
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 cd "$ROOT_DIR"
 
+RUNTIME_UID="$(id -u)"
+RUNTIME_GID="$(id -g)"
+if [[ "$RUNTIME_UID" == "0" ]]; then
+  echo "Yappa server startup must run as an unprivileged installation owner." >&2
+  exit 1
+fi
+if [[ "$(stat -c '%u' "$ROOT_DIR")" != "$RUNTIME_UID" ]]; then
+  echo "Yappa server startup must run as the installation owner." >&2
+  exit 1
+fi
+
 random_string() {
   local len="$1"
   local out
@@ -95,6 +106,8 @@ LIVEKIT_SITE_ADDRESS=${INITIAL_LIVEKIT_SITE}
 YAPPA_HTTP_PORT=80
 YAPPA_HTTPS_PORT=443
 YAPPA_LIVEKIT_PROXY_PORT=7882
+YAPPA_RUNTIME_UID=${RUNTIME_UID}
+YAPPA_RUNTIME_GID=${RUNTIME_GID}
 SERVER_NAME="Default"
 SERVER_DESCRIPTION="Description"
 DB_PATH=./data/newchat.db
@@ -133,6 +146,8 @@ SESSION_ABSOLUTE_TTL_MS=2592000000
 SESSION_IDLE_TTL_MS=604800000
 ATTACHMENT_URL_TTL_SECONDS=900
 ATTACHMENT_SIGNING_SECRET=${ATTACHMENT_SECRET}
+DURABLE_STORAGE_CRITICAL_FREE_BYTES=536870912
+DURABLE_STORAGE_WARNING_FREE_BYTES=2147483648
 LAN_DISCOVERY_ENABLED=true
 LIVEKIT_SIGNAL_PORT=7880
 LIVEKIT_TCP_PORT=7881
@@ -151,9 +166,14 @@ ENVEOF
   echo "Created .env with fresh server credentials."
 fi
 chmod 600 .env
-mkdir -p data
-chown -R 1000:1000 data
+mkdir -p -m 700 data
+if [[ "$(stat -c '%u:%g' data)" != "$RUNTIME_UID:$RUNTIME_GID" ]]; then
+  echo "Yappa data must be owned by the installation owner." >&2
+  exit 1
+fi
 chmod 700 data
+set_env_value YAPPA_RUNTIME_UID "$RUNTIME_UID"
+set_env_value YAPPA_RUNTIME_GID "$RUNTIME_GID"
 
 # The raw application port is an internal maintenance path. Public and LAN
 # clients must enter through Caddy so transport and routing policy are applied.
@@ -234,7 +254,7 @@ turn:
 keys:
   ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
 EOF2
-chmod 600 livekit.yaml
+chmod 640 livekit.yaml
 
 echo "Wrote livekit.yaml from .env."
 docker compose up -d --build

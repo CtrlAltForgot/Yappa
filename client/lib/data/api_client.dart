@@ -127,6 +127,238 @@ class YuidChallenge {
   }
 }
 
+class HistoryRecoveryDeviceKey {
+  final String deviceId;
+  final String publicKey;
+  final String yuidAuthorizationSignature;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  const HistoryRecoveryDeviceKey({
+    required this.deviceId,
+    required this.publicKey,
+    required this.yuidAuthorizationSignature,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  factory HistoryRecoveryDeviceKey.fromJson(Map<String, dynamic> json) {
+    final deviceId = json['deviceId']?.toString() ?? '';
+    final publicKey = json['publicKey']?.toString() ?? '';
+    final signature = json['yuidAuthorizationSignature']?.toString() ?? '';
+    final createdAt = DateTime.tryParse(json['createdAt']?.toString() ?? '');
+    final updatedAt = DateTime.tryParse(json['updatedAt']?.toString() ?? '');
+    if (!RegExp(r'^device_[A-Za-z0-9_-]{24}$').hasMatch(deviceId) ||
+        !RegExp(r'^[A-Za-z0-9_-]{43}$').hasMatch(publicKey) ||
+        !RegExp(r'^[A-Za-z0-9_-]{86}$').hasMatch(signature) ||
+        createdAt == null ||
+        updatedAt == null) {
+      throw const FormatException('Invalid history recovery device key.');
+    }
+    return HistoryRecoveryDeviceKey(
+      deviceId: deviceId,
+      publicKey: publicKey,
+      yuidAuthorizationSignature: signature,
+      createdAt: createdAt,
+      updatedAt: updatedAt,
+    );
+  }
+}
+
+class HistoryRecoveryKeyDirectory {
+  final String accountYuid;
+  final List<HistoryRecoveryDeviceKey> keys;
+
+  const HistoryRecoveryKeyDirectory({
+    required this.accountYuid,
+    required this.keys,
+  });
+}
+
+enum HistoryRecoveryTransferState {
+  uploading,
+  ready,
+  consumed,
+  canceled,
+  expired;
+
+  static HistoryRecoveryTransferState parse(dynamic value) {
+    return values.firstWhere(
+      (state) => state.name == value,
+      orElse: () =>
+          throw const FormatException('Invalid history recovery state.'),
+    );
+  }
+}
+
+class HistoryRecoveryTransfer {
+  final String id;
+  final String channelId;
+  final String sourceDeviceId;
+  final String destinationDeviceId;
+  final int firstServerSequence;
+  final int lastServerSequence;
+  final int eventCount;
+  final int chunkCount;
+  final int totalBytes;
+  final Uint8List? manifest;
+  final String manifestSha256;
+  final String yuidSignature;
+  final HistoryRecoveryTransferState state;
+  final int uploadedChunks;
+  final int uploadedBytes;
+  final DateTime createdAt;
+  final DateTime? readyAt;
+  final DateTime? consumedAt;
+  final DateTime? canceledAt;
+  final DateTime expiresAt;
+
+  const HistoryRecoveryTransfer({
+    required this.id,
+    required this.channelId,
+    required this.sourceDeviceId,
+    required this.destinationDeviceId,
+    required this.firstServerSequence,
+    required this.lastServerSequence,
+    required this.eventCount,
+    required this.chunkCount,
+    required this.totalBytes,
+    required this.manifest,
+    required this.manifestSha256,
+    required this.yuidSignature,
+    required this.state,
+    required this.uploadedChunks,
+    required this.uploadedBytes,
+    required this.createdAt,
+    required this.readyAt,
+    required this.consumedAt,
+    required this.canceledAt,
+    required this.expiresAt,
+  });
+
+  factory HistoryRecoveryTransfer.fromJson(
+    Map<String, dynamic> json, {
+    bool requireManifest = true,
+  }) {
+    DateTime? date(dynamic value) =>
+        value == null ? null : DateTime.tryParse(value.toString())?.toUtc();
+    Uint8List? manifest;
+    final encodedManifest = json['manifest'];
+    if (encodedManifest != null) {
+      final text = encodedManifest.toString();
+      manifest = Uint8List.fromList(
+        base64Url.decode(
+          text.padRight(text.length + ((4 - text.length % 4) % 4), '='),
+        ),
+      );
+    }
+    final id = json['id']?.toString() ?? '';
+    final channelId = json['channelId']?.toString() ?? '';
+    final sourceDeviceId = json['sourceDeviceId']?.toString() ?? '';
+    final destinationDeviceId = json['destinationDeviceId']?.toString() ?? '';
+    final first = json['firstServerSequence'];
+    final last = json['lastServerSequence'];
+    final eventCount = json['eventCount'];
+    final chunkCount = json['chunkCount'];
+    final totalBytes = json['totalBytes'];
+    final uploadedChunks = json['uploadedChunks'];
+    final uploadedBytes = json['uploadedBytes'];
+    final manifestSha256 = json['manifestSha256']?.toString() ?? '';
+    final signature = json['yuidSignature']?.toString() ?? '';
+    final createdAt = date(json['createdAt']);
+    final readyAt = date(json['readyAt']);
+    final consumedAt = date(json['consumedAt']);
+    final canceledAt = date(json['canceledAt']);
+    final expiresAt = date(json['expiresAt']);
+    if (!RegExp(r'^recovery_[A-Za-z0-9_-]{22}$').hasMatch(id) ||
+        (int.tryParse(channelId) ?? 0) < 1 ||
+        !RegExp(r'^device_[A-Za-z0-9_-]{24}$').hasMatch(sourceDeviceId) ||
+        !RegExp(r'^device_[A-Za-z0-9_-]{24}$').hasMatch(destinationDeviceId) ||
+        sourceDeviceId == destinationDeviceId ||
+        first is! int ||
+        first < 1 ||
+        last is! int ||
+        last < first ||
+        eventCount is! int ||
+        eventCount < 1 ||
+        eventCount > last - first + 1 ||
+        chunkCount is! int ||
+        chunkCount < 1 ||
+        chunkCount > 1024 ||
+        totalBytes is! int ||
+        totalBytes < chunkCount ||
+        totalBytes > 256 * 1024 * 1024 ||
+        uploadedChunks is! int ||
+        uploadedChunks < 0 ||
+        uploadedChunks > chunkCount ||
+        uploadedBytes is! int ||
+        uploadedBytes < 0 ||
+        uploadedBytes > totalBytes ||
+        (requireManifest && (manifest == null || manifest.isEmpty)) ||
+        (manifest?.length ?? 0) > 64 * 1024 ||
+        !RegExp(r'^[a-f0-9]{64}$').hasMatch(manifestSha256) ||
+        !RegExp(r'^[A-Za-z0-9_-]{86}$').hasMatch(signature) ||
+        createdAt == null ||
+        expiresAt == null) {
+      throw const FormatException('Invalid history recovery transfer.');
+    }
+    final state = HistoryRecoveryTransferState.parse(json['state']);
+    if ((state == HistoryRecoveryTransferState.ready && readyAt == null) ||
+        (state == HistoryRecoveryTransferState.consumed &&
+            consumedAt == null) ||
+        (state == HistoryRecoveryTransferState.canceled &&
+            canceledAt == null)) {
+      throw const FormatException('Invalid history recovery lifecycle.');
+    }
+    return HistoryRecoveryTransfer(
+      id: id,
+      channelId: channelId,
+      sourceDeviceId: sourceDeviceId,
+      destinationDeviceId: destinationDeviceId,
+      firstServerSequence: first,
+      lastServerSequence: last,
+      eventCount: eventCount,
+      chunkCount: chunkCount,
+      totalBytes: totalBytes,
+      manifest: manifest,
+      manifestSha256: manifestSha256,
+      yuidSignature: signature,
+      state: state,
+      uploadedChunks: uploadedChunks,
+      uploadedBytes: uploadedBytes,
+      createdAt: createdAt,
+      readyAt: readyAt,
+      consumedAt: consumedAt,
+      canceledAt: canceledAt,
+      expiresAt: expiresAt,
+    );
+  }
+}
+
+class HistoryRecoveryTransferResult {
+  final bool changed;
+  final HistoryRecoveryTransfer transfer;
+
+  const HistoryRecoveryTransferResult({
+    required this.changed,
+    required this.transfer,
+  });
+}
+
+class HistoryRecoveryChunk {
+  final String transferId;
+  final int chunkIndex;
+  final Uint8List ciphertext;
+  final String ciphertextSha256;
+
+  const HistoryRecoveryChunk({
+    required this.transferId,
+    required this.chunkIndex,
+    required this.ciphertext,
+    required this.ciphertextSha256,
+  });
+}
+
 class SessionBundle {
   final ChatServer server;
   final List<ChatChannel> channels;
@@ -268,7 +500,7 @@ class ServerSettings {
 
     return ServerSettings(
       attachmentRetentionDays:
-          (json['attachmentRetentionDays'] as num?)?.toInt() ?? 30,
+          (json['attachmentRetentionDays'] as num?)?.toInt() ?? 0,
       attachmentMaxBytes:
           (json['attachmentMaxBytes'] as num?)?.toInt() ?? 26214400,
       attachmentAllowedTypes:
@@ -288,6 +520,57 @@ class ServerSettings {
           json['inlineMediaPreviewsEnabled'] as bool? ?? true,
       createdAt: parseOptionalDate(json['createdAt']),
       updatedAt: parseOptionalDate(json['updatedAt']),
+    );
+  }
+}
+
+class ServerStorageStatus {
+  final String status;
+  final bool acceptsDurableWrites;
+  final int availableBytes;
+  final int totalBytes;
+  final int warningFreeBytes;
+  final int criticalFreeBytes;
+  final int databaseBytes;
+  final int ordinaryAttachmentBytes;
+  final int encryptedAttachmentBytes;
+  final int? backupBytes;
+  final bool backupMonitoringEnabled;
+
+  const ServerStorageStatus({
+    required this.status,
+    required this.acceptsDurableWrites,
+    required this.availableBytes,
+    required this.totalBytes,
+    required this.warningFreeBytes,
+    required this.criticalFreeBytes,
+    required this.databaseBytes,
+    required this.ordinaryAttachmentBytes,
+    required this.encryptedAttachmentBytes,
+    required this.backupBytes,
+    required this.backupMonitoringEnabled,
+  });
+
+  factory ServerStorageStatus.fromJson(Map<String, dynamic> json) {
+    final filesystem = Map<String, dynamic>.from(json['filesystem'] as Map);
+    final thresholds = Map<String, dynamic>.from(json['thresholds'] as Map);
+    final usage = Map<String, dynamic>.from(json['usage'] as Map);
+    return ServerStorageStatus(
+      status: json['status']?.toString() ?? 'unavailable',
+      acceptsDurableWrites: json['acceptsDurableWrites'] as bool? ?? false,
+      availableBytes: (filesystem['availableBytes'] as num?)?.toInt() ?? 0,
+      totalBytes: (filesystem['totalBytes'] as num?)?.toInt() ?? 0,
+      warningFreeBytes: (thresholds['warningFreeBytes'] as num?)?.toInt() ?? 0,
+      criticalFreeBytes:
+          (thresholds['criticalFreeBytes'] as num?)?.toInt() ?? 0,
+      databaseBytes: (usage['databaseBytes'] as num?)?.toInt() ?? 0,
+      ordinaryAttachmentBytes:
+          (usage['ordinaryAttachmentBytes'] as num?)?.toInt() ?? 0,
+      encryptedAttachmentBytes:
+          (usage['encryptedAttachmentBytes'] as num?)?.toInt() ?? 0,
+      backupBytes: (usage['backupBytes'] as num?)?.toInt(),
+      backupMonitoringEnabled:
+          usage['backupMonitoringEnabled'] as bool? ?? false,
     );
   }
 }
@@ -431,6 +714,37 @@ class ApiClient {
     return _lanRoutes.containsKey(publicUri.origin);
   }
 
+  Future<Uint8List> downloadNetworkAsset(String rawUrl) async {
+    final uri = Uri.parse(rawUrl);
+    if (uri.scheme != 'http' && uri.scheme != 'https') {
+      throw ApiException(
+        'The asset URL is invalid.',
+        code: 'invalid_asset_url',
+      );
+    }
+    final client = _clientFor(uri);
+    try {
+      final response = await client
+          .get(uri)
+          .timeout(const Duration(seconds: 20));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw ApiException(
+          'Asset download failed with status ${response.statusCode}.',
+          statusCode: response.statusCode,
+          code: 'asset_download_failed',
+        );
+      }
+      return response.bodyBytes;
+    } on TimeoutException {
+      throw ApiException(
+        'The asset download timed out.',
+        code: 'connection_timeout',
+      );
+    } finally {
+      client.close();
+    }
+  }
+
   bool _isPrivateOrDevelopmentHost(String input) {
     final host = input.trim().toLowerCase();
     if (host == 'localhost' ||
@@ -565,6 +879,7 @@ class ApiClient {
     String expectedPublicKey = '',
     String expectedAdvertisedAddress = '',
     Duration timeout = const Duration(milliseconds: 1400),
+    InternetAddress? discoveryAddress,
   }) async {
     const discoveryPort = 41200;
     final socket = await RawDatagramSocket.bind(
@@ -653,7 +968,15 @@ class ApiClient {
         consider(datagram!);
       }
     });
-    socket.send(request, InternetAddress('255.255.255.255'), discoveryPort);
+    try {
+      socket.send(
+        request,
+        discoveryAddress ?? InternetAddress('255.255.255.255'),
+        discoveryPort,
+      );
+    } on SocketException {
+      result.complete(null);
+    }
     Timer(timeout, () {
       if (!result.isCompleted) result.complete(null);
     });
@@ -852,6 +1175,21 @@ class ApiClient {
     );
   }
 
+  Future<ServerStorageStatus> fetchServerStorage({
+    required String baseUrl,
+    required String token,
+  }) async {
+    final normalized = normalizeBaseUrl(baseUrl);
+    final json = await _requestJson(
+      'GET',
+      '$normalized/api/server/storage',
+      token: token,
+    );
+    return ServerStorageStatus.fromJson(
+      Map<String, dynamic>.from(json['storage'] as Map),
+    );
+  }
+
   Future<ServerSettings> updateServerSettings({
     required String baseUrl,
     required String token,
@@ -1015,6 +1353,346 @@ class ApiClient {
         .toList();
 
     return membersJson.map(Member.fromJson).toList();
+  }
+
+  Future<HistoryRecoveryDeviceKey> registerHistoryRecoveryDeviceKey({
+    required String baseUrl,
+    required String token,
+    required String expectedDeviceId,
+    required String publicKey,
+    required String yuidAuthorizationSignature,
+  }) async {
+    final normalized = normalizeBaseUrl(baseUrl);
+    final json = await _requestJson(
+      'POST',
+      '$normalized/api/mls/history-recovery/keys',
+      token: token,
+      body: {
+        'publicKey': publicKey,
+        'yuidAuthorizationSignature': yuidAuthorizationSignature,
+      },
+    );
+    try {
+      final key = HistoryRecoveryDeviceKey.fromJson(
+        Map<String, dynamic>.from(json['key'] as Map),
+      );
+      if (key.deviceId != expectedDeviceId ||
+          key.publicKey != publicKey ||
+          key.yuidAuthorizationSignature != yuidAuthorizationSignature) {
+        throw const FormatException(
+          'History recovery key registration was substituted.',
+        );
+      }
+      return key;
+    } catch (_) {
+      throw ApiException(
+        'The server returned invalid encrypted-history recovery key metadata.',
+        code: 'invalid_history_recovery_response',
+      );
+    }
+  }
+
+  Future<HistoryRecoveryKeyDirectory> fetchHistoryRecoveryDeviceKeys({
+    required String baseUrl,
+    required String token,
+  }) async {
+    final normalized = normalizeBaseUrl(baseUrl);
+    final json = await _requestJson(
+      'GET',
+      '$normalized/api/mls/history-recovery/keys',
+      token: token,
+    );
+    try {
+      final accountYuid = json['accountYuid']?.toString() ?? '';
+      if (!RegExp(r'^[A-Za-z0-9_-]{20}$').hasMatch(accountYuid)) {
+        throw const FormatException('Invalid recovery account.');
+      }
+      final rawKeys = json['keys'];
+      if (rawKeys is! List || rawKeys.length > 100) {
+        throw const FormatException('Invalid recovery key directory.');
+      }
+      return HistoryRecoveryKeyDirectory(
+        accountYuid: accountYuid,
+        keys: rawKeys
+            .map(
+              (item) => HistoryRecoveryDeviceKey.fromJson(
+                Map<String, dynamic>.from(item as Map),
+              ),
+            )
+            .toList(growable: false),
+      );
+    } catch (_) {
+      throw ApiException(
+        'The server returned an invalid encrypted-history recovery directory.',
+        code: 'invalid_history_recovery_response',
+      );
+    }
+  }
+
+  Future<HistoryRecoveryTransferResult> createHistoryRecoveryTransfer({
+    required String baseUrl,
+    required String token,
+    required String channelId,
+    required String transferId,
+    required String sourceDeviceId,
+    required String destinationDeviceId,
+    required int firstServerSequence,
+    required int lastServerSequence,
+    required int eventCount,
+    required int chunkCount,
+    required int totalBytes,
+    required Uint8List manifest,
+    required String manifestSha256,
+    required String yuidSignature,
+  }) async {
+    final normalized = normalizeBaseUrl(baseUrl);
+    final json = await _requestJson(
+      'POST',
+      '$normalized/api/channels/$channelId/mls/history-recovery/transfers',
+      token: token,
+      body: {
+        'id': transferId,
+        'destinationDeviceId': destinationDeviceId,
+        'firstServerSequence': firstServerSequence,
+        'lastServerSequence': lastServerSequence,
+        'eventCount': eventCount,
+        'chunkCount': chunkCount,
+        'totalBytes': totalBytes,
+        'manifest': base64Url.encode(manifest).replaceAll('=', ''),
+        'manifestSha256': manifestSha256,
+        'yuidSignature': yuidSignature,
+      },
+    );
+    try {
+      final transfer = HistoryRecoveryTransfer.fromJson(
+        Map<String, dynamic>.from(json['transfer'] as Map),
+      );
+      if (transfer.id != transferId ||
+          transfer.channelId != channelId ||
+          transfer.sourceDeviceId != sourceDeviceId ||
+          transfer.destinationDeviceId != destinationDeviceId ||
+          transfer.firstServerSequence != firstServerSequence ||
+          transfer.lastServerSequence != lastServerSequence ||
+          transfer.eventCount != eventCount ||
+          transfer.chunkCount != chunkCount ||
+          transfer.totalBytes != totalBytes ||
+          transfer.manifestSha256 != manifestSha256 ||
+          transfer.yuidSignature != yuidSignature ||
+          !_constantTimeBytesEqual(transfer.manifest!, manifest)) {
+        throw const FormatException('History recovery transfer substituted.');
+      }
+      return HistoryRecoveryTransferResult(
+        changed: json['created'] == true,
+        transfer: transfer,
+      );
+    } catch (_) {
+      throw ApiException(
+        'The server returned invalid encrypted-history transfer metadata.',
+        code: 'invalid_history_recovery_response',
+      );
+    }
+  }
+
+  Future<bool> uploadHistoryRecoveryChunk({
+    required String baseUrl,
+    required String token,
+    required String transferId,
+    required int chunkIndex,
+    required Uint8List ciphertext,
+    required String ciphertextSha256,
+  }) async {
+    final normalized = normalizeBaseUrl(baseUrl);
+    final json = await _requestBinaryJson(
+      'PUT',
+      '$normalized/api/mls/history-recovery/transfers/$transferId/chunks/'
+          '$chunkIndex',
+      token: token,
+      body: ciphertext,
+      headers: {'X-Yappa-Content-Sha256': ciphertextSha256},
+    );
+    if (json['transferId'] != transferId ||
+        json['chunkIndex'] != chunkIndex ||
+        json['sizeBytes'] != ciphertext.length ||
+        json['ciphertextSha256'] != ciphertextSha256 ||
+        json['created'] is! bool) {
+      throw ApiException(
+        'The server returned invalid encrypted-history chunk metadata.',
+        code: 'invalid_history_recovery_response',
+      );
+    }
+    return json['created'] as bool;
+  }
+
+  Future<HistoryRecoveryTransferResult> finalizeHistoryRecoveryTransfer({
+    required String baseUrl,
+    required String token,
+    required String transferId,
+  }) async {
+    final normalized = normalizeBaseUrl(baseUrl);
+    final json = await _requestJson(
+      'POST',
+      '$normalized/api/mls/history-recovery/transfers/$transferId/finalize',
+      token: token,
+    );
+    return _parseHistoryRecoveryMutation(
+      json,
+      transferId: transferId,
+      changedField: 'finalized',
+      expectedState: HistoryRecoveryTransferState.ready,
+    );
+  }
+
+  Future<List<HistoryRecoveryTransfer>> fetchHistoryRecoveryTransfers({
+    required String baseUrl,
+    required String token,
+    required String channelId,
+    required String destinationDeviceId,
+  }) async {
+    final normalized = normalizeBaseUrl(baseUrl);
+    final json = await _requestJson(
+      'GET',
+      '$normalized/api/channels/$channelId/mls/history-recovery/transfers',
+      token: token,
+    );
+    try {
+      final raw = json['transfers'];
+      if (raw is! List || raw.length > 20) throw const FormatException();
+      final transfers = raw
+          .map(
+            (item) => HistoryRecoveryTransfer.fromJson(
+              Map<String, dynamic>.from(item as Map),
+            ),
+          )
+          .toList(growable: false);
+      final ids = <String>{};
+      for (final transfer in transfers) {
+        if (transfer.channelId != channelId ||
+            transfer.destinationDeviceId != destinationDeviceId ||
+            transfer.state != HistoryRecoveryTransferState.ready ||
+            !ids.add(transfer.id)) {
+          throw const FormatException();
+        }
+      }
+      return transfers;
+    } catch (_) {
+      throw ApiException(
+        'The server returned an invalid encrypted-history transfer list.',
+        code: 'invalid_history_recovery_response',
+      );
+    }
+  }
+
+  Future<HistoryRecoveryChunk> downloadHistoryRecoveryChunk({
+    required String baseUrl,
+    required String token,
+    required String transferId,
+    required int chunkIndex,
+    required String expectedSha256,
+    required int expectedSizeBytes,
+  }) async {
+    final normalized = normalizeBaseUrl(baseUrl);
+    final json = await _requestJson(
+      'GET',
+      '$normalized/api/mls/history-recovery/transfers/$transferId/chunks/'
+          '$chunkIndex',
+      token: token,
+    );
+    try {
+      final encoded = json['ciphertext'] as String;
+      final ciphertext = Uint8List.fromList(_decodeBase64Url(encoded));
+      final digest = hashes.sha256.convert(ciphertext).toString();
+      if (json['transferId'] != transferId ||
+          json['chunkIndex'] != chunkIndex ||
+          json['sizeBytes'] != ciphertext.length ||
+          ciphertext.length != expectedSizeBytes ||
+          json['ciphertextSha256'] != expectedSha256 ||
+          digest != expectedSha256 ||
+          ciphertext.isEmpty ||
+          ciphertext.length > 256 * 1024) {
+        throw const FormatException();
+      }
+      return HistoryRecoveryChunk(
+        transferId: transferId,
+        chunkIndex: chunkIndex,
+        ciphertext: ciphertext,
+        ciphertextSha256: digest,
+      );
+    } catch (_) {
+      throw ApiException(
+        'The server returned an invalid encrypted-history chunk.',
+        code: 'invalid_history_recovery_response',
+      );
+    }
+  }
+
+  Future<HistoryRecoveryTransferResult> consumeHistoryRecoveryTransfer({
+    required String baseUrl,
+    required String token,
+    required String transferId,
+  }) async {
+    final normalized = normalizeBaseUrl(baseUrl);
+    final json = await _requestJson(
+      'POST',
+      '$normalized/api/mls/history-recovery/transfers/$transferId/consume',
+      token: token,
+    );
+    return _parseHistoryRecoveryMutation(
+      json,
+      transferId: transferId,
+      changedField: 'consumed',
+      expectedState: HistoryRecoveryTransferState.consumed,
+      requireManifest: false,
+    );
+  }
+
+  Future<bool> cancelHistoryRecoveryTransfer({
+    required String baseUrl,
+    required String token,
+    required String transferId,
+  }) async {
+    final normalized = normalizeBaseUrl(baseUrl);
+    final json = await _requestJson(
+      'DELETE',
+      '$normalized/api/mls/history-recovery/transfers/$transferId',
+      token: token,
+    );
+    if (json['transferId'] != transferId || json['canceled'] is! bool) {
+      throw ApiException(
+        'The server returned invalid encrypted-history cancellation metadata.',
+        code: 'invalid_history_recovery_response',
+      );
+    }
+    return json['canceled'] as bool;
+  }
+
+  HistoryRecoveryTransferResult _parseHistoryRecoveryMutation(
+    Map<String, dynamic> json, {
+    required String transferId,
+    required String changedField,
+    required HistoryRecoveryTransferState expectedState,
+    bool requireManifest = true,
+  }) {
+    try {
+      final changed = json[changedField];
+      final transfer = HistoryRecoveryTransfer.fromJson(
+        Map<String, dynamic>.from(json['transfer'] as Map),
+        requireManifest: requireManifest,
+      );
+      if (changed is! bool ||
+          transfer.id != transferId ||
+          transfer.state != expectedState) {
+        throw const FormatException();
+      }
+      return HistoryRecoveryTransferResult(
+        changed: changed,
+        transfer: transfer,
+      );
+    } catch (_) {
+      throw ApiException(
+        'The server returned invalid encrypted-history lifecycle metadata.',
+        code: 'invalid_history_recovery_response',
+      );
+    }
   }
 
   Future<MlsKeyPackageInventory> fetchMlsKeyPackageInventory({
@@ -1294,26 +1972,117 @@ class ApiClient {
     return cursor;
   }
 
-  Future<List<ChatMessage>> fetchMessages({
+  Future<MessageHistoryPage> fetchMessages({
     required String baseUrl,
     required String token,
     required String channelId,
+    String? cursor,
+    int limit = 50,
   }) async {
+    if (limit < 1 || limit > 100) {
+      throw ArgumentError.value(limit, 'limit', 'must be from 1 to 100');
+    }
     final normalized = normalizeBaseUrl(baseUrl);
-    final json = await _requestJson(
-      'GET',
+    final query = <String, String>{'limit': limit.toString()};
+    if (cursor != null && cursor.isNotEmpty) {
+      query['cursor'] = cursor;
+    }
+    final uri = Uri.parse(
       '$normalized/api/channels/$channelId/messages',
-      token: token,
-    );
+    ).replace(queryParameters: query);
+    final json = await _requestJson('GET', uri.toString(), token: token);
 
     final messagesJson = (json['messages'] as List? ?? const [])
         .map((item) => Map<String, dynamic>.from(item as Map))
         .toList();
 
-    return messagesJson
+    final messages = messagesJson
         .map(ChatMessage.fromJson)
         .map((message) => _resolveMessageUrls(message, normalized))
         .toList();
+    final pageJson = json['page'];
+    // Servers deployed before bounded history pagination returned only the
+    // latest messages. Accept that shape for the initial page so a newer
+    // pretest client can still connect while the operator schedules the
+    // backend migration. Never accept it for a cursor request: an old server
+    // ignores cursors, which would make catch-up/paging ambiguous and could
+    // repeat or omit history silently.
+    if (pageJson == null && (cursor == null || cursor.isEmpty)) {
+      return MessageHistoryPage(
+        messages: messages,
+        direction: 'before',
+        hasMore: false,
+        nextCursor: null,
+        forwardCursor: null,
+        backwardCursor: null,
+      );
+    }
+    if (pageJson is! Map) {
+      throw ApiException(
+        'The server returned an invalid message history page.',
+        code: 'invalid_history_response',
+      );
+    }
+    final page = Map<String, dynamic>.from(pageJson);
+    final direction = page['direction'];
+    final hasMore = page['hasMore'];
+    final nextCursor = page['nextCursor'];
+    final forwardCursor = page['forwardCursor'];
+    final backwardCursor = page['backwardCursor'];
+    if ((direction != 'before' && direction != 'after') ||
+        hasMore is! bool ||
+        (nextCursor != null && nextCursor is! String) ||
+        (forwardCursor != null && forwardCursor is! String) ||
+        (backwardCursor != null && backwardCursor is! String) ||
+        (hasMore && (nextCursor is! String || nextCursor.isEmpty)) ||
+        (!hasMore && nextCursor != null) ||
+        (messages.isNotEmpty &&
+            (forwardCursor is! String ||
+                forwardCursor.isEmpty ||
+                backwardCursor is! String ||
+                backwardCursor.isEmpty))) {
+      throw ApiException(
+        'The server returned an invalid message history cursor.',
+        code: 'invalid_history_response',
+      );
+    }
+    return MessageHistoryPage(
+      messages: messages,
+      direction: direction as String,
+      hasMore: hasMore,
+      nextCursor: nextCursor as String?,
+      forwardCursor: forwardCursor as String?,
+      backwardCursor: backwardCursor as String?,
+    );
+  }
+
+  Future<String> createMessageHistoryCursor({
+    required String baseUrl,
+    required String token,
+    required String channelId,
+    required String messageId,
+    required String direction,
+  }) async {
+    if (direction != 'before' && direction != 'after') {
+      throw ArgumentError.value(direction, 'direction');
+    }
+    final normalized = normalizeBaseUrl(baseUrl);
+    final uri = Uri.parse('$normalized/api/channels/$channelId/messages/cursor')
+        .replace(
+          queryParameters: {'messageId': messageId, 'direction': direction},
+        );
+    final json = await _requestJson('GET', uri.toString(), token: token);
+    final cursor = json['cursor'];
+    if (json['direction'] != direction ||
+        json['messageId']?.toString() != messageId ||
+        cursor is! String ||
+        cursor.isEmpty) {
+      throw ApiException(
+        'The server returned an invalid message history boundary.',
+        code: 'invalid_history_response',
+      );
+    }
+    return cursor;
   }
 
   Future<ChatAttachment> uploadAttachment({
@@ -1692,6 +2461,40 @@ class ApiClient {
     return 'Desktop';
   }
 
+  Future<Map<String, dynamic>> _requestBinaryJson(
+    String method,
+    String url, {
+    required String token,
+    required Uint8List body,
+    Map<String, String> headers = const {},
+  }) async {
+    final uri = Uri.parse(url);
+    final request = http.Request(method, uri)
+      ..headers['Accept'] = 'application/json'
+      ..headers['Authorization'] = 'Bearer $token'
+      ..headers['Content-Type'] = 'application/octet-stream'
+      ..headers.addAll(headers)
+      ..bodyBytes = body;
+    final client = _clientFor(uri);
+    late final http.Response response;
+    try {
+      final streamed = await client
+          .send(request)
+          .timeout(const Duration(minutes: 2));
+      response = await http.Response.fromStream(
+        streamed,
+      ).timeout(const Duration(seconds: 10));
+    } on TimeoutException {
+      throw ApiException(
+        'The server did not finish the encrypted-history upload in time.',
+        code: 'connection_timeout',
+      );
+    } finally {
+      client.close();
+    }
+    return _decodeJsonResponse(response);
+  }
+
   Future<Map<String, dynamic>> _requestJson(
     String method,
     String url, {
@@ -1745,30 +2548,39 @@ class ApiClient {
       client.close();
     }
 
-    Map<String, dynamic> decoded = const {};
-    if (response.body.isNotEmpty) {
-      final dynamic parsed = jsonDecode(response.body);
-      if (parsed is Map<String, dynamic>) {
-        decoded = parsed;
-      }
-    }
+    return _decodeJsonResponse(response);
+  }
 
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      final errorMap = decoded['error'];
-      if (errorMap is Map<String, dynamic> && errorMap['message'] is String) {
+  Map<String, dynamic> _decodeJsonResponse(http.Response response) {
+    Map<String, dynamic> decoded = const {};
+    try {
+      if (response.body.isNotEmpty) {
+        final dynamic parsed = jsonDecode(response.body);
+        if (parsed is Map<String, dynamic>) decoded = parsed;
+      }
+    } catch (_) {
+      if (response.statusCode >= 200 && response.statusCode < 300) {
         throw ApiException(
-          errorMap['message'] as String,
-          statusCode: response.statusCode,
-          code: errorMap['code']?.toString(),
+          'The server returned an invalid response.',
+          code: 'invalid_server_response',
         );
       }
+    }
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return decoded;
+    }
+    final errorMap = decoded['error'];
+    if (errorMap is Map<String, dynamic> && errorMap['message'] is String) {
       throw ApiException(
-        'Request failed with status ${response.statusCode}.',
+        errorMap['message'] as String,
         statusCode: response.statusCode,
+        code: errorMap['code']?.toString(),
       );
     }
-
-    return decoded;
+    throw ApiException(
+      'Request failed with status ${response.statusCode}.',
+      statusCode: response.statusCode,
+    );
   }
 
   T _parseMlsResponse<T>(T Function() parse) {

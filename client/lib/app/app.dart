@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../features/connect/connect_screen.dart';
 import '../features/shell/shell_screen.dart';
+import '../shared/network_asset_scope.dart';
 import 'app_state.dart';
 import 'theme.dart';
 
@@ -64,6 +65,10 @@ class _YappaAppState extends State<YappaApp> {
               title: 'Yappa',
               debugShowCheckedModeBanner: false,
               theme: buildYappaTheme(),
+              builder: (context, child) => NetworkAssetScope(
+                loader: appState.downloadNetworkAsset,
+                child: child ?? const SizedBox.shrink(),
+              ),
               home: appState.hasActiveSession
                   ? ShellScreen(appState: appState)
                   : ConnectScreen(appState: appState),

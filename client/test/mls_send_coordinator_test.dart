@@ -69,7 +69,8 @@ class _LostResponseApi extends ApiClient {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  final supportsMlsBridge = Platform.isLinux || Platform.isWindows;
+  final supportsMlsBridge =
+      Platform.isLinux || Platform.isWindows || Platform.isMacOS;
 
   test(
     'outgoing application resumes exact ciphertext after restart',

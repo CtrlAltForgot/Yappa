@@ -108,7 +108,8 @@ class _AttachmentApi extends ApiClient {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  final supportsNative = Platform.isLinux || Platform.isWindows;
+  final supportsNative =
+      Platform.isLinux || Platform.isWindows || Platform.isMacOS;
 
   test(
     'attachment upload and MLS binding resume after lost response',

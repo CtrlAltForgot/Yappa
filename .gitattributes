@@ -1,0 +1,21 @@
+* text=auto eol=lf
+
+*.sh text eol=lf
+*.bash text eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.zip binary
+*.gz binary
+*.so binary
+*.dll binary
+*.dylib binary
+
+server/node_modules/** linguist-vendored
+client/packages/flutter_webrtc_yappa/third_party/** linguist-vendored

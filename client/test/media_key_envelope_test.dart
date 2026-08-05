@@ -34,7 +34,7 @@ void main() {
         keyIndex: 3,
         createdAt: createdAt,
         recipientMediaPublicKey: recipientPublic,
-        senderYuidKeyPair: senderYuid,
+        senderYuidPrivateKeySeed: (await senderYuid.extract()).bytes,
       );
       final serialized = MediaKeyEnvelope.fromJson(envelope.toJson());
       final opened = await cryptor.open(
@@ -88,7 +88,7 @@ void main() {
       keyIndex: 1,
       createdAt: DateTime.utc(2026, 7, 24),
       recipientMediaPublicKey: await recipient.extractPublicKey(),
-      senderYuidKeyPair: sender,
+      senderYuidPrivateKeySeed: (await sender.extract()).bytes,
     );
 
     await expectLater(

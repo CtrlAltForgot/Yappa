@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/app_state.dart';
 import '../../app/theme.dart';
 import '../../models/server_model.dart';
+import '../../shared/network_asset_scope.dart';
 import '../settings/yappa_settings_dialog.dart';
 
 class ConnectScreen extends StatefulWidget {
@@ -790,7 +791,7 @@ class _ServerPickerTile extends StatelessWidget {
             children: [
               if (hasBanner)
                 Positioned.fill(
-                  child: Image.network(
+                  child: RoutedNetworkImage(
                     bannerUrl!,
                     fit: BoxFit.cover,
                     errorBuilder: (context, error, stackTrace) {
@@ -836,7 +837,7 @@ class _ServerPickerTile extends StatelessWidget {
                       ),
                       clipBehavior: Clip.antiAlias,
                       child: hasIcon
-                          ? Image.network(
+                          ? RoutedNetworkImage(
                               iconUrl!,
                               fit: BoxFit.cover,
                               errorBuilder: (context, error, stackTrace) {

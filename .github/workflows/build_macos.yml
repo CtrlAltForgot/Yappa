@@ -1,0 +1,87 @@
+name: Build Yappa macOS
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: yappa-macos-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build macOS development artifact
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Load pinned versions
+        id: versions
+        shell: bash
+        run: .github/scripts/export-release-versions.sh
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          flutter-version: ${{ steps.versions.outputs.flutter }}
+
+      - name: Show tool versions
+        run: |
+          uname -m
+          flutter --version
+          cargo --version
+
+      - name: Install pinned libsodium
+        run: >
+          .github/scripts/install-libsodium-macos.sh
+          "${{ steps.versions.outputs.libsodium_version }}"
+          "${{ steps.versions.outputs.libsodium_source_url }}"
+          "${{ steps.versions.outputs.libsodium_source_sha256 }}"
+
+      - name: Run shared client validation
+        run: .github/scripts/validate-client.sh
+
+      - name: Build, inspect, smoke-test, and package macOS
+        run: .github/scripts/build-macos.sh "${{ steps.versions.outputs.safe_yappa }}"
+
+      - name: Generate checksum and SPDX evidence
+        run: |
+          node .github/scripts/generate-release-evidence.js \
+            --artifact "client/dist/Yappa-${{ steps.versions.outputs.safe_yappa }}-macos.zip" \
+            --output-dir client/dist/evidence \
+            --version "${{ steps.versions.outputs.yappa }}" \
+            --commit "${{ github.sha }}" \
+            --github-attestation true
+
+      - name: Attest macOS artifact provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: client/dist/Yappa-${{ steps.versions.outputs.safe_yappa }}-macos.zip
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: Yappa-macos-${{ github.sha }}
+          path: |
+            client/dist/Yappa-${{ steps.versions.outputs.safe_yappa }}-macos.zip
+            client/dist/evidence/*
+          if-no-files-found: error
+
+      - name: Upload macOS diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: Yappa-macos-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .artifacts/diagnostics/macos
+          if-no-files-found: ignore
+          retention-days: 14

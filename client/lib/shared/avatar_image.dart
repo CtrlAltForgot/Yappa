@@ -2,9 +2,11 @@ import 'dart:collection';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
+import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+
+import 'network_asset_scope.dart';
 
 class AvatarImage extends StatefulWidget {
   final String? source;
@@ -39,8 +41,8 @@ class _AvatarImageState extends State<AvatarImage> {
   String? _gifFutureKey;
 
   @override
-  void initState() {
-    super.initState();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
     _startWarmup();
   }
 
@@ -82,7 +84,7 @@ class _AvatarImageState extends State<AvatarImage> {
       _gifFutureKey = cacheKey;
       _gifFuture = _loadGifEntry(
         cacheKey,
-        () => _downloadBytes(resolved),
+        () => _downloadBytes(context, resolved),
         gifExtent,
       );
       return;
@@ -110,8 +112,9 @@ class _AvatarImageState extends State<AvatarImage> {
       }
 
       final entry = _GifCacheEntry(
-        animatedBytes:
-            gifBytes.lengthInBytes <= _maxAnimatedGifBytes ? gifBytes : null,
+        animatedBytes: gifBytes.lengthInBytes <= _maxAnimatedGifBytes
+            ? gifBytes
+            : null,
         firstFramePng: firstFramePng,
       );
       _storeInCache(cacheKey, entry);
@@ -200,13 +203,13 @@ class _AvatarImageState extends State<AvatarImage> {
       final cacheKey = '$resolved@$gifExtent';
       return _buildGifFromFuture(
         cacheKey,
-        () => _downloadBytes(resolved),
+        () => _downloadBytes(context, resolved),
         gifExtent,
       );
     }
 
     return RepaintBoundary(
-      child: Image.network(
+      child: RoutedNetworkImage(
         resolved,
         fit: widget.fit,
         width: widget.size,
@@ -278,12 +281,9 @@ class _AvatarImageState extends State<AvatarImage> {
   }
 
   Widget _fallback() => Text(
-        widget.fallbackInitial,
-        style: TextStyle(
-          fontSize: widget.size * 0.4,
-          fontWeight: FontWeight.w900,
-        ),
-      );
+    widget.fallbackInitial,
+    style: TextStyle(fontSize: widget.size * 0.4, fontWeight: FontWeight.w900),
+  );
 }
 
 class _AnimatedGifLayer extends StatefulWidget {
@@ -309,13 +309,85 @@ class _AnimatedGifLayer extends StatefulWidget {
 
 class _AnimatedGifLayerState extends State<_AnimatedGifLayer> {
   bool _firstAnimatedFrameReady = false;
+  ui.Codec? _codec;
+  ui.Image? _frameImage;
+  Timer? _frameTimer;
+  int _decodeGeneration = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _startDecoder();
+  }
 
   @override
   void didUpdateWidget(covariant _AnimatedGifLayer oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.animatedBytes, widget.animatedBytes)) {
-      _firstAnimatedFrameReady = false;
+      _startDecoder();
     }
+  }
+
+  Future<void> _startDecoder() async {
+    final generation = ++_decodeGeneration;
+    _frameTimer?.cancel();
+    _codec?.dispose();
+    _codec = null;
+    _frameImage?.dispose();
+    _frameImage = null;
+    _firstAnimatedFrameReady = false;
+    try {
+      final codec = await ui.instantiateImageCodec(
+        widget.animatedBytes,
+        targetWidth: widget.gifExtent,
+        targetHeight: widget.gifExtent,
+      );
+      if (!mounted || generation != _decodeGeneration) {
+        codec.dispose();
+        return;
+      }
+      _codec = codec;
+      await _decodeNextFrame(generation);
+    } catch (_) {
+      if (mounted && generation == _decodeGeneration) {
+        setState(() => _firstAnimatedFrameReady = false);
+      }
+    }
+  }
+
+  Future<void> _decodeNextFrame(int generation) async {
+    final codec = _codec;
+    if (!mounted || generation != _decodeGeneration || codec == null) return;
+    try {
+      final frame = await codec.getNextFrame();
+      if (!mounted || generation != _decodeGeneration) {
+        frame.image.dispose();
+        return;
+      }
+      final previous = _frameImage;
+      setState(() {
+        _frameImage = frame.image;
+        _firstAnimatedFrameReady = true;
+      });
+      previous?.dispose();
+      _frameTimer = Timer(
+        normalizedGifFrameDuration(frame.duration),
+        () => _decodeNextFrame(generation),
+      );
+    } catch (_) {
+      if (mounted && generation == _decodeGeneration) {
+        setState(() => _firstAnimatedFrameReady = false);
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _decodeGeneration += 1;
+    _frameTimer?.cancel();
+    _codec?.dispose();
+    _frameImage?.dispose();
+    super.dispose();
   }
 
   @override
@@ -329,33 +401,31 @@ class _AnimatedGifLayerState extends State<_AnimatedGifLayer> {
           duration: const Duration(milliseconds: 80),
           curve: Curves.easeOut,
           child: RepaintBoundary(
-            child: Image.memory(
-              widget.animatedBytes,
-              fit: widget.fit,
-              width: widget.size,
-              height: widget.size,
-              cacheWidth: widget.gifExtent,
-              cacheHeight: widget.gifExtent,
-              filterQuality: FilterQuality.medium,
-              gaplessPlayback: true,
-              frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
-                if ((wasSynchronouslyLoaded || frame != null) &&
-                    !_firstAnimatedFrameReady) {
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (mounted) {
-                      setState(() => _firstAnimatedFrameReady = true);
-                    }
-                  });
-                }
-                return child;
-              },
-              errorBuilder: (context, error, stackTrace) => widget.fallback(),
-            ),
+            child: _frameImage == null
+                ? widget.fallback()
+                : RawImage(
+                    image: _frameImage,
+                    fit: widget.fit,
+                    width: widget.size,
+                    height: widget.size,
+                    filterQuality: FilterQuality.medium,
+                  ),
           ),
         ),
       ],
     );
   }
+}
+
+@visibleForTesting
+Duration normalizedGifFrameDuration(Duration encoded) {
+  // GIF permits an omitted/zero delay. Browsers clamp that case instead of
+  // spinning through frames as fast as the decoder can run; match that
+  // behavior so uploaded avatars have consistent timing on desktop.
+  if (encoded < const Duration(milliseconds: 20)) {
+    return const Duration(milliseconds: 100);
+  }
+  return encoded;
 }
 
 class _GifCacheEntry {
@@ -375,10 +445,7 @@ class _ParsedDataUri {
   final String mimeType;
   final Uint8List bytes;
 
-  const _ParsedDataUri({
-    required this.mimeType,
-    required this.bytes,
-  });
+  const _ParsedDataUri({required this.mimeType, required this.bytes});
 }
 
 _ParsedDataUri? _tryParseDataUri(String source) {
@@ -396,10 +463,7 @@ _ParsedDataUri? _tryParseDataUri(String source) {
     final mimeType = header.split(';').first.trim().toLowerCase();
     final bytes = base64Decode(source.substring(comma + 1));
 
-    return _ParsedDataUri(
-      mimeType: mimeType,
-      bytes: bytes,
-    );
+    return _ParsedDataUri(mimeType: mimeType, bytes: bytes);
   } catch (_) {
     return null;
   }
@@ -416,18 +480,10 @@ bool _looksLikeGifUrl(String source) {
   }
 }
 
-Future<Uint8List> _downloadBytes(String url) async {
-  final response = await http.get(Uri.parse(url));
-  if (response.statusCode < 200 || response.statusCode >= 300) {
-    throw Exception('Failed to load avatar');
-  }
-  return response.bodyBytes;
-}
+Future<Uint8List> _downloadBytes(BuildContext context, String url) =>
+    NetworkAssetScope.of(context)(url);
 
-Future<Uint8List?> _extractFirstFramePng(
-  Uint8List bytes,
-  int gifExtent,
-) async {
+Future<Uint8List?> _extractFirstFramePng(Uint8List bytes, int gifExtent) async {
   final codec = await ui.instantiateImageCodec(
     bytes,
     targetWidth: gifExtent,
@@ -437,8 +493,9 @@ Future<Uint8List?> _extractFirstFramePng(
   try {
     final frame = await codec.getNextFrame();
     try {
-      final byteData =
-          await frame.image.toByteData(format: ui.ImageByteFormat.png);
+      final byteData = await frame.image.toByteData(
+        format: ui.ImageByteFormat.png,
+      );
       return byteData?.buffer.asUint8List();
     } finally {
       frame.image.dispose();

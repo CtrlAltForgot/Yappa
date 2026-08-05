@@ -8,6 +8,7 @@ import 'media_device_identity_service.dart';
 import 'media_key_envelope.dart';
 import 'media_room_state.dart';
 import 'yuid_identity_service.dart';
+import 'sodium_media_crypto.dart';
 
 enum MediaE2eeStatus { idle, establishing, encrypted, failed }
 
@@ -42,6 +43,7 @@ class MediaE2eeCoordinator {
   final void Function(MediaE2eeStatus status) _onStatusChanged;
   final MediaKeyEnvelopeCryptor _envelopes = MediaKeyEnvelopeCryptor();
   final MediaRoomStateVerifier _roomVerifier = MediaRoomStateVerifier();
+  final SodiumMediaCrypto? _native = SodiumMediaCrypto.tryLoad();
 
   String? _serverId;
   String? _channelId;
@@ -167,12 +169,15 @@ class MediaE2eeCoordinator {
     final deviceId = _deviceId;
     if (serverId == null || channelId == null || deviceId == null) return;
     final previous = _roomState;
-    await _roomVerifier.verify(
-      state,
-      expectedServerId: serverId,
-      expectedChannelId: channelId,
-      minimumEpoch: previous?.epoch,
-      minimumMembershipSequence: previous?.membershipSequence,
+    await _stage(
+      'room-state verification',
+      () => _roomVerifier.verify(
+        state,
+        expectedServerId: serverId,
+        expectedChannelId: channelId,
+        minimumEpoch: previous?.epoch,
+        minimumMembershipSequence: previous?.membershipSequence,
+      ),
     );
     _ensureCurrentGeneration(generation);
     if (!state.devices.any((device) => device.id == deviceId)) {
@@ -210,20 +215,31 @@ class MediaE2eeCoordinator {
       return;
     }
     if (_sessionKey == null) {
-      final randomKey = await SecretKeyData.random(length: 32).extractBytes();
+      final randomKey = await _stage(
+        'room-key generation',
+        () async =>
+            _native?.randomBytes(32) ??
+            await SecretKeyData.random(length: 32).extractBytes(),
+      );
       _ensureCurrentGeneration(generation);
-      await _setSessionKey(
-        MediaE2eeSessionKey(
-          serverId: serverId,
-          channelId: channelId,
-          epoch: state.epoch,
-          keyIndex: state.epoch % 256,
-          bytes: Uint8List.fromList(randomKey),
+      await _stage(
+        'room-key installation',
+        () => _setSessionKey(
+          MediaE2eeSessionKey(
+            serverId: serverId,
+            channelId: channelId,
+            epoch: state.epoch,
+            keyIndex: state.epoch % 256,
+            bytes: Uint8List.fromList(randomKey),
+          ),
+          generation,
         ),
-        generation,
       );
     }
-    await _sendCurrentKeyToMembers(state, generation);
+    await _stage(
+      'room-key delivery',
+      () => _sendCurrentKeyToMembers(state, generation),
+    );
   }
 
   Future<void> _sendCurrentKeyToMembers(
@@ -233,10 +249,13 @@ class MediaE2eeCoordinator {
     final sessionKey = _sessionKey;
     final deviceId = _deviceId;
     if (sessionKey == null || deviceId == null) return;
-    final senderKeyPair = await _yuidIdentity.keyPair();
+    final recipients = state.devices
+        .where((recipient) => recipient.id != deviceId)
+        .toList(growable: false);
+    if (recipients.isEmpty) return;
+    final senderSeed = await _yuidIdentity.privateKeySeed();
     _ensureCurrentGeneration(generation);
-    for (final recipient in state.devices) {
-      if (recipient.id == deviceId) continue;
+    for (final recipient in recipients) {
       _outgoingSequence += 1;
       final envelope = await _envelopes.seal(
         context: MediaRoomContext(
@@ -254,7 +273,7 @@ class MediaE2eeCoordinator {
           _decodeBase64Url(recipient.publicKey),
           type: KeyPairType.x25519,
         ),
-        senderYuidKeyPair: senderKeyPair,
+        senderYuidPrivateKeySeed: senderSeed,
       );
       _ensureCurrentGeneration(generation);
       await _sendEnvelope(envelope);
@@ -381,6 +400,17 @@ class MediaE2eeCoordinator {
     if (_status == status) return;
     _status = status;
     _onStatusChanged(status);
+  }
+
+  Future<T> _stage<T>(String name, Future<T> Function() action) async {
+    try {
+      return await action();
+    } catch (error, stackTrace) {
+      Error.throwWithStackTrace(
+        StateError('Encrypted media $name failed: $error'),
+        stackTrace,
+      );
+    }
   }
 
   Uint8List _decodeBase64Url(String value) {

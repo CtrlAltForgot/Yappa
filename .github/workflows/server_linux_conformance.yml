@@ -1,0 +1,100 @@
+name: Linux Server Host Contract
+
+on:
+  pull_request:
+    paths:
+      - ".github/scripts/build-server-bundle.sh"
+      - ".github/scripts/verify-server-runtime-closure.js"
+      - ".github/scripts/test-server-host-contract.sh"
+      - ".github/workflows/server_linux_conformance.yml"
+      - "server/**"
+  push:
+    branches: [main]
+    paths:
+      - ".github/scripts/build-server-bundle.sh"
+      - ".github/scripts/verify-server-runtime-closure.js"
+      - ".github/scripts/test-server-host-contract.sh"
+      - ".github/workflows/server_linux_conformance.yml"
+      - "server/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: yappa-server-host-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-host-contract:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Ubuntu 24.04 LTS x64
+            image: ubuntu@sha256:52df9b1ee71626e0088f7d400d5c6b5f7bb916f8f0c82b474289a4ece6cf3faf
+            package_manager: apt
+            os_id: ubuntu
+            version: "24.04"
+            target: ubuntu-lts-x64
+          - name: Debian 13 stable x64
+            image: debian@sha256:9bb8a3626890e084ab54e888fdd7c4b6d2f119071cd4c5dc5fecb4d73062aa5f
+            package_manager: apt
+            os_id: debian
+            version: "13"
+            target: debian-stable-x64
+          - name: Fedora 44 x64
+            image: fedora@sha256:89f61a124414261868224666aa7fb8df1b78397a53623774bdfb105d1612b48b
+            package_manager: dnf
+            os_id: fedora
+            version: "44"
+            target: fedora-current-x64
+          - name: Rocky Linux 10 x64
+            image: rockylinux/rockylinux@sha256:86b31f19c0ce9c9153ad06e4f35c022901275b9c16683a1b27429f0178e494dc
+            package_manager: microdnf
+            os_id: rocky
+            version: "10"
+            target: rhel-compatible-current-x64
+
+    steps:
+      - name: Install host-contract prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ matrix.package_manager }}" in
+            apt)
+              apt-get update
+              DEBIAN_FRONTEND=noninteractive apt-get install -y \
+                bash ca-certificates coreutils curl findutils git gzip \
+                nodejs npm sqlite3 tar util-linux
+              ;;
+            dnf)
+              dnf install -y \
+                bash ca-certificates coreutils curl findutils git gzip \
+                nodejs npm sqlite tar util-linux
+              ;;
+            microdnf)
+              microdnf install -y \
+                bash ca-certificates curl findutils git gzip \
+                nodejs npm sqlite tar util-linux
+              ;;
+          esac
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Run host packaging and lifecycle contract
+        shell: bash
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          .github/scripts/test-server-host-contract.sh \
+            "${{ matrix.os_id }}" \
+            "${{ matrix.version }}" \
+            "${{ matrix.target }}"

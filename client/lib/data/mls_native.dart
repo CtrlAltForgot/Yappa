@@ -301,7 +301,9 @@ class _MlsNativeLibrary {
             'native/yappa_mls/target/release/libyappa_mls.so',
           ]
         : Platform.isMacOS
-        ? const [
+        ? [
+            '${File(Platform.resolvedExecutable).parent.path}/'
+                '../Frameworks/libyappa_mls.dylib',
             'libyappa_mls.dylib',
             'native/yappa_mls/target/debug/libyappa_mls.dylib',
             'native/yappa_mls/target/release/libyappa_mls.dylib',

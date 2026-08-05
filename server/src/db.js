@@ -3,7 +3,7 @@ const path = require('path');
 const crypto = require('crypto');
 const Database = require('better-sqlite3');
 
-const CURRENT_SCHEMA_VERSION = 3;
+const CURRENT_SCHEMA_VERSION = 6;
 
 function ensureDirForFile(filePath) {
   const dir = path.dirname(filePath);
@@ -124,6 +124,65 @@ function createBaseTables(db) {
     FOREIGN KEY (user_id) REFERENCES users(id)
   );
 
+  CREATE TABLE IF NOT EXISTS history_recovery_device_keys (
+    device_id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    public_key TEXT NOT NULL UNIQUE,
+    yuid_authorization_signature TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (device_id) REFERENCES media_devices(id),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS history_recovery_transfers (
+    id TEXT PRIMARY KEY,
+    channel_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    source_device_id TEXT NOT NULL,
+    destination_device_id TEXT NOT NULL,
+    first_server_sequence INTEGER NOT NULL CHECK (first_server_sequence >= 1),
+    last_server_sequence INTEGER NOT NULL CHECK (
+      last_server_sequence >= first_server_sequence
+    ),
+    event_count INTEGER NOT NULL CHECK (event_count >= 1),
+    chunk_count INTEGER NOT NULL CHECK (chunk_count BETWEEN 1 AND 1024),
+    total_bytes INTEGER NOT NULL CHECK (
+      total_bytes BETWEEN 1 AND 268435456
+    ),
+    manifest BLOB NOT NULL,
+    manifest_sha256 TEXT NOT NULL,
+    yuid_signature TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (
+      state IN ('uploading', 'ready', 'consumed', 'canceled', 'expired')
+    ),
+    uploaded_chunks INTEGER NOT NULL DEFAULT 0,
+    uploaded_bytes INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    ready_at TEXT,
+    consumed_at TEXT,
+    canceled_at TEXT,
+    expires_at TEXT NOT NULL,
+    FOREIGN KEY (channel_id) REFERENCES channels(id),
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (source_device_id) REFERENCES media_devices(id),
+    FOREIGN KEY (destination_device_id) REFERENCES media_devices(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS history_recovery_transfer_chunks (
+    transfer_id TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL CHECK (chunk_index >= 0),
+    ciphertext BLOB NOT NULL,
+    ciphertext_sha256 TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL CHECK (
+      size_bytes BETWEEN 1 AND 262144
+    ),
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (transfer_id, chunk_index),
+    FOREIGN KEY (transfer_id) REFERENCES history_recovery_transfers(id)
+      ON DELETE CASCADE
+  );
+
   CREATE TABLE IF NOT EXISTS channels (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
@@ -148,7 +207,7 @@ function createBaseTables(db) {
 
   CREATE TABLE IF NOT EXISTS server_settings (
     id INTEGER PRIMARY KEY CHECK (id = 1),
-                                              attachment_retention_days INTEGER NOT NULL DEFAULT 30,
+                                              attachment_retention_days INTEGER NOT NULL DEFAULT 0,
                                               attachment_max_bytes INTEGER NOT NULL DEFAULT 26214400,
                                               attachment_allowed_types_json TEXT NOT NULL DEFAULT '["image/","video/","audio/","text/","application/pdf","application/zip","application/json"]',
                                               file_storage_enabled INTEGER NOT NULL DEFAULT 1,
@@ -393,6 +452,65 @@ function runMigrations(db) {
     );
   }
   db.exec(`
+  CREATE TABLE IF NOT EXISTS history_recovery_device_keys (
+    device_id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    public_key TEXT NOT NULL UNIQUE,
+    yuid_authorization_signature TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (device_id) REFERENCES media_devices(id),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS history_recovery_transfers (
+    id TEXT PRIMARY KEY,
+    channel_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    source_device_id TEXT NOT NULL,
+    destination_device_id TEXT NOT NULL,
+    first_server_sequence INTEGER NOT NULL CHECK (first_server_sequence >= 1),
+    last_server_sequence INTEGER NOT NULL CHECK (
+      last_server_sequence >= first_server_sequence
+    ),
+    event_count INTEGER NOT NULL CHECK (event_count >= 1),
+    chunk_count INTEGER NOT NULL CHECK (chunk_count BETWEEN 1 AND 1024),
+    total_bytes INTEGER NOT NULL CHECK (
+      total_bytes BETWEEN 1 AND 268435456
+    ),
+    manifest BLOB NOT NULL,
+    manifest_sha256 TEXT NOT NULL,
+    yuid_signature TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (
+      state IN ('uploading', 'ready', 'consumed', 'canceled', 'expired')
+    ),
+    uploaded_chunks INTEGER NOT NULL DEFAULT 0,
+    uploaded_bytes INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    ready_at TEXT,
+    consumed_at TEXT,
+    canceled_at TEXT,
+    expires_at TEXT NOT NULL,
+    FOREIGN KEY (channel_id) REFERENCES channels(id),
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (source_device_id) REFERENCES media_devices(id),
+    FOREIGN KEY (destination_device_id) REFERENCES media_devices(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS history_recovery_transfer_chunks (
+    transfer_id TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL CHECK (chunk_index >= 0),
+    ciphertext BLOB NOT NULL,
+    ciphertext_sha256 TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL CHECK (
+      size_bytes BETWEEN 1 AND 262144
+    ),
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (transfer_id, chunk_index),
+    FOREIGN KEY (transfer_id) REFERENCES history_recovery_transfers(id)
+      ON DELETE CASCADE
+  );
+
   CREATE TABLE IF NOT EXISTS mls_device_credentials (
     device_id TEXT NOT NULL,
     signature_public_key TEXT NOT NULL,
@@ -429,6 +547,19 @@ function runMigrations(db) {
   UPDATE sessions
   SET device_name = 'Existing Yappa client'
   WHERE device_name IS NULL OR device_name = '';
+
+  UPDATE server_settings
+  SET attachment_retention_days = 0,
+      updated_at = datetime('now')
+  WHERE attachment_retention_days != 0;
+
+  UPDATE attachments
+  SET expires_at = NULL
+  WHERE deleted_at IS NULL;
+
+  UPDATE encrypted_attachments
+  SET expires_at = NULL
+  WHERE deleted_at IS NULL;
   `);
 
   db.prepare(`
@@ -462,7 +593,19 @@ function runMigrations(db) {
   ON media_devices (user_id);
   CREATE INDEX IF NOT EXISTS idx_media_devices_active
   ON media_devices (revoked_at);
-  CREATE INDEX IF NOT EXISTS idx_messages_channel_id ON messages (channel_id);
+  CREATE INDEX IF NOT EXISTS idx_history_recovery_keys_user
+  ON history_recovery_device_keys (user_id, device_id);
+  CREATE INDEX IF NOT EXISTS idx_history_recovery_transfer_destination
+  ON history_recovery_transfers (
+    destination_device_id, state, channel_id, created_at
+  );
+  CREATE INDEX IF NOT EXISTS idx_history_recovery_transfer_source
+  ON history_recovery_transfers (source_device_id, state, created_at);
+  CREATE INDEX IF NOT EXISTS idx_history_recovery_transfer_expiry
+  ON history_recovery_transfers (state, expires_at);
+  DROP INDEX IF EXISTS idx_messages_channel_id;
+  CREATE INDEX IF NOT EXISTS idx_messages_channel_id_id
+  ON messages (channel_id, id);
   CREATE INDEX IF NOT EXISTS idx_channels_position ON channels (position);
   CREATE INDEX IF NOT EXISTS idx_attachments_channel_id ON attachments (channel_id);
   CREATE INDEX IF NOT EXISTS idx_attachments_message_id ON attachments (message_id);
@@ -517,7 +660,7 @@ function ensureServerConfig(db, defaults) {
   }
 
   const createdAt = nowIso();
-  const serverId = randomId('node');
+  const serverId = `srv_${crypto.randomBytes(16).toString('hex')}`;
   db.prepare(`
   INSERT INTO server_config (
     id,
@@ -567,7 +710,7 @@ function ensureServerSettings(db) {
     created_at,
     updated_at
   )
-  VALUES (1, 30, 26214400, ?, 1, 2147483648, 262144000, ?, 1, ?, ?)
+  VALUES (1, 0, 26214400, ?, 1, 2147483648, 262144000, ?, 1, ?, ?)
   `).run(
     JSON.stringify(['image/', 'video/', 'audio/', 'text/', 'application/pdf', 'application/zip', 'application/json']),
          JSON.stringify(['*']),

@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 
 import '../../app/app_state.dart';
 import '../../app/theme.dart';
+import '../../data/api_client.dart';
 import '../../shared/pick_and_adjust_image.dart';
+import '../../shared/network_asset_scope.dart';
 
 Future<void> showServerAdminDialog(
   BuildContext context, {
@@ -19,6 +21,7 @@ Future<void> showServerAdminDialog(
 
 enum _AdminSection {
   branding,
+  storage,
   emojis,
   stickers,
   soundboard,
@@ -52,6 +55,7 @@ class _ServerAdminDialogState extends State<_ServerAdminDialog> {
   bool _uploadingBanner = false;
 
   String? _brandingMessage;
+  late Future<ServerStorageStatus> _storageFuture;
 
   @override
   void initState() {
@@ -62,6 +66,7 @@ class _ServerAdminDialogState extends State<_ServerAdminDialog> {
     _accentController = TextEditingController(text: server.accentColor);
     _iconUrlController = TextEditingController(text: server.iconUrl ?? '');
     _bannerUrlController = TextEditingController(text: server.bannerUrl ?? '');
+    _storageFuture = widget.appState.fetchSelectedServerStorage();
   }
 
   @override
@@ -165,11 +170,8 @@ class _ServerAdminDialogState extends State<_ServerAdminDialog> {
       final uploadFile = File('${tempDir.path}/$slot.${picked.extension}');
       await uploadFile.writeAsBytes(picked.bytes, flush: true);
 
-      final updatedServer =
-          await widget.appState.uploadSelectedServerBrandingAsset(
-        slot: slot,
-        file: uploadFile,
-      );
+      final updatedServer = await widget.appState
+          .uploadSelectedServerBrandingAsset(slot: slot, file: uploadFile);
 
       if (!mounted) return;
 
@@ -180,8 +182,9 @@ class _ServerAdminDialogState extends State<_ServerAdminDialog> {
       _accentController.text = updatedServer.accentColor;
 
       setState(() {
-        _brandingMessage =
-            slot == 'icon' ? 'Server icon uploaded.' : 'Server banner uploaded.';
+        _brandingMessage = slot == 'icon'
+            ? 'Server icon uploaded.'
+            : 'Server banner uploaded.';
       });
     } catch (error) {
       if (!mounted) return;
@@ -213,14 +216,9 @@ class _ServerAdminDialogState extends State<_ServerAdminDialog> {
     return Dialog(
       insetPadding: const EdgeInsets.all(24),
       backgroundColor: NewChatColors.panel,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(28),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(
-          maxWidth: 1180,
-          maxHeight: 820,
-        ),
+        constraints: const BoxConstraints(maxWidth: 1180, maxHeight: 820),
         child: Row(
           children: [
             _AdminSidebar(
@@ -268,6 +266,8 @@ class _ServerAdminDialogState extends State<_ServerAdminDialog> {
     switch (_selectedSection) {
       case _AdminSection.branding:
         return _buildBrandingSection();
+      case _AdminSection.storage:
+        return _buildStorageSection();
       case _AdminSection.emojis:
         return _buildPlaceholderSection(
           icon: Icons.emoji_emotions_outlined,
@@ -373,6 +373,152 @@ class _ServerAdminDialogState extends State<_ServerAdminDialog> {
           ],
         );
     }
+  }
+
+  Widget _buildStorageSection() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: FutureBuilder<ServerStorageStatus>(
+        future: _storageFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError || !snapshot.hasData) {
+            return _buildSectionCard(
+              title: 'Storage status unavailable',
+              subtitle: 'Yappa could not safely inspect this server’s storage.',
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed: _refreshStorage,
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: const Text('Try again'),
+                ),
+              ),
+            );
+          }
+          final storage = snapshot.data!;
+          final statusColor = switch (storage.status) {
+            'healthy' => const Color(0xFF78D7A5),
+            'warning' => const Color(0xFFFFC857),
+            _ => const Color(0xFFFF7A7A),
+          };
+          return Column(
+            children: [
+              _buildSectionCard(
+                title: 'Durable chat storage',
+                subtitle:
+                    'Yappa reserves emergency disk headroom so messages are '
+                    'never accepted and silently discarded later.',
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          storage.acceptsDurableWrites
+                              ? Icons.check_circle_rounded
+                              : Icons.error_rounded,
+                          color: statusColor,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            storage.status.toUpperCase(),
+                            style: TextStyle(
+                              color: statusColor,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: _refreshStorage,
+                          icon: const Icon(Icons.refresh_rounded, size: 18),
+                          label: const Text('Refresh'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+                    _storageMetric(
+                      'Free on storage volume',
+                      _formatBytes(storage.availableBytes),
+                    ),
+                    _storageMetric(
+                      'Critical reserve',
+                      _formatBytes(storage.criticalFreeBytes),
+                    ),
+                    _storageMetric(
+                      'Warning threshold',
+                      _formatBytes(storage.warningFreeBytes),
+                    ),
+                    _storageMetric(
+                      'Database, WAL, and SHM',
+                      _formatBytes(storage.databaseBytes),
+                    ),
+                    _storageMetric(
+                      'Ordinary attachments',
+                      _formatBytes(storage.ordinaryAttachmentBytes),
+                    ),
+                    _storageMetric(
+                      'Encrypted attachments',
+                      _formatBytes(storage.encryptedAttachmentBytes),
+                    ),
+                    _storageMetric(
+                      'Portable backups',
+                      storage.backupMonitoringEnabled
+                          ? _formatBytes(storage.backupBytes ?? 0)
+                          : 'Not connected to backend monitoring',
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _refreshStorage() {
+    setState(() {
+      _storageFuture = widget.appState.fetchSelectedServerStorage();
+    });
+  }
+
+  Widget _storageMetric(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 7),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(color: NewChatColors.textMuted),
+            ),
+          ),
+          const SizedBox(width: 16),
+          Flexible(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatBytes(int bytes) {
+    const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+    var value = bytes.toDouble();
+    var unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+      value /= 1024;
+      unit += 1;
+    }
+    final precision = unit == 0 || value >= 100 ? 0 : 1;
+    return '${value.toStringAsFixed(precision)} ${units[unit]}';
   }
 
   Widget _buildBrandingSection() {
@@ -577,11 +723,7 @@ class _ServerAdminDialogState extends State<_ServerAdminDialog> {
 
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              left,
-              const SizedBox(height: 18),
-              right,
-            ],
+            children: [left, const SizedBox(height: 18), right],
           );
         },
       ),
@@ -751,19 +893,12 @@ class _ServerAdminDialogState extends State<_ServerAdminDialog> {
       ),
       child: Text(
         message,
-        style: TextStyle(
-          color: NewChatColors.textMuted,
-          fontSize: 12,
-        ),
+        style: TextStyle(color: NewChatColors.textMuted, fontSize: 12),
       ),
     );
   }
 
-  InputDecoration _decoration(
-    String label, {
-    String? hint,
-    IconData? icon,
-  }) {
+  InputDecoration _decoration(String label, {String? hint, IconData? icon}) {
     return InputDecoration(
       labelText: label,
       hintText: hint,
@@ -792,10 +927,7 @@ class _ServerAdminDialogState extends State<_ServerAdminDialog> {
         children: [
           Text(
             title,
-            style: const TextStyle(
-              fontWeight: FontWeight.w800,
-              fontSize: 14,
-            ),
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
           ),
           const SizedBox(height: 12),
           ClipRRect(
@@ -812,7 +944,7 @@ class _ServerAdminDialogState extends State<_ServerAdminDialog> {
                         color: NewChatColors.textMuted,
                       ),
                     )
-                  : Image.network(
+                  : RoutedNetworkImage(
                       resolvedUrl,
                       fit: BoxFit.cover,
                       errorBuilder: (context, error, stackTrace) {
@@ -832,10 +964,7 @@ class _ServerAdminDialogState extends State<_ServerAdminDialog> {
             resolvedUrl ?? 'No image set yet.',
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: NewChatColors.textMuted,
-              fontSize: 11,
-            ),
+            style: TextStyle(color: NewChatColors.textMuted, fontSize: 11),
           ),
         ],
       ),
@@ -864,10 +993,7 @@ class _ServerAdminDialogState extends State<_ServerAdminDialog> {
         children: [
           const Text(
             'Quick preview',
-            style: TextStyle(
-              fontWeight: FontWeight.w800,
-              fontSize: 14,
-            ),
+            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
           ),
           const SizedBox(height: 12),
           Container(
@@ -890,13 +1016,15 @@ class _ServerAdminDialogState extends State<_ServerAdminDialog> {
                               begin: Alignment.topCenter,
                               end: Alignment.bottomCenter,
                               colors: [
-                                NewChatColors.accentGlow.withValues(alpha: 0.92),
+                                NewChatColors.accentGlow.withValues(
+                                  alpha: 0.92,
+                                ),
                                 NewChatColors.accent.withValues(alpha: 0.74),
                               ],
                             ),
                           ),
                         )
-                      : Image.network(
+                      : RoutedNetworkImage(
                           resolvedBannerUrl,
                           fit: BoxFit.cover,
                           errorBuilder: (context, error, stackTrace) {
@@ -906,8 +1034,12 @@ class _ServerAdminDialogState extends State<_ServerAdminDialog> {
                                   begin: Alignment.topCenter,
                                   end: Alignment.bottomCenter,
                                   colors: [
-                                    NewChatColors.accentGlow.withValues(alpha: 0.92),
-                                    NewChatColors.accent.withValues(alpha: 0.74),
+                                    NewChatColors.accentGlow.withValues(
+                                      alpha: 0.92,
+                                    ),
+                                    NewChatColors.accent.withValues(
+                                      alpha: 0.74,
+                                    ),
                                   ],
                                 ),
                               ),
@@ -940,7 +1072,7 @@ class _ServerAdminDialogState extends State<_ServerAdminDialog> {
                                   color: NewChatColors.textMuted,
                                   size: 28,
                                 )
-                              : Image.network(
+                              : RoutedNetworkImage(
                                   resolvedIconUrl,
                                   fit: BoxFit.cover,
                                   errorBuilder: (context, error, stackTrace) {
@@ -996,9 +1128,7 @@ class _AdminContentHeader extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(24, 20, 24, 18),
       decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(color: NewChatColors.outline),
-        ),
+        border: Border(bottom: BorderSide(color: NewChatColors.outline)),
       ),
       child: Row(
         children: [
@@ -1101,7 +1231,7 @@ class _AdminSidebar extends StatelessWidget {
               children: [
                 _AdminCategorySection(
                   title: 'SERVER',
-                  items: const [_AdminSection.branding],
+                  items: const [_AdminSection.branding, _AdminSection.storage],
                   selectedSection: selectedSection,
                   onSectionSelected: onSectionSelected,
                 ),
@@ -1251,8 +1381,15 @@ _AdminSectionMeta _sectionMeta(_AdminSection section) {
     case _AdminSection.branding:
       return const _AdminSectionMeta(
         label: 'Server Branding',
-        description: 'Change the server name, icon, banner, and visual identity.',
+        description:
+            'Change the server name, icon, banner, and visual identity.',
         icon: Icons.style_rounded,
+      );
+    case _AdminSection.storage:
+      return const _AdminSectionMeta(
+        label: 'Storage',
+        description: 'Inspect durable history capacity and safety headroom.',
+        icon: Icons.storage_rounded,
       );
     case _AdminSection.emojis:
       return const _AdminSectionMeta(

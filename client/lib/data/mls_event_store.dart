@@ -12,6 +12,50 @@ import 'secret_storage.dart';
 
 typedef MlsEventDirectoryProvider = Future<Directory> Function();
 
+class MlsRecoveredSenderAuthorization {
+  final bool authorized;
+  final bool senderIsOwner;
+
+  const MlsRecoveredSenderAuthorization({
+    required this.authorized,
+    required this.senderIsOwner,
+  });
+}
+
+class MlsHistoryRecoveryReceipt {
+  final String transferId;
+  final String manifestSha256;
+  final String sourceDeviceId;
+  final String destinationDeviceId;
+  final int firstServerSequence;
+  final int lastServerSequence;
+  final int eventCount;
+
+  const MlsHistoryRecoveryReceipt({
+    required this.transferId,
+    required this.manifestSha256,
+    required this.sourceDeviceId,
+    required this.destinationDeviceId,
+    required this.firstServerSequence,
+    required this.lastServerSequence,
+    required this.eventCount,
+  });
+
+  void validate() {
+    if (!RegExp(r'^recovery_[A-Za-z0-9_-]{22}$').hasMatch(transferId) ||
+        !RegExp(r'^[a-f0-9]{64}$').hasMatch(manifestSha256) ||
+        !RegExp(r'^device_[A-Za-z0-9_-]{24}$').hasMatch(sourceDeviceId) ||
+        !RegExp(r'^device_[A-Za-z0-9_-]{24}$').hasMatch(destinationDeviceId) ||
+        sourceDeviceId == destinationDeviceId ||
+        firstServerSequence < 1 ||
+        lastServerSequence < firstServerSequence ||
+        eventCount < 1 ||
+        eventCount > lastServerSequence - firstServerSequence + 1) {
+      throw const FormatException('Invalid history recovery receipt.');
+    }
+  }
+}
+
 class MlsApplicationEvent {
   final int serverSequence;
   final int epoch;
@@ -273,20 +317,29 @@ class MlsEventStore {
 
   final Uint8List _key;
   final Uint8List _aad;
+  final String _deviceId;
+  final String _channelId;
   final File _file;
   final File _pending;
   List<MlsApplicationEvent> _events;
+  Map<String, MlsHistoryRecoveryReceipt> _recoveries;
 
   MlsEventStore._({
     required Uint8List key,
     required Uint8List aad,
+    required String deviceId,
+    required String channelId,
     required File file,
     required List<MlsApplicationEvent> events,
+    required Map<String, MlsHistoryRecoveryReceipt> recoveries,
   }) : _key = key,
        _aad = aad,
+       _deviceId = deviceId,
+       _channelId = channelId,
        _file = file,
        _pending = File('${file.path}.pending'),
-       _events = events;
+       _events = events,
+       _recoveries = recoveries;
 
   static Future<MlsEventStore> open({
     required String serverId,
@@ -341,39 +394,198 @@ class MlsEventStore {
       aad: Uint8List.fromList(
         utf8.encode('yappa-mls-event-store-v1|$serverId|$deviceId|$channelId'),
       ),
+      deviceId: deviceId,
+      channelId: channelId,
       file: file,
       events: [],
+      recoveries: {},
     );
     if (await pending.exists()) {
-      store._events = await store._decode(await pending.readAsBytes());
+      final snapshot = await store._decode(await pending.readAsBytes());
+      store._events = snapshot.events;
+      store._recoveries = snapshot.recoveries;
       if (await file.exists()) await file.delete();
       await pending.rename(file.path);
       await _restrictFile(file);
     } else if (await file.exists()) {
-      store._events = await store._decode(await file.readAsBytes());
+      final snapshot = await store._decode(await file.readAsBytes());
+      store._events = snapshot.events;
+      store._recoveries = snapshot.recoveries;
     }
     return store;
   }
 
   List<MlsApplicationEvent> get events => List.unmodifiable(_events);
 
+  List<MlsHistoryRecoveryReceipt> get recoveryReceipts =>
+      List.unmodifiable(_recoveries.values);
+
   bool containsSequence(int sequence) =>
       _events.any((event) => event.serverSequence == sequence);
+
+  Uint8List exportRecoveryRecords({
+    required int firstServerSequence,
+    required int lastServerSequence,
+  }) {
+    if (firstServerSequence < 1 || lastServerSequence < firstServerSequence) {
+      throw const FormatException('Invalid encrypted-history export range.');
+    }
+    final selected = _events
+        .where(
+          (event) =>
+              event.serverSequence >= firstServerSequence &&
+              event.serverSequence <= lastServerSequence,
+        )
+        .toList(growable: false);
+    if (selected.isEmpty ||
+        selected.first.serverSequence != firstServerSequence ||
+        selected.last.serverSequence != lastServerSequence) {
+      throw const FormatException(
+        'Encrypted history is incomplete for that export range.',
+      );
+    }
+    var previous = firstServerSequence - 1;
+    for (final event in selected) {
+      if (event.serverSequence <= previous || event.channelId != _channelId) {
+        throw const FormatException(
+          'Encrypted history is incomplete for that export range.',
+        );
+      }
+      previous = event.serverSequence;
+    }
+    return Uint8List.fromList(
+      utf8.encode(
+        _canonicalJson({
+          'events': selected.map(_encodeEvent).toList(growable: false),
+          'protocol': 'yappa-history-records-v1',
+        }),
+      ),
+    );
+  }
+
+  Future<bool> mergeRecoveryRecords({
+    required Uint8List canonicalRecords,
+    required MlsHistoryRecoveryReceipt receipt,
+    required Future<MlsRecoveredSenderAuthorization> Function(
+      MlsApplicationEvent event,
+    )
+    authorizeSender,
+  }) async {
+    receipt.validate();
+    if (receipt.destinationDeviceId != _deviceId) {
+      throw const FormatException(
+        'Encrypted-history receipt targets another device.',
+      );
+    }
+    final priorReceipt = _recoveries[receipt.transferId];
+    if (priorReceipt != null) {
+      if (_canonicalJson(_encodeReceipt(priorReceipt)) ==
+          _canonicalJson(_encodeReceipt(receipt))) {
+        return false;
+      }
+      throw const FormatException(
+        'Encrypted-history transfer replay conflicts with its receipt.',
+      );
+    }
+    if (canonicalRecords.isEmpty || canonicalRecords.length > _maxFileBytes) {
+      throw const FormatException('Invalid encrypted-history records.');
+    }
+    final recovered = _decodeRecoveryRecords(
+      canonicalRecords,
+      firstServerSequence: receipt.firstServerSequence,
+      lastServerSequence: receipt.lastServerSequence,
+      eventCount: receipt.eventCount,
+    );
+    final authorization = <int, MlsRecoveredSenderAuthorization>{};
+    for (final event in recovered) {
+      final result = await authorizeSender(event);
+      if (!result.authorized) {
+        throw const FormatException(
+          'A recovered encrypted-history sender is not authorized.',
+        );
+      }
+      authorization[event.serverSequence] = result;
+    }
+
+    final bySequence = <int, MlsApplicationEvent>{
+      for (final event in _events) event.serverSequence: event,
+    };
+    final ids = <String, MlsApplicationEvent>{
+      for (final event in _events) event.eventId: event,
+    };
+    for (final event in recovered) {
+      final existingSequence = bySequence[event.serverSequence];
+      final existingId = ids[event.eventId];
+      if (existingSequence != null &&
+          _canonicalJson(_encodeEvent(existingSequence)) !=
+              _canonicalJson(_encodeEvent(event))) {
+        throw const FormatException(
+          'Recovered encrypted-history sequence conflicts with local data.',
+        );
+      }
+      if (existingId != null &&
+          existingId.serverSequence != event.serverSequence) {
+        throw const FormatException(
+          'Recovered encrypted-history event id conflicts with local data.',
+        );
+      }
+      bySequence[event.serverSequence] = event;
+      ids[event.eventId] = event;
+    }
+    final merged = bySequence.values.toList()
+      ..sort(
+        (first, second) =>
+            first.serverSequence.compareTo(second.serverSequence),
+      );
+    final priorEvents = <String, MlsApplicationEvent>{};
+    final recoveredSequences = recovered
+        .map((event) => event.serverSequence)
+        .toSet();
+    for (final event in merged) {
+      final target = event.targetEventId == null
+          ? null
+          : priorEvents[event.targetEventId];
+      if (event.targetEventId != null && target == null) {
+        throw const FormatException(
+          'Recovered encrypted-history mutation target is missing.',
+        );
+      }
+      if (recoveredSequences.contains(event.serverSequence)) {
+        _validateMutationAuthorization(
+          event,
+          target: target,
+          senderIsOwner: authorization[event.serverSequence]!.senderIsOwner,
+        );
+      }
+      priorEvents[event.eventId] = event;
+    }
+    if (merged.length > _maxEvents) {
+      throw const FormatException('Encrypted MLS history is full.');
+    }
+    final recoveries = {..._recoveries, receipt.transferId: receipt};
+    await _persist(merged, recoveries: recoveries);
+    _events = merged;
+    _recoveries = recoveries;
+    return true;
+  }
 
   Future<void> apply(
     MlsApplicationEvent event, {
     required bool senderIsOwner,
   }) async {
+    _decodeEvent(_encodeEvent(event));
     final existing = _events
         .where((item) => item.serverSequence == event.serverSequence)
         .firstOrNull;
     if (existing != null) {
-      if (existing.eventId != event.eventId) {
+      if (_canonicalJson(_encodeEvent(existing)) !=
+          _canonicalJson(_encodeEvent(event))) {
         throw const FormatException('Conflicting encrypted event sequence.');
       }
       return;
     }
-    if (_events.length >= _maxEvents ||
+    if (event.channelId != _channelId ||
+        _events.length >= _maxEvents ||
         _events.any((item) => item.eventId == event.eventId) ||
         (_events.isNotEmpty &&
             event.serverSequence <= _events.last.serverSequence)) {
@@ -384,28 +596,11 @@ class MlsEventStore {
         : _events
               .where((item) => item.eventId == event.targetEventId)
               .firstOrNull;
-    if (event.targetEventId != null && target == null) {
-      throw const FormatException('Missing encrypted event target.');
-    }
-    if (event.kind == EncryptedApplicationEventKind.edit &&
-        target!.kind != EncryptedApplicationEventKind.message) {
-      throw const FormatException('Invalid encrypted edit target.');
-    }
-    if ((event.kind == EncryptedApplicationEventKind.delete ||
-            event.kind == EncryptedApplicationEventKind.reaction) &&
-        target!.kind != EncryptedApplicationEventKind.message &&
-        target.kind != EncryptedApplicationEventKind.attachment) {
-      throw const FormatException('Invalid encrypted mutation target.');
-    }
-    if (event.kind == EncryptedApplicationEventKind.edit &&
-        !_sameBytes(event.senderCredential, target!.senderCredential)) {
-      throw const FormatException('Unauthorized encrypted edit.');
-    }
-    if (event.kind == EncryptedApplicationEventKind.delete &&
-        !senderIsOwner &&
-        !_sameBytes(event.senderCredential, target!.senderCredential)) {
-      throw const FormatException('Unauthorized encrypted delete.');
-    }
+    _validateMutationAuthorization(
+      event,
+      target: target,
+      senderIsOwner: senderIsOwner,
+    );
     final next = [..._events, event];
     await _persist(next);
     _events = next;
@@ -415,12 +610,19 @@ class MlsEventStore {
     _key.fillRange(0, _key.length, 0);
   }
 
-  Future<void> _persist(List<MlsApplicationEvent> events) async {
+  Future<void> _persist(
+    List<MlsApplicationEvent> events, {
+    Map<String, MlsHistoryRecoveryReceipt>? recoveries,
+  }) async {
+    final durableRecoveries = recoveries ?? _recoveries;
     final plaintext = Uint8List.fromList(
       utf8.encode(
         jsonEncode({
-          'version': 1,
+          'version': 2,
           'events': events.map(_encodeEvent).toList(growable: false),
+          'recoveries': durableRecoveries.values
+              .map(_encodeReceipt)
+              .toList(growable: false),
         }),
       ),
     );
@@ -448,7 +650,7 @@ class MlsEventStore {
     await _restrictFile(_file);
   }
 
-  Future<List<MlsApplicationEvent>> _decode(List<int> encrypted) async {
+  Future<_MlsEventStoreSnapshot> _decode(List<int> encrypted) async {
     if (encrypted.length < 28 || encrypted.length > _maxFileBytes) {
       throw const FormatException('Invalid encrypted MLS history.');
     }
@@ -469,7 +671,13 @@ class MlsEventStore {
           jsonDecode(utf8.decode(plaintext)) as Map,
         );
         final rawEvents = json['events'] as List;
-        if (json['version'] != 1 || rawEvents.length > _maxEvents) {
+        final version = json['version'];
+        final rawRecoveries = version == 2
+            ? json['recoveries'] as List
+            : const [];
+        if ((version != 1 && version != 2) ||
+            rawEvents.length > _maxEvents ||
+            rawRecoveries.length > _maxEvents) {
           throw const FormatException();
         }
         final events = rawEvents
@@ -478,12 +686,24 @@ class MlsEventStore {
         var previous = 0;
         final ids = <String>{};
         for (final event in events) {
-          if (event.serverSequence <= previous || !ids.add(event.eventId)) {
+          if (event.serverSequence <= previous ||
+              event.channelId != _channelId ||
+              !ids.add(event.eventId)) {
             throw const FormatException();
           }
           previous = event.serverSequence;
         }
-        return events;
+        final recoveries = <String, MlsHistoryRecoveryReceipt>{};
+        for (final item in rawRecoveries) {
+          final receipt = _decodeReceipt(
+            Map<String, dynamic>.from(item as Map),
+          );
+          if (recoveries[receipt.transferId] != null) {
+            throw const FormatException();
+          }
+          recoveries[receipt.transferId] = receipt;
+        }
+        return _MlsEventStoreSnapshot(events: events, recoveries: recoveries);
       } finally {
         plaintext.fillRange(0, plaintext.length, 0);
       }
@@ -512,6 +732,18 @@ class MlsEventStore {
   };
 
   static MlsApplicationEvent _decodeEvent(Map<String, dynamic> json) {
+    const keys = {
+      'serverSequence',
+      'epoch',
+      'eventId',
+      'channelId',
+      'kind',
+      'targetEventId',
+      'createdAt',
+      'body',
+      'senderCredential',
+      'senderSignaturePublicKey',
+    };
     final sequence = json['serverSequence'];
     final epoch = json['epoch'];
     final eventId = json['eventId']?.toString() ?? '';
@@ -520,7 +752,9 @@ class MlsEventStore {
     final createdAt = DateTime.tryParse(json['createdAt']?.toString() ?? '');
     final senderCredential = _decodeBytes(json['senderCredential']);
     final senderKey = _decodeBytes(json['senderSignaturePublicKey']);
-    if (sequence is! int ||
+    if (json.length != keys.length ||
+        !json.keys.toSet().containsAll(keys) ||
+        sequence is! int ||
         sequence < 1 ||
         epoch is! int ||
         epoch < 0 ||
@@ -533,18 +767,142 @@ class MlsEventStore {
         senderKey.length != 32) {
       throw const FormatException();
     }
+    final kind = EncryptedApplicationEventKind.parse(json['kind']);
+    final body = Map<String, dynamic>.from(json['body'] as Map);
+    final attachmentIds = kind == EncryptedApplicationEventKind.attachment
+        ? (body['attachments'] as List)
+              .map(
+                (item) =>
+                    Map<String, dynamic>.from(item as Map)['id'].toString(),
+              )
+              .toList(growable: false)
+        : const <String>[];
+    final routing = EncryptedApplicationEventRouting(
+      eventId: eventId,
+      kind: kind,
+      targetEventId: target,
+      encryptedAttachmentIds: attachmentIds,
+    );
+    MlsApplicationEvent._validateBody(routing, body);
     return MlsApplicationEvent(
       serverSequence: sequence,
       epoch: epoch,
       eventId: eventId,
       channelId: channelId,
-      kind: EncryptedApplicationEventKind.parse(json['kind']),
+      kind: kind,
       targetEventId: target,
       createdAt: createdAt.toUtc(),
-      body: Map<String, dynamic>.from(json['body'] as Map),
+      body: body,
       senderCredential: senderCredential,
       senderSignaturePublicKey: senderKey,
     );
+  }
+
+  List<MlsApplicationEvent> _decodeRecoveryRecords(
+    Uint8List canonicalRecords, {
+    required int firstServerSequence,
+    required int lastServerSequence,
+    required int eventCount,
+  }) {
+    try {
+      final text = utf8.decode(canonicalRecords);
+      final json = Map<String, dynamic>.from(jsonDecode(text) as Map);
+      if (json.length != 2 ||
+          json['protocol'] != 'yappa-history-records-v1' ||
+          _canonicalJson(json) != text) {
+        throw const FormatException();
+      }
+      final raw = json['events'] as List;
+      if (raw.length != eventCount) {
+        throw const FormatException();
+      }
+      final result = raw
+          .map((item) => _decodeEvent(Map<String, dynamic>.from(item as Map)))
+          .toList(growable: false);
+      var previous = firstServerSequence - 1;
+      for (var index = 0; index < result.length; index++) {
+        final event = result[index];
+        if (event.serverSequence <= previous ||
+            event.serverSequence < firstServerSequence ||
+            event.serverSequence > lastServerSequence ||
+            event.channelId != _channelId) {
+          throw const FormatException();
+        }
+        previous = event.serverSequence;
+      }
+      if (result.first.serverSequence != firstServerSequence ||
+          result.last.serverSequence != lastServerSequence) {
+        throw const FormatException();
+      }
+      return result;
+    } catch (_) {
+      throw const FormatException('Invalid encrypted-history records.');
+    }
+  }
+
+  static void _validateMutationAuthorization(
+    MlsApplicationEvent event, {
+    required MlsApplicationEvent? target,
+    required bool senderIsOwner,
+  }) {
+    final requiresTarget = {
+      EncryptedApplicationEventKind.edit,
+      EncryptedApplicationEventKind.delete,
+      EncryptedApplicationEventKind.reaction,
+    }.contains(event.kind);
+    if (requiresTarget && (event.targetEventId == null || target == null)) {
+      throw const FormatException('Missing encrypted event target.');
+    }
+    if (event.kind == EncryptedApplicationEventKind.edit &&
+        target!.kind != EncryptedApplicationEventKind.message) {
+      throw const FormatException('Invalid encrypted edit target.');
+    }
+    if ((event.kind == EncryptedApplicationEventKind.delete ||
+            event.kind == EncryptedApplicationEventKind.reaction) &&
+        target!.kind != EncryptedApplicationEventKind.message &&
+        target.kind != EncryptedApplicationEventKind.attachment) {
+      throw const FormatException('Invalid encrypted mutation target.');
+    }
+    if (event.kind == EncryptedApplicationEventKind.edit &&
+        !_sameBytes(event.senderCredential, target!.senderCredential)) {
+      throw const FormatException('Unauthorized encrypted edit.');
+    }
+    if (event.kind == EncryptedApplicationEventKind.delete &&
+        !senderIsOwner &&
+        !_sameBytes(event.senderCredential, target!.senderCredential)) {
+      throw const FormatException('Unauthorized encrypted delete.');
+    }
+  }
+
+  static Map<String, dynamic> _encodeReceipt(
+    MlsHistoryRecoveryReceipt receipt,
+  ) => {
+    'destinationDeviceId': receipt.destinationDeviceId,
+    'eventCount': receipt.eventCount,
+    'firstServerSequence': receipt.firstServerSequence,
+    'lastServerSequence': receipt.lastServerSequence,
+    'manifestSha256': receipt.manifestSha256,
+    'sourceDeviceId': receipt.sourceDeviceId,
+    'transferId': receipt.transferId,
+  };
+
+  static MlsHistoryRecoveryReceipt _decodeReceipt(Map<String, dynamic> json) {
+    if (json.length != 7) throw const FormatException();
+    final receipt = MlsHistoryRecoveryReceipt(
+      transferId: json['transferId']?.toString() ?? '',
+      manifestSha256: json['manifestSha256']?.toString() ?? '',
+      sourceDeviceId: json['sourceDeviceId']?.toString() ?? '',
+      destinationDeviceId: json['destinationDeviceId']?.toString() ?? '',
+      firstServerSequence: json['firstServerSequence'] is int
+          ? json['firstServerSequence'] as int
+          : -1,
+      lastServerSequence: json['lastServerSequence'] is int
+          ? json['lastServerSequence'] as int
+          : -1,
+      eventCount: json['eventCount'] is int ? json['eventCount'] as int : -1,
+    );
+    receipt.validate();
+    return receipt;
   }
 
   static Uint8List _decodeBytes(dynamic value) {
@@ -579,6 +937,32 @@ class MlsEventStore {
       if (result.exitCode != 0) throw const FileSystemException();
     }
   }
+}
+
+class _MlsEventStoreSnapshot {
+  final List<MlsApplicationEvent> events;
+  final Map<String, MlsHistoryRecoveryReceipt> recoveries;
+
+  const _MlsEventStoreSnapshot({
+    required this.events,
+    required this.recoveries,
+  });
+}
+
+String _canonicalJson(dynamic value) {
+  dynamic normalize(dynamic item) {
+    if (item is Map) {
+      final keys = item.keys.map((key) => key.toString()).toList()..sort();
+      return {for (final key in keys) key: normalize(item[key])};
+    }
+    if (item is List) return item.map(normalize).toList(growable: false);
+    if (item == null || item is String || item is bool || item is int) {
+      return item;
+    }
+    throw const FormatException('Invalid canonical JSON value.');
+  }
+
+  return jsonEncode(normalize(value));
 }
 
 bool _sameStrings(List<String> first, List<String> second) {

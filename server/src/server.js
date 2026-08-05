@@ -15,6 +15,7 @@ const multer = require('multer');
 const mime = require('mime-types');
 const { Server } = require('socket.io');
 const { createPinnedLookup } = require('./safe-preview-lookup');
+const { readStorageCapacity } = require('./storage-capacity');
 const nacl = require('tweetnacl');
 const { AccessToken } = require('livekit-server-sdk');
 const {
@@ -193,6 +194,24 @@ const ATTACHMENT_URL_TTL_SECONDS = integerEnvironmentValue(
   15 * 60,
   { min: 60, max: 3600 },
 );
+const DURABLE_STORAGE_CRITICAL_FREE_BYTES = integerEnvironmentValue(
+  'DURABLE_STORAGE_CRITICAL_FREE_BYTES',
+  512 * 1024 * 1024,
+  { min: 16 * 1024 * 1024 },
+);
+const DURABLE_STORAGE_WARNING_FREE_BYTES = integerEnvironmentValue(
+  'DURABLE_STORAGE_WARNING_FREE_BYTES',
+  2 * 1024 * 1024 * 1024,
+  { min: 16 * 1024 * 1024 },
+);
+if (
+  DURABLE_STORAGE_WARNING_FREE_BYTES <=
+  DURABLE_STORAGE_CRITICAL_FREE_BYTES
+) {
+  console.error('[server] startup refused (code=invalid_configuration).');
+  process.exit(1);
+}
+const BACKUP_ROOT = String(process.env.YAPPA_BACKUP_ROOT || '').trim();
 const configuredAttachmentSigningSecret = optionalSecretEnvironmentValue(
   'ATTACHMENT_SIGNING_SECRET',
 );
@@ -1030,6 +1049,68 @@ ensureDir(encryptedAttachmentsRoot);
 ensureDir(sharedStorageRoot);
 ensureDir(brandingIconRoot);
 ensureDir(brandingBannerRoot);
+
+function currentStorageCapacity({
+  incomingBytes = 0,
+  includeBackupSize = false,
+} = {}) {
+  return readStorageCapacity({
+    db,
+    dbPath: path.resolve(DB_PATH),
+    dataRoot: path.resolve(DATA_ROOT),
+    backupRoot: BACKUP_ROOT ? path.resolve(BACKUP_ROOT) : '',
+    warningFreeBytes: DURABLE_STORAGE_WARNING_FREE_BYTES,
+    criticalFreeBytes: DURABLE_STORAGE_CRITICAL_FREE_BYTES,
+    incomingBytes,
+    includeBackupSize,
+  });
+}
+
+function expectedRequestBytes(req) {
+  const raw = String(req.headers['content-length'] || '');
+  if (!/^[0-9]+$/.test(raw)) return 0;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) ? value : Number.MAX_SAFE_INTEGER;
+}
+
+function requireDurableStorage(
+  req,
+  res,
+  { uploadedFile, incomingBytes: incomingBytesOverride } = {},
+) {
+  const incomingBytes = incomingBytesOverride == null
+    ? Math.max(
+        expectedRequestBytes(req),
+        Number(uploadedFile?.size || 0),
+      )
+    : incomingBytesOverride;
+  const capacity = currentStorageCapacity({ incomingBytes });
+  if (capacity.acceptsDurableWrites) {
+    return true;
+  }
+  if (uploadedFile?.path) {
+    fs.unlink(uploadedFile.path, () => {});
+  }
+  res.setHeader('Retry-After', '60');
+  apiError(
+    res,
+    507,
+    'durable_storage_unavailable',
+    'The server cannot safely store another durable message right now.',
+    {
+      retryable: true,
+      storageStatus: capacity.status,
+    },
+  );
+  return false;
+}
+
+function durableStorageRequired(req, res, next) {
+  if (!requireDurableStorage(req, res)) {
+    return;
+  }
+  next();
+}
 
 const serverIdentityPath = path.join(serverRoot, 'server-identity.json');
 
@@ -2223,6 +2304,85 @@ function attachmentGrantSignature({ attachmentId, userId, expires }) {
     .digest('base64url');
 }
 
+const HISTORY_CURSOR_VERSION = 1;
+
+function historyCursorSignature(encodedPayload) {
+  return crypto
+    .createHmac('sha256', ATTACHMENT_SIGNING_SECRET)
+    .update(`yappa-history-cursor-v1.${encodedPayload}`, 'utf8')
+    .digest('base64url');
+}
+
+function encodeHistoryCursor({
+  channelId,
+  messageId,
+  userId,
+  direction,
+}) {
+  if (direction !== 'before' && direction !== 'after') {
+    throw new TypeError('Invalid history cursor direction.');
+  }
+  const encodedPayload = Buffer.from(
+    JSON.stringify({
+      v: HISTORY_CURSOR_VERSION,
+      s: serverId,
+      c: toId(channelId),
+      m: toId(messageId),
+      u: toId(userId),
+      d: direction,
+    }),
+    'utf8',
+  ).toString('base64url');
+  return `${encodedPayload}.${historyCursorSignature(encodedPayload)}`;
+}
+
+function decodeHistoryCursor(cursor, { channelId, userId }) {
+  if (
+    typeof cursor !== 'string' ||
+    cursor.length < 32 ||
+    cursor.length > 1024 ||
+    !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(cursor)
+  ) {
+    return null;
+  }
+
+  const [encodedPayload, providedSignature] = cursor.split('.');
+  const expectedSignature = historyCursorSignature(encodedPayload);
+  const providedBytes = Buffer.from(providedSignature, 'utf8');
+  const expectedBytes = Buffer.from(expectedSignature, 'utf8');
+  if (
+    providedBytes.length !== expectedBytes.length ||
+    !crypto.timingSafeEqual(providedBytes, expectedBytes)
+  ) {
+    return null;
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.from(encodedPayload, 'base64url').toString('utf8'));
+  } catch (_) {
+    return null;
+  }
+
+  const messageId = Number(payload?.m);
+  if (
+    payload?.v !== HISTORY_CURSOR_VERSION ||
+    payload?.s !== serverId ||
+    payload?.c !== toId(channelId) ||
+    payload?.u !== toId(userId) ||
+    (payload?.d !== 'before' && payload?.d !== 'after') ||
+    !Number.isSafeInteger(messageId) ||
+    messageId <= 0 ||
+    payload.m !== toId(messageId)
+  ) {
+    return null;
+  }
+  return {
+    messageId,
+    direction: payload.d,
+  };
+}
+
 function signedAttachmentUrl(row, viewerUserId) {
   const attachmentId = toId(row.id);
   const userId = toId(viewerUserId);
@@ -2405,6 +2565,25 @@ function getSocketsForUser(userId) {
     }
   }
   return matches;
+}
+
+function emitHistoryRecoveryReady({
+  userId,
+  destinationDeviceId,
+  channelId,
+  transferId,
+}) {
+  for (const [socketId, presence] of socketPresence.entries()) {
+    if (
+      Number(presence.userId) === Number(userId) &&
+      presence.mediaDeviceId === destinationDeviceId
+    ) {
+      io.to(socketId).emit('history-recovery:ready', {
+        channelId: toId(channelId),
+        transferId,
+      });
+    }
+  }
 }
 
 function getVoicePresenceForUser(userId) {
@@ -3044,6 +3223,20 @@ app.get('/api/server/settings', authRequired, (req, res) => {
   res.json({ ok: true, settings: currentSettings() });
 });
 
+app.get('/api/server/storage', authRequired, ownerOnly, (_req, res) => {
+  const storage = currentStorageCapacity({ includeBackupSize: true });
+  if (!storage.available) {
+    return apiError(
+      res,
+      503,
+      'storage_status_unavailable',
+      'Storage capacity could not be inspected safely.',
+      { retryable: true },
+    );
+  }
+  return res.json({ ok: true, storage });
+});
+
 app.patch(
   '/api/server/settings',
   authRequired,
@@ -3074,12 +3267,12 @@ app.patch(
 
   if (attachmentRetentionDays !== undefined) {
     const value = Number(attachmentRetentionDays);
-    if (!Number.isInteger(value) || value < 0 || value > 3650) {
+    if (!Number.isInteger(value) || value !== 0) {
       return apiError(
         res,
         400,
         'invalid_attachment_retention_days',
-        'attachmentRetentionDays must be between 0 and 3650.',
+        'Public-release chat attachments must use indefinite retention (0).',
       );
     }
     patch.attachment_retention_days = value;
@@ -3689,6 +3882,10 @@ app.delete(
     db.prepare(
       'UPDATE media_devices SET revoked_at = ? WHERE id = ?',
     ).run(revokedAt, deviceId);
+    cancelActiveHistoryRecoveryTransfers({
+      deviceId,
+      canceledAt: revokedAt,
+    });
     db.prepare('DELETE FROM sessions WHERE media_device_id = ?').run(deviceId);
   });
   revoke();
@@ -3696,6 +3893,917 @@ app.delete(
     disconnectSessionSockets(session.id);
   }
   return res.json({ ok: true, deviceId, revokedAt });
+  },
+);
+
+app.get('/api/mls/history-recovery/keys', authRequired, (req, res) => {
+  const deviceId = req.auth.session.mediaDeviceId;
+  if (!deviceId) {
+    return apiError(
+      res,
+      409,
+      'media_device_required',
+      'This session must be bound to an active device.',
+    );
+  }
+  const user = db.prepare(`
+    SELECT yuid
+    FROM users
+    WHERE id = ?
+  `).get(req.auth.user.id);
+  if (!user?.yuid) {
+    return apiError(
+      res,
+      409,
+      'verified_yuid_required',
+      'A verified YUID is required for encrypted history recovery.',
+    );
+  }
+  const keys = db.prepare(`
+    SELECT
+      history_recovery_device_keys.device_id,
+      history_recovery_device_keys.public_key,
+      history_recovery_device_keys.yuid_authorization_signature,
+      history_recovery_device_keys.created_at,
+      history_recovery_device_keys.updated_at
+    FROM history_recovery_device_keys
+    JOIN media_devices
+      ON media_devices.id = history_recovery_device_keys.device_id
+    WHERE history_recovery_device_keys.user_id = ?
+      AND media_devices.user_id = ?
+      AND media_devices.revoked_at IS NULL
+    ORDER BY history_recovery_device_keys.device_id ASC
+  `).all(req.auth.user.id, req.auth.user.id);
+  return res.json({
+    ok: true,
+    accountYuid: user.yuid,
+    keys: keys.map((key) => ({
+      deviceId: key.device_id,
+      publicKey: key.public_key,
+      yuidAuthorizationSignature: key.yuid_authorization_signature,
+      createdAt: key.created_at,
+      updatedAt: key.updated_at,
+    })),
+  });
+});
+
+app.post(
+  '/api/mls/history-recovery/keys',
+  authRequired,
+  accountMutationRateLimit,
+  (req, res) => {
+    const deviceId = req.auth.session.mediaDeviceId;
+    if (!deviceId) {
+      return apiError(
+        res,
+        409,
+        'media_device_required',
+        'This session must be bound to an active device.',
+      );
+    }
+    const publicKey = String(req.body?.publicKey || '').trim();
+    const yuidAuthorizationSignature = String(
+      req.body?.yuidAuthorizationSignature || '',
+    ).trim();
+    if (
+      !/^[A-Za-z0-9_-]{43}$/.test(publicKey) ||
+      !/^[A-Za-z0-9_-]{86}$/.test(yuidAuthorizationSignature)
+    ) {
+      return apiError(
+        res,
+        400,
+        'invalid_history_recovery_key',
+        'Invalid encrypted-history recovery key binding.',
+      );
+    }
+    const user = db.prepare(`
+      SELECT yuid, yuid_public_key
+      FROM users
+      WHERE id = ?
+    `).get(req.auth.user.id);
+    const yuidPublicKey = decodeBase64Url(user?.yuid_public_key);
+    const signature = decodeBase64Url(yuidAuthorizationSignature);
+    if (
+      !user?.yuid ||
+      !yuidPublicKey ||
+      yuidPublicKey.length !== 32 ||
+      !signature ||
+      signature.length !== 64
+    ) {
+      return apiError(
+        res,
+        409,
+        'verified_yuid_required',
+        'A verified YUID is required for encrypted history recovery.',
+      );
+    }
+    const binding = Buffer.from(
+      `yappa-history-recovery-device-v1|${serverId}|${user.yuid}|` +
+        `${deviceId}|${publicKey}`,
+      'utf8',
+    );
+    if (
+      !nacl.sign.detached.verify(
+        new Uint8Array(binding),
+        new Uint8Array(signature),
+        new Uint8Array(yuidPublicKey),
+      )
+    ) {
+      return apiError(
+        res,
+        401,
+        'invalid_history_recovery_key_signature',
+        'This encrypted-history recovery key could not be verified.',
+      );
+    }
+    const existing = db.prepare(`
+      SELECT public_key, yuid_authorization_signature, created_at, updated_at
+      FROM history_recovery_device_keys
+      WHERE device_id = ?
+    `).get(deviceId);
+    if (existing) {
+      if (
+        existing.public_key !== publicKey ||
+        existing.yuid_authorization_signature !== yuidAuthorizationSignature
+      ) {
+        return apiError(
+          res,
+          409,
+          'history_recovery_key_conflict',
+          'This device already has a different recovery key binding.',
+        );
+      }
+      return res.json({
+        ok: true,
+        created: false,
+        key: {
+          deviceId,
+          publicKey,
+          yuidAuthorizationSignature,
+          createdAt: existing.created_at,
+          updatedAt: existing.updated_at,
+        },
+      });
+    }
+    const now = nowIso();
+    try {
+      db.prepare(`
+        INSERT INTO history_recovery_device_keys (
+          device_id, user_id, public_key, yuid_authorization_signature,
+          created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(
+        deviceId,
+        req.auth.user.id,
+        publicKey,
+        yuidAuthorizationSignature,
+        now,
+        now,
+      );
+    } catch (error) {
+      if (String(error?.code || '').startsWith('SQLITE_CONSTRAINT')) {
+        return apiError(
+          res,
+          409,
+          'history_recovery_key_conflict',
+          'That recovery key is already bound to another device.',
+        );
+      }
+      throw error;
+    }
+    return res.status(201).json({
+      ok: true,
+      created: true,
+      key: {
+        deviceId,
+        publicKey,
+        yuidAuthorizationSignature,
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+  },
+);
+
+const historyRecoveryChunkBody = express.raw({
+  type: 'application/octet-stream',
+  limit: '256kb',
+});
+const historyRecoveryMaxChunks = 257;
+const historyRecoveryMaxCiphertextBytes =
+  64 * 1024 * 1024 + historyRecoveryMaxChunks * (12 + 16);
+
+function compactExpiredHistoryRecoveryTransfers(at = nowIso()) {
+  const expired = db.prepare(`
+    SELECT id
+    FROM history_recovery_transfers
+    WHERE state IN ('uploading', 'ready')
+      AND expires_at <= ?
+  `).all(at);
+  if (expired.length === 0) return 0;
+  const remove = db.transaction(() => {
+    const deleteChunks = db.prepare(`
+      DELETE FROM history_recovery_transfer_chunks
+      WHERE transfer_id = ?
+    `);
+    const markExpired = db.prepare(`
+      UPDATE history_recovery_transfers
+      SET state = 'expired'
+      WHERE id = ? AND state IN ('uploading', 'ready')
+    `);
+    for (const item of expired) {
+      deleteChunks.run(item.id);
+      markExpired.run(item.id);
+    }
+  });
+  remove();
+  return expired.length;
+}
+
+function cancelActiveHistoryRecoveryTransfers({
+  deviceId = null,
+  userId = null,
+  canceledAt = nowIso(),
+} = {}) {
+  if ((deviceId === null) === (userId === null)) {
+    throw new Error('history_recovery_cleanup_scope');
+  }
+  const rows = deviceId !== null
+    ? db.prepare(`
+        SELECT id
+        FROM history_recovery_transfers
+        WHERE state IN ('uploading', 'ready')
+          AND (source_device_id = ? OR destination_device_id = ?)
+      `).all(deviceId, deviceId)
+    : db.prepare(`
+        SELECT id
+        FROM history_recovery_transfers
+        WHERE state IN ('uploading', 'ready') AND user_id = ?
+      `).all(Number(userId));
+  const deleteChunks = db.prepare(`
+    DELETE FROM history_recovery_transfer_chunks
+    WHERE transfer_id = ?
+  `);
+  const cancelTransfer = db.prepare(`
+    UPDATE history_recovery_transfers
+    SET state = 'canceled', canceled_at = ?
+    WHERE id = ? AND state IN ('uploading', 'ready')
+  `);
+  for (const row of rows) {
+    deleteChunks.run(row.id);
+    cancelTransfer.run(canceledAt, row.id);
+  }
+  return rows.length;
+}
+
+function serializeHistoryRecoveryTransfer(row, { includeManifest = true } = {}) {
+  return {
+    id: row.id,
+    channelId: toId(row.channel_id),
+    sourceDeviceId: row.source_device_id,
+    destinationDeviceId: row.destination_device_id,
+    firstServerSequence: Number(row.first_server_sequence),
+    lastServerSequence: Number(row.last_server_sequence),
+    eventCount: Number(row.event_count),
+    chunkCount: Number(row.chunk_count),
+    totalBytes: Number(row.total_bytes),
+    manifest: includeManifest
+      ? Buffer.from(row.manifest).toString('base64url')
+      : undefined,
+    manifestSha256: row.manifest_sha256,
+    yuidSignature: row.yuid_signature,
+    state: row.state,
+    uploadedChunks: Number(row.uploaded_chunks),
+    uploadedBytes: Number(row.uploaded_bytes),
+    createdAt: row.created_at,
+    readyAt: row.ready_at || null,
+    consumedAt: row.consumed_at || null,
+    canceledAt: row.canceled_at || null,
+    expiresAt: row.expires_at,
+  };
+}
+
+function historyRecoveryTransferForRequest(req, res, { destination = false } = {}) {
+  compactExpiredHistoryRecoveryTransfers();
+  const transferId = String(req.params.transferId || '').trim();
+  if (!/^recovery_[A-Za-z0-9_-]{22}$/.test(transferId)) {
+    apiError(
+      res,
+      400,
+      'invalid_history_recovery_transfer_id',
+      'Invalid encrypted-history transfer identifier.',
+    );
+    return null;
+  }
+  const deviceId = req.auth.session.mediaDeviceId;
+  if (!deviceId) {
+    apiError(
+      res,
+      409,
+      'media_device_required',
+      'This session must be bound to an active device.',
+    );
+    return null;
+  }
+  const row = db.prepare(`
+    SELECT *
+    FROM history_recovery_transfers
+    WHERE id = ?
+  `).get(transferId);
+  if (
+    !row ||
+    row.user_id !== req.auth.user.id ||
+    (destination
+      ? row.destination_device_id !== deviceId
+      : row.source_device_id !== deviceId)
+  ) {
+    apiError(
+      res,
+      404,
+      'history_recovery_transfer_not_found',
+      'Encrypted-history transfer not found.',
+    );
+    return null;
+  }
+  return row;
+}
+
+app.post(
+  '/api/channels/:channelId/mls/history-recovery/transfers',
+  authRequired,
+  contentMutationRateLimit,
+  durableStorageRequired,
+  (req, res) => {
+    compactExpiredHistoryRecoveryTransfers();
+    const channelId = Number(req.params.channelId);
+    const sourceDeviceId = req.auth.session.mediaDeviceId;
+    if (!Number.isSafeInteger(channelId) || channelId <= 0) {
+      return apiError(res, 400, 'invalid_channel_id', 'Invalid channel id.');
+    }
+    if (!sourceDeviceId) {
+      return apiError(
+        res,
+        409,
+        'media_device_required',
+        'This session must be bound to an active device.',
+      );
+    }
+    const channel = db.prepare(`
+      SELECT id, type, encryption_mode, encryption_version
+      FROM channels
+      WHERE id = ?
+    `).get(channelId);
+    if (!channel) {
+      return apiError(res, 404, 'channel_not_found', 'Channel not found.');
+    }
+    if (
+      channel.type !== 'text' ||
+      channel.encryption_mode !== 'e2ee' ||
+      channel.encryption_version !== 1
+    ) {
+      return apiError(
+        res,
+        409,
+        'history_recovery_requires_e2ee',
+        'Encrypted-history transfer requires an E2EE version 1 text channel.',
+      );
+    }
+    const transferId = String(req.body?.id || '').trim();
+    const destinationDeviceId = String(
+      req.body?.destinationDeviceId || '',
+    ).trim();
+    const firstServerSequence = Number(req.body?.firstServerSequence);
+    const lastServerSequence = Number(req.body?.lastServerSequence);
+    const eventCount = Number(req.body?.eventCount);
+    const chunkCount = Number(req.body?.chunkCount);
+    const totalBytes = Number(req.body?.totalBytes);
+    const manifestText = String(req.body?.manifest || '');
+    const manifestSha256 = String(req.body?.manifestSha256 || '').toLowerCase();
+    const yuidSignature = String(req.body?.yuidSignature || '').trim();
+    const manifest = decodeBase64Url(manifestText);
+    const rangeCount = lastServerSequence - firstServerSequence + 1;
+    if (
+      !/^recovery_[A-Za-z0-9_-]{22}$/.test(transferId) ||
+      !/^device_[A-Za-z0-9_-]{24}$/.test(destinationDeviceId) ||
+      destinationDeviceId === sourceDeviceId ||
+      !Number.isSafeInteger(firstServerSequence) ||
+      firstServerSequence < 1 ||
+      !Number.isSafeInteger(lastServerSequence) ||
+      lastServerSequence < firstServerSequence ||
+      !Number.isSafeInteger(eventCount) ||
+      eventCount < 1 ||
+      eventCount > rangeCount ||
+      !Number.isSafeInteger(chunkCount) ||
+      chunkCount < 1 ||
+      chunkCount > historyRecoveryMaxChunks ||
+      !Number.isSafeInteger(totalBytes) ||
+      totalBytes < chunkCount ||
+      totalBytes > historyRecoveryMaxCiphertextBytes ||
+      !manifest ||
+      manifest.length < 1 ||
+      manifest.length > 64 * 1024 ||
+      !/^[a-f0-9]{64}$/.test(manifestSha256) ||
+      !/^[A-Za-z0-9_-]{86}$/.test(yuidSignature)
+    ) {
+      return apiError(
+        res,
+        400,
+        'invalid_history_recovery_transfer',
+        'Invalid encrypted-history transfer metadata.',
+      );
+    }
+    const computedManifestHash = crypto
+      .createHash('sha256')
+      .update(manifest)
+      .digest('hex');
+    if (computedManifestHash !== manifestSha256) {
+      return apiError(
+        res,
+        400,
+        'history_recovery_manifest_mismatch',
+        'Encrypted-history transfer manifest digest does not match.',
+      );
+    }
+    const user = db.prepare(`
+      SELECT yuid, yuid_public_key
+      FROM users
+      WHERE id = ?
+    `).get(req.auth.user.id);
+    const yuidPublicKey = decodeBase64Url(user?.yuid_public_key);
+    const signature = decodeBase64Url(yuidSignature);
+    if (
+      !user?.yuid ||
+      !yuidPublicKey ||
+      yuidPublicKey.length !== 32 ||
+      !signature ||
+      signature.length !== 64 ||
+      !nacl.sign.detached.verify(
+        new Uint8Array(Buffer.from(manifestSha256, 'hex')),
+        new Uint8Array(signature),
+        new Uint8Array(yuidPublicKey),
+      )
+    ) {
+      return apiError(
+        res,
+        401,
+        'invalid_history_recovery_manifest_signature',
+        'Encrypted-history transfer manifest signature is invalid.',
+      );
+    }
+    const destination = db.prepare(`
+      SELECT
+        media_devices.id,
+        history_recovery_device_keys.public_key
+      FROM media_devices
+      JOIN history_recovery_device_keys
+        ON history_recovery_device_keys.device_id = media_devices.id
+       AND history_recovery_device_keys.user_id = media_devices.user_id
+      WHERE media_devices.id = ?
+        AND media_devices.user_id = ?
+        AND media_devices.revoked_at IS NULL
+    `).get(destinationDeviceId, req.auth.user.id);
+    if (!destination) {
+      return apiError(
+        res,
+        409,
+        'history_recovery_destination_unavailable',
+        'The destination recovery device is unavailable.',
+      );
+    }
+    const existing = db.prepare(`
+      SELECT *
+      FROM history_recovery_transfers
+      WHERE id = ?
+    `).get(transferId);
+    if (existing) {
+      const exact =
+        existing.user_id === req.auth.user.id &&
+        existing.channel_id === channelId &&
+        existing.source_device_id === sourceDeviceId &&
+        existing.destination_device_id === destinationDeviceId &&
+        existing.first_server_sequence === firstServerSequence &&
+        existing.last_server_sequence === lastServerSequence &&
+        existing.event_count === eventCount &&
+        existing.chunk_count === chunkCount &&
+        existing.total_bytes === totalBytes &&
+        existing.manifest_sha256 === manifestSha256 &&
+        existing.yuid_signature === yuidSignature &&
+        Buffer.from(existing.manifest).equals(manifest);
+      if (!exact) {
+        return apiError(
+          res,
+          409,
+          'history_recovery_transfer_conflict',
+          'That transfer identifier is already bound to different data.',
+        );
+      }
+      return res.json({
+        ok: true,
+        created: false,
+        transfer: serializeHistoryRecoveryTransfer(existing),
+      });
+    }
+    const active = db.prepare(`
+      SELECT id
+      FROM history_recovery_transfers
+      WHERE destination_device_id = ?
+        AND channel_id = ?
+        AND state IN ('uploading', 'ready')
+      LIMIT 1
+    `).get(destinationDeviceId, channelId);
+    if (active) {
+      return apiError(
+        res,
+        409,
+        'history_recovery_transfer_limit',
+        'That destination already has an active transfer for this channel.',
+      );
+    }
+    const createdAt = nowIso();
+    const expiresAt = new Date(
+      Date.now() + 7 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    db.prepare(`
+      INSERT INTO history_recovery_transfers (
+        id, channel_id, user_id, source_device_id, destination_device_id,
+        first_server_sequence, last_server_sequence, event_count, chunk_count,
+        total_bytes, manifest, manifest_sha256, yuid_signature, state,
+        uploaded_chunks, uploaded_bytes, created_at, expires_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'uploading', 0, 0, ?, ?)
+    `).run(
+      transferId,
+      channelId,
+      req.auth.user.id,
+      sourceDeviceId,
+      destinationDeviceId,
+      firstServerSequence,
+      lastServerSequence,
+      eventCount,
+      chunkCount,
+      totalBytes,
+      manifest,
+      manifestSha256,
+      yuidSignature,
+      createdAt,
+      expiresAt,
+    );
+    const created = db.prepare(`
+      SELECT *
+      FROM history_recovery_transfers
+      WHERE id = ?
+    `).get(transferId);
+    return res.status(201).json({
+      ok: true,
+      created: true,
+      transfer: serializeHistoryRecoveryTransfer(created),
+    });
+  },
+);
+
+app.put(
+  '/api/mls/history-recovery/transfers/:transferId/chunks/:chunkIndex',
+  authRequired,
+  contentMutationRateLimit,
+  historyRecoveryChunkBody,
+  durableStorageRequired,
+  (req, res) => {
+    const transfer = historyRecoveryTransferForRequest(req, res);
+    if (!transfer) return;
+    const chunkIndex = Number(req.params.chunkIndex);
+    const digest = String(req.headers['x-yappa-content-sha256'] || '')
+      .trim()
+      .toLowerCase();
+    const ciphertext = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    if (
+      transfer.state !== 'uploading' ||
+      !Number.isSafeInteger(chunkIndex) ||
+      chunkIndex < 0 ||
+      chunkIndex >= transfer.chunk_count ||
+      ciphertext.length < 1 ||
+      ciphertext.length > 256 * 1024 ||
+      !/^[a-f0-9]{64}$/.test(digest)
+    ) {
+      return apiError(
+        res,
+        400,
+        'invalid_history_recovery_chunk',
+        'Invalid encrypted-history transfer chunk.',
+      );
+    }
+    const computed = crypto
+      .createHash('sha256')
+      .update(ciphertext)
+      .digest('hex');
+    if (computed !== digest) {
+      return apiError(
+        res,
+        400,
+        'history_recovery_chunk_mismatch',
+        'Encrypted-history chunk digest does not match.',
+      );
+    }
+    const existing = db.prepare(`
+      SELECT ciphertext, ciphertext_sha256, size_bytes
+      FROM history_recovery_transfer_chunks
+      WHERE transfer_id = ? AND chunk_index = ?
+    `).get(transfer.id, chunkIndex);
+    if (existing) {
+      if (
+        existing.ciphertext_sha256 !== digest ||
+        existing.size_bytes !== ciphertext.length ||
+        !Buffer.from(existing.ciphertext).equals(ciphertext)
+      ) {
+        return apiError(
+          res,
+          409,
+          'history_recovery_chunk_conflict',
+          'That transfer chunk already contains different data.',
+        );
+      }
+      return res.json({
+        ok: true,
+        created: false,
+        transferId: transfer.id,
+        chunkIndex,
+        sizeBytes: ciphertext.length,
+        ciphertextSha256: digest,
+      });
+    }
+    if (transfer.uploaded_bytes + ciphertext.length > transfer.total_bytes) {
+      return apiError(
+        res,
+        409,
+        'history_recovery_transfer_size_exceeded',
+        'Encrypted-history chunks exceed the declared transfer size.',
+      );
+    }
+    const createdAt = nowIso();
+    db.transaction(() => {
+      db.prepare(`
+        INSERT INTO history_recovery_transfer_chunks (
+          transfer_id, chunk_index, ciphertext, ciphertext_sha256,
+          size_bytes, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(
+        transfer.id,
+        chunkIndex,
+        ciphertext,
+        digest,
+        ciphertext.length,
+        createdAt,
+      );
+      db.prepare(`
+        UPDATE history_recovery_transfers
+        SET uploaded_chunks = uploaded_chunks + 1,
+            uploaded_bytes = uploaded_bytes + ?
+        WHERE id = ? AND state = 'uploading'
+      `).run(ciphertext.length, transfer.id);
+    })();
+    return res.status(201).json({
+      ok: true,
+      created: true,
+      transferId: transfer.id,
+      chunkIndex,
+      sizeBytes: ciphertext.length,
+      ciphertextSha256: digest,
+    });
+  },
+);
+
+app.post(
+  '/api/mls/history-recovery/transfers/:transferId/finalize',
+  authRequired,
+  contentMutationRateLimit,
+  (req, res) => {
+    const transfer = historyRecoveryTransferForRequest(req, res);
+    if (!transfer) return;
+    if (transfer.state === 'ready') {
+      return res.json({
+        ok: true,
+        finalized: false,
+        transfer: serializeHistoryRecoveryTransfer(transfer),
+      });
+    }
+    if (transfer.state !== 'uploading') {
+      return apiError(
+        res,
+        409,
+        'history_recovery_transfer_not_uploading',
+        'That encrypted-history transfer cannot be finalized.',
+      );
+    }
+    const totals = db.prepare(`
+      SELECT COUNT(*) AS chunk_count, COALESCE(SUM(size_bytes), 0) AS total_bytes
+      FROM history_recovery_transfer_chunks
+      WHERE transfer_id = ?
+    `).get(transfer.id);
+    if (
+      Number(totals.chunk_count) !== transfer.chunk_count ||
+      Number(totals.total_bytes) !== transfer.total_bytes
+    ) {
+      return apiError(
+        res,
+        409,
+        'history_recovery_transfer_incomplete',
+        'Every declared encrypted-history chunk is required before finalize.',
+      );
+    }
+    const readyAt = nowIso();
+    const expiresAt = new Date(
+      Date.now() + 30 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    db.prepare(`
+      UPDATE history_recovery_transfers
+      SET state = 'ready', ready_at = ?, expires_at = ?
+      WHERE id = ? AND state = 'uploading'
+    `).run(readyAt, expiresAt, transfer.id);
+    const ready = db.prepare(`
+      SELECT *
+      FROM history_recovery_transfers
+      WHERE id = ?
+    `).get(transfer.id);
+    emitHistoryRecoveryReady({
+      userId: transfer.user_id,
+      destinationDeviceId: transfer.destination_device_id,
+      channelId: transfer.channel_id,
+      transferId: transfer.id,
+    });
+    return res.json({
+      ok: true,
+      finalized: true,
+      transfer: serializeHistoryRecoveryTransfer(ready),
+    });
+  },
+);
+
+app.get(
+  '/api/channels/:channelId/mls/history-recovery/transfers',
+  authRequired,
+  (req, res) => {
+    compactExpiredHistoryRecoveryTransfers();
+    const channelId = Number(req.params.channelId);
+    const deviceId = req.auth.session.mediaDeviceId;
+    if (!Number.isSafeInteger(channelId) || channelId <= 0) {
+      return apiError(res, 400, 'invalid_channel_id', 'Invalid channel id.');
+    }
+    if (!deviceId) {
+      return apiError(
+        res,
+        409,
+        'media_device_required',
+        'This session must be bound to an active device.',
+      );
+    }
+    const rows = db.prepare(`
+      SELECT *
+      FROM history_recovery_transfers
+      WHERE channel_id = ?
+        AND user_id = ?
+        AND destination_device_id = ?
+        AND state = 'ready'
+      ORDER BY created_at ASC, id ASC
+      LIMIT 20
+    `).all(channelId, req.auth.user.id, deviceId);
+    return res.json({
+      ok: true,
+      transfers: rows.map((row) => serializeHistoryRecoveryTransfer(row)),
+    });
+  },
+);
+
+app.get(
+  '/api/mls/history-recovery/transfers/:transferId/chunks/:chunkIndex',
+  authRequired,
+  (req, res) => {
+    const transfer = historyRecoveryTransferForRequest(req, res, {
+      destination: true,
+    });
+    if (!transfer) return;
+    const chunkIndex = Number(req.params.chunkIndex);
+    if (
+      transfer.state !== 'ready' ||
+      !Number.isSafeInteger(chunkIndex) ||
+      chunkIndex < 0 ||
+      chunkIndex >= transfer.chunk_count
+    ) {
+      return apiError(
+        res,
+        404,
+        'history_recovery_chunk_not_found',
+        'Encrypted-history transfer chunk not found.',
+      );
+    }
+    const chunk = db.prepare(`
+      SELECT ciphertext, ciphertext_sha256, size_bytes
+      FROM history_recovery_transfer_chunks
+      WHERE transfer_id = ? AND chunk_index = ?
+    `).get(transfer.id, chunkIndex);
+    if (!chunk) {
+      return apiError(
+        res,
+        404,
+        'history_recovery_chunk_not_found',
+        'Encrypted-history transfer chunk not found.',
+      );
+    }
+    return res.json({
+      ok: true,
+      transferId: transfer.id,
+      chunkIndex,
+      ciphertext: Buffer.from(chunk.ciphertext).toString('base64url'),
+      ciphertextSha256: chunk.ciphertext_sha256,
+      sizeBytes: Number(chunk.size_bytes),
+    });
+  },
+);
+
+app.post(
+  '/api/mls/history-recovery/transfers/:transferId/consume',
+  authRequired,
+  contentMutationRateLimit,
+  (req, res) => {
+    const transfer = historyRecoveryTransferForRequest(req, res, {
+      destination: true,
+    });
+    if (!transfer) return;
+    if (transfer.state === 'consumed') {
+      return res.json({
+        ok: true,
+        consumed: false,
+        transfer: serializeHistoryRecoveryTransfer(transfer, {
+          includeManifest: false,
+        }),
+      });
+    }
+    if (transfer.state !== 'ready') {
+      return apiError(
+        res,
+        409,
+        'history_recovery_transfer_not_ready',
+        'That encrypted-history transfer is not ready to consume.',
+      );
+    }
+    const consumedAt = nowIso();
+    db.transaction(() => {
+      db.prepare(`
+        DELETE FROM history_recovery_transfer_chunks
+        WHERE transfer_id = ?
+      `).run(transfer.id);
+      db.prepare(`
+        UPDATE history_recovery_transfers
+        SET state = 'consumed', consumed_at = ?
+        WHERE id = ? AND state = 'ready'
+      `).run(consumedAt, transfer.id);
+    })();
+    const consumed = db.prepare(`
+      SELECT *
+      FROM history_recovery_transfers
+      WHERE id = ?
+    `).get(transfer.id);
+    return res.json({
+      ok: true,
+      consumed: true,
+      transfer: serializeHistoryRecoveryTransfer(consumed, {
+        includeManifest: false,
+      }),
+    });
+  },
+);
+
+app.delete(
+  '/api/mls/history-recovery/transfers/:transferId',
+  authRequired,
+  contentMutationRateLimit,
+  (req, res) => {
+    const transfer = historyRecoveryTransferForRequest(req, res);
+    if (!transfer) return;
+    if (transfer.state === 'canceled') {
+      return res.json({ ok: true, canceled: false, transferId: transfer.id });
+    }
+    if (transfer.state !== 'uploading') {
+      return apiError(
+        res,
+        409,
+        'history_recovery_transfer_not_cancelable',
+        'Only an unfinished encrypted-history transfer can be canceled.',
+      );
+    }
+    const canceledAt = nowIso();
+    db.transaction(() => {
+      db.prepare(`
+        DELETE FROM history_recovery_transfer_chunks
+        WHERE transfer_id = ?
+      `).run(transfer.id);
+      db.prepare(`
+        UPDATE history_recovery_transfers
+        SET state = 'canceled', canceled_at = ?
+        WHERE id = ? AND state = 'uploading'
+      `).run(canceledAt, transfer.id);
+    })();
+    return res.json({ ok: true, canceled: true, transferId: transfer.id });
   },
 );
 
@@ -4082,8 +5190,9 @@ app.post(
   '/api/channels/:channelId/encrypted-attachments',
   authRequired,
   uploadRateLimit,
+  durableStorageRequired,
   uploadSingleEncryptedAttachment,
-  async (req, res) => {
+  async (req, res, next) => {
     const uploadedFile = req.file;
     const channelId = Number(req.params.channelId);
     const uploaderDeviceId = req.auth.session.mediaDeviceId;
@@ -4099,6 +5208,9 @@ app.post(
         'missing_encrypted_attachment',
         'No encrypted attachment object was uploaded.',
       );
+    }
+    if (!requireDurableStorage(req, res, { uploadedFile, incomingBytes: 0 })) {
+      return;
     }
     if (!Number.isInteger(channelId) || !uploaderDeviceId) {
       discardUpload();
@@ -4293,7 +5405,7 @@ app.post(
           'That encrypted attachment id is already reserved.',
         );
       }
-      throw error;
+      return next(error);
     }
     return res.status(201).json({
       ok: true,
@@ -4492,6 +5604,7 @@ app.post(
   '/api/channels/:channelId/mls/messages',
   authRequired,
   contentMutationRateLimit,
+  durableStorageRequired,
   (req, res) => {
     const channelId = Number(req.params.channelId);
     const uploaderDeviceId = req.auth.session.mediaDeviceId;
@@ -5279,18 +6392,58 @@ app.get('/api/channels', authRequired, (_req, res) => {
 
 app.get('/api/channels/:channelId/messages', authRequired, (req, res) => {
   const channelId = Number(req.params.channelId);
-  if (!Number.isInteger(channelId)) {
+  if (!Number.isSafeInteger(channelId) || channelId <= 0) {
     return apiError(res, 400, 'invalid_channel_id', 'Invalid channel id.');
   }
 
-  const limitRaw = Number(req.query.limit || 50);
-  const limit = Math.max(
-    1,
-    Math.min(100, Number.isFinite(limitRaw) ? limitRaw : 50),
-  );
+  const channel = db.prepare(`
+    SELECT id, type, encryption_mode, encryption_version
+    FROM channels
+    WHERE id = ?
+  `).get(channelId);
+  if (!channel) {
+    return apiError(res, 404, 'channel_not_found', 'Channel not found.');
+  }
+  if (channel.type !== 'text') {
+    return apiError(
+      res,
+      400,
+      'channel_not_text',
+      'Messages can only be read from text channels.',
+    );
+  }
+  if (rejectPlaintextForEncryptedChannel(res, channel)) {
+    return;
+  }
 
-  const rows = db
-  .prepare(`
+  const limitText = req.query.limit == null ? '50' : String(req.query.limit);
+  const limit = Number(limitText);
+  if (!/^[1-9][0-9]*$/.test(limitText) || !Number.isSafeInteger(limit) || limit > 100) {
+    return apiError(
+      res,
+      400,
+      'invalid_history_limit',
+      'History limit must be an integer from 1 to 100.',
+    );
+  }
+
+  let decodedCursor = null;
+  if (req.query.cursor != null) {
+    decodedCursor = decodeHistoryCursor(String(req.query.cursor), {
+      channelId,
+      userId: req.auth.user.id,
+    });
+    if (decodedCursor == null) {
+      return apiError(
+        res,
+        400,
+        'invalid_history_cursor',
+        'History cursor is invalid for this account and channel.',
+      );
+    }
+  }
+
+  const historySelect = `
   SELECT
   messages.id,
   messages.channel_id,
@@ -5305,11 +6458,35 @@ app.get('/api/channels/:channelId/messages', authRequired, (req, res) => {
   FROM messages
   JOIN users ON users.id = messages.user_id
   WHERE messages.channel_id = ?
+  `;
+  const direction = decodedCursor?.direction || 'before';
+  const rows = decodedCursor == null
+    ? db.prepare(`
+  ${historySelect}
   ORDER BY messages.id DESC
   LIMIT ?
-  `)
-  .all(channelId, limit)
-  .reverse();
+  `).all(channelId, limit + 1)
+    : direction === 'before'
+      ? db.prepare(`
+  ${historySelect}
+  AND messages.id < ?
+  ORDER BY messages.id DESC
+  LIMIT ?
+  `).all(channelId, decodedCursor.messageId, limit + 1)
+      : db.prepare(`
+  ${historySelect}
+  AND messages.id > ?
+  ORDER BY messages.id ASC
+  LIMIT ?
+  `).all(channelId, decodedCursor.messageId, limit + 1);
+
+  const hasMore = rows.length > limit;
+  if (hasMore) {
+    rows.pop();
+  }
+  if (direction === 'before') {
+    rows.reverse();
+  }
 
   const attachmentsMap = getAttachmentsForMessageIds(
     db,
@@ -5325,13 +6502,117 @@ app.get('/api/channels/:channelId/messages', authRequired, (req, res) => {
       req.auth.user.id,
     ),
     ),
+    page: {
+      direction,
+      hasMore,
+      nextCursor:
+        hasMore && rows.length > 0
+          ? encodeHistoryCursor({
+              channelId,
+              messageId:
+                direction === 'before'
+                  ? rows[0].id
+                  : rows[rows.length - 1].id,
+              userId: req.auth.user.id,
+              direction,
+            })
+          : null,
+      forwardCursor:
+        rows.length > 0
+          ? encodeHistoryCursor({
+              channelId,
+              messageId: rows[rows.length - 1].id,
+              userId: req.auth.user.id,
+              direction: 'after',
+            })
+          : direction === 'after'
+            ? String(req.query.cursor)
+            : null,
+      backwardCursor:
+        rows.length > 0
+          ? encodeHistoryCursor({
+              channelId,
+              messageId: rows[0].id,
+              userId: req.auth.user.id,
+              direction: 'before',
+            })
+          : null,
+    },
   });
 });
+
+app.get(
+  '/api/channels/:channelId/messages/cursor',
+  authRequired,
+  (req, res) => {
+    const channelId = Number(req.params.channelId);
+    const messageId = Number(req.query.messageId);
+    const direction = String(req.query.direction || '');
+    if (
+      !Number.isSafeInteger(channelId) ||
+      channelId <= 0 ||
+      !Number.isSafeInteger(messageId) ||
+      messageId <= 0 ||
+      (direction !== 'before' && direction !== 'after')
+    ) {
+      return apiError(
+        res,
+        400,
+        'invalid_history_cursor_anchor',
+        'A valid message and cursor direction are required.',
+      );
+    }
+    const channel = db.prepare(`
+      SELECT id, type, encryption_mode, encryption_version
+      FROM channels
+      WHERE id = ?
+    `).get(channelId);
+    if (!channel) {
+      return apiError(res, 404, 'channel_not_found', 'Channel not found.');
+    }
+    if (channel.type !== 'text') {
+      return apiError(
+        res,
+        400,
+        'channel_not_text',
+        'History cursors require a text channel.',
+      );
+    }
+    if (rejectPlaintextForEncryptedChannel(res, channel)) {
+      return;
+    }
+    const message = db.prepare(`
+      SELECT id
+      FROM messages
+      WHERE id = ? AND channel_id = ?
+    `).get(messageId, channelId);
+    if (!message) {
+      return apiError(
+        res,
+        404,
+        'history_cursor_anchor_not_found',
+        'That history boundary is no longer available.',
+      );
+    }
+    return res.json({
+      ok: true,
+      cursor: encodeHistoryCursor({
+        channelId,
+        messageId,
+        userId: req.auth.user.id,
+        direction,
+      }),
+      direction,
+      messageId: toId(messageId),
+    });
+  },
+);
 
 app.post(
   '/api/uploads/attachments',
   authRequired,
   uploadRateLimit,
+  durableStorageRequired,
   uploadSingleAttachment,
          (req, res) => {
            const uploadedFile = req.file;
@@ -5339,6 +6620,12 @@ app.post(
 
            if (!uploadedFile) {
              return apiError(res, 400, 'missing_file', 'No file was uploaded.');
+           }
+           if (!requireDurableStorage(req, res, {
+             uploadedFile,
+             incomingBytes: 0,
+           })) {
+             return;
            }
 
            if (!Number.isInteger(channelId)) {
@@ -5405,19 +6692,27 @@ app.post(
            }
 
            const relativePath = path.relative(DATA_ROOT, uploadedFile.path);
-           const attachment = createAttachment(db, {
-             serverId,
-             channelId,
-             uploaderUserId: req.auth.user.id,
-             kind: classifyAttachmentKind(mimeType),
-                                               originalName: uploadedFile.originalname,
-                                               storedName: uploadedFile.filename,
-                                               relativePath,
-                                               mimeType,
-                                               sizeBytes: uploadedFile.size,
-                                               createdAt: nowIso(),
-                                               expiresAt: computeExpiresAt(settings.attachment_retention_days),
-           });
+           let attachment;
+           try {
+             attachment = createAttachment(db, {
+               serverId,
+               channelId,
+               uploaderUserId: req.auth.user.id,
+               kind: classifyAttachmentKind(mimeType),
+               originalName: uploadedFile.originalname,
+               storedName: uploadedFile.filename,
+               relativePath,
+               mimeType,
+               sizeBytes: uploadedFile.size,
+               createdAt: nowIso(),
+               expiresAt: computeExpiresAt(
+                 settings.attachment_retention_days,
+               ),
+             });
+           } catch (error) {
+             fs.unlink(uploadedFile.path, () => {});
+             throw error;
+           }
 
            res.status(201).json({
              ok: true,
@@ -5430,6 +6725,7 @@ app.post(
   '/api/channels/:channelId/messages',
   authRequired,
   contentMutationRateLimit,
+  durableStorageRequired,
   (req, res) => {
   const channelId = Number(req.params.channelId);
   if (!Number.isInteger(channelId)) {
@@ -6116,6 +7412,12 @@ app.post(
     createdByUserId: req.auth.user.id,
   });
 
+  db.transaction(() => {
+    cancelActiveHistoryRecoveryTransfers({
+      userId: targetUser.id,
+      canceledAt: ban.created_at,
+    });
+  })();
   clearSessionsForUser(targetUser.id);
   disconnectUserSockets(targetUser.id);
   emitPresence();
@@ -6712,6 +8014,25 @@ app.use((error, _req, res, next) => {
       400,
       'upload_error',
       'The multipart upload could not be processed.',
+    );
+  }
+
+  if (
+    error?.code === 'SQLITE_FULL' ||
+    error?.code === 'SQLITE_IOERR_WRITE' ||
+    error?.code === 'ENOSPC'
+  ) {
+    logOperationalFailure('durable storage write', error);
+    res.setHeader('Retry-After', '60');
+    return apiError(
+      res,
+      507,
+      'durable_storage_unavailable',
+      'The server cannot safely store another durable message right now.',
+      {
+        retryable: true,
+        storageStatus: 'critical',
+      },
     );
   }
 

@@ -138,19 +138,21 @@ void main() {
         expectedServerId: serverId,
         expectedPublicKey: publicKeyText,
         expectedAdvertisedAddress: advertisedAddress,
+        discoveryAddress: InternetAddress.loopbackIPv4,
       );
       expect(route, isNotNull);
       expect(route!.serverId, serverId);
       expect(route.publicKey, publicKeyText);
       expect(route.tlsPort, httpServer.port);
       expect(route.advertisedAddress, advertisedAddress);
-      expect(InternetAddress.tryParse(route.host)?.isLoopback, isFalse);
+      expect(InternetAddress.tryParse(route.host)?.isLoopback, isTrue);
 
       final rejected = await ApiClient().discoverLanServer(
         expectedServerId: serverId,
         expectedPublicKey: publicKeyText,
         expectedAdvertisedAddress: '198.51.100.20',
         timeout: const Duration(milliseconds: 250),
+        discoveryAddress: InternetAddress.loopbackIPv4,
       );
       expect(rejected, isNull);
     } finally {

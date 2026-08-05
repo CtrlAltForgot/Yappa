@@ -8,6 +8,7 @@ import '../../app/theme.dart';
 import '../../models/member_model.dart';
 import '../../models/server_model.dart';
 import '../../shared/avatar_image.dart';
+import '../../shared/network_asset_scope.dart';
 import '../admin/server_admin_dialog.dart';
 import '../channels/channel_sidebar.dart';
 import '../chat/chat_area.dart';
@@ -458,8 +459,42 @@ class _ShellScreenState extends State<ShellScreen> {
                             child: ChatArea(
                               channel: selectedChannel,
                               messages: widget.appState.selectedMessages,
+                              hasOlderMessages: widget
+                                  .appState
+                                  .selectedChannelHasOlderMessages,
+                              loadingOlderMessages: widget
+                                  .appState
+                                  .selectedChannelLoadingOlderMessages,
+                              hasNewerMessages: widget
+                                  .appState
+                                  .selectedChannelHasNewerMessages,
+                              loadingNewerMessages: widget
+                                  .appState
+                                  .selectedChannelLoadingNewerMessages,
+                              onLoadOlderMessages:
+                                  selectedChannel.allowsPlaintextMessaging
+                                  ? widget.appState.loadOlderSelectedMessages
+                                  : null,
+                              onLoadNewerMessages:
+                                  selectedChannel.allowsPlaintextMessaging
+                                  ? widget.appState.loadNewerSelectedMessages
+                                  : null,
                               textE2eeStartup: widget.appState
                                   .encryptedChannelStartup(selectedChannel.id),
+                              historyRecovery: widget.appState
+                                  .encryptedHistoryRecoveryState(
+                                    selectedChannel.id,
+                                  ),
+                              onHistoryRecoveryAction: (destinationDeviceId) =>
+                                  widget.appState
+                                      .performEncryptedHistoryRecoveryAction(
+                                        selectedChannel.id,
+                                        destinationDeviceId,
+                                      ),
+                              onCancelHistoryRecovery: () => widget.appState
+                                  .cancelEncryptedHistoryRecovery(
+                                    selectedChannel.id,
+                                  ),
                               members: widget.appState.selectedMembers,
                               voiceMembers: isVoiceDeck
                                   ? widget.appState.membersForVoiceDeck(
@@ -844,7 +879,7 @@ class _RailIconButton extends StatelessWidget {
     } else if (imageUrl != null && imageUrl!.isNotEmpty) {
       content = ClipRRect(
         borderRadius: BorderRadius.circular(cornerRadius - 1),
-        child: Image.network(
+        child: RoutedNetworkImage(
           imageUrl!,
           fit: BoxFit.cover,
           width: 56,

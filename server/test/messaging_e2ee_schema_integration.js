@@ -64,6 +64,9 @@ try {
 
   const requiredTables = [
     'schema_migrations',
+    'history_recovery_device_keys',
+    'history_recovery_transfers',
+    'history_recovery_transfer_chunks',
     'mls_key_packages',
     'mls_channel_state',
     'mls_delivery_messages',
@@ -89,6 +92,11 @@ try {
 
   const eventColumns = columns(db, 'encrypted_message_events');
   const attachmentColumns = columns(db, 'encrypted_attachments');
+  const recoveryTransferColumns = columns(db, 'history_recovery_transfers');
+  const recoveryChunkColumns = columns(
+    db,
+    'history_recovery_transfer_chunks',
+  );
   for (const forbidden of [
     'content',
     'body',
@@ -106,6 +114,16 @@ try {
       attachmentColumns.includes(forbidden),
       false,
       `Encrypted attachments must not store ${forbidden}`,
+    );
+    assert.equal(
+      recoveryTransferColumns.includes(forbidden),
+      false,
+      `History recovery transfers must not store ${forbidden}`,
+    );
+    assert.equal(
+      recoveryChunkColumns.includes(forbidden),
+      false,
+      `History recovery chunks must not store ${forbidden}`,
     );
   }
   assert.equal(eventColumns.includes('delivery_message_id'), true);
@@ -127,6 +145,49 @@ try {
       `)
       .get().count,
     1,
+  );
+  assert.equal(
+    db
+      .prepare(`
+        SELECT COUNT(*) AS count
+        FROM sqlite_master
+        WHERE type = 'index'
+        AND name = 'idx_messages_channel_id_id'
+      `)
+      .get().count,
+    1,
+  );
+  const historyQueryPlan = db
+    .prepare(`
+      EXPLAIN QUERY PLAN
+      SELECT id
+      FROM messages
+      WHERE channel_id = ? AND id < ?
+      ORDER BY id DESC
+      LIMIT ?
+    `)
+    .all(1, Number.MAX_SAFE_INTEGER, 50)
+    .map((row) => row.detail)
+    .join('\n');
+  assert.match(
+    historyQueryPlan,
+    /idx_messages_channel_id_id \(channel_id=\? AND id<\?\)/,
+  );
+  const forwardHistoryQueryPlan = db
+    .prepare(`
+      EXPLAIN QUERY PLAN
+      SELECT id
+      FROM messages
+      WHERE channel_id = ? AND id > ?
+      ORDER BY id ASC
+      LIMIT ?
+    `)
+    .all(1, 0, 50)
+    .map((row) => row.detail)
+    .join('\n');
+  assert.match(
+    forwardHistoryQueryPlan,
+    /idx_messages_channel_id_id \(channel_id=\? AND id>\?\)/,
   );
   assert.equal(attachmentColumns.includes('ciphertext_sha256'), true);
   assert.equal(attachmentColumns.includes('secretstream_header'), true);
@@ -303,6 +364,62 @@ try {
     },
   );
   versionThree.close();
+
+  const retentionLegacy = new Database(versionTwoPath);
+  retentionLegacy.pragma('foreign_keys = ON');
+  const retentionServerId = retentionLegacy
+    .prepare('SELECT server_id FROM server_config WHERE id = 1')
+    .pluck()
+    .get();
+  const retentionChannelId = retentionLegacy
+    .prepare("SELECT id FROM channels WHERE type = 'text' ORDER BY id LIMIT 1")
+    .pluck()
+    .get();
+  retentionLegacy
+    .prepare(`
+      UPDATE server_settings
+      SET attachment_retention_days = 30
+      WHERE id = 1
+    `)
+    .run();
+  retentionLegacy
+    .prepare(`
+      INSERT INTO attachments (
+        server_id, channel_id, uploader_user_id, kind, original_name,
+        stored_name, relative_path, mime_type, size_bytes, created_at,
+        expires_at
+      )
+      VALUES (?, ?, ?, 'file', 'retained.txt', 'retained.bin',
+              'attachments/retained.bin', 'text/plain', 8, ?,
+              '2026-08-27T01:00:00.000Z')
+    `)
+    .run(retentionServerId, retentionChannelId, userId, createdAt);
+  retentionLegacy.exec(`
+    DELETE FROM schema_migrations WHERE version >= 4;
+    INSERT OR REPLACE INTO schema_migrations (version, applied_at)
+    VALUES (3, '2026-07-24T02:00:00.000Z');
+  `);
+  retentionLegacy.close();
+
+  const retentionUpgraded = createDb(versionTwoPath, {
+    serverName: 'Version three retention upgrade',
+    serverDescription: 'Disable implicit chat attachment expiry',
+  });
+  assert.equal(
+    retentionUpgraded
+      .prepare('SELECT attachment_retention_days FROM server_settings WHERE id = 1')
+      .pluck()
+      .get(),
+    0,
+  );
+  assert.equal(
+    retentionUpgraded
+      .prepare("SELECT expires_at FROM attachments WHERE stored_name = 'retained.bin'")
+      .pluck()
+      .get(),
+    null,
+  );
+  retentionUpgraded.close();
 
   const futurePath = path.join(testDir, 'future.db');
   const future = new Database(futurePath);

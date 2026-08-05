@@ -101,7 +101,8 @@ MlsDeliveryMessage _message({
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  final supportsMlsBridge = Platform.isLinux || Platform.isWindows;
+  final supportsMlsBridge =
+      Platform.isLinux || Platform.isWindows || Platform.isMacOS;
 
   test(
     'recipient skips pre-Welcome commit, verifies tree, and acknowledges',

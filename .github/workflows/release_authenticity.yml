@@ -1,0 +1,90 @@
+name: Release Authenticity Foundations
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/release-versions.json"
+      - ".github/scripts/build-server-bundle.sh"
+      - ".github/scripts/verify-server-runtime-closure.js"
+      - ".github/scripts/generate-release-evidence.js"
+      - ".github/scripts/test-release-evidence.js"
+      - ".github/scripts/validate-release-ref.js"
+      - ".github/workflows/release_authenticity.yml"
+      - "client/pubspec.lock"
+      - "client/native/yappa_mls/Cargo.lock"
+      - "server/install-manifest.json"
+      - "server/package-lock.json"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/release-versions.json"
+      - ".github/scripts/build-server-bundle.sh"
+      - ".github/scripts/verify-server-runtime-closure.js"
+      - ".github/scripts/generate-release-evidence.js"
+      - ".github/scripts/test-release-evidence.js"
+      - ".github/scripts/validate-release-ref.js"
+      - ".github/workflows/release_authenticity.yml"
+      - "client/pubspec.lock"
+      - "client/native/yappa_mls/Cargo.lock"
+      - "server/install-manifest.json"
+      - "server/package-lock.json"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: yappa-release-authenticity-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  evidence:
+    name: Deterministic SBOM and release guard
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Test deterministic evidence and exact-tag guard
+        run: node .github/scripts/test-release-evidence.js
+
+      - name: Load pinned versions
+        id: versions
+        run: .github/scripts/export-release-versions.sh
+
+      - name: Build canonical server artifact
+        run: .github/scripts/build-server-bundle.sh
+
+      - name: Generate server checksum and SPDX evidence
+        run: |
+          node .github/scripts/generate-release-evidence.js \
+            --artifact "dist/server/yappa-server-${{ steps.versions.outputs.yappa }}.tar.gz" \
+            --output-dir dist/server/evidence \
+            --version "${{ steps.versions.outputs.yappa }}" \
+            --commit "${{ github.sha }}" \
+            --github-attestation "${{ github.event_name != 'pull_request' }}"
+
+      - name: Attest server artifact provenance
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: dist/server/yappa-server-${{ steps.versions.outputs.yappa }}.tar.gz
+
+      - name: Upload development evidence
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: Yappa-server-evidence-${{ github.sha }}
+          path: |
+            dist/server/*.tar.gz
+            dist/server/*.sha256
+            dist/server/evidence/*
+          if-no-files-found: error

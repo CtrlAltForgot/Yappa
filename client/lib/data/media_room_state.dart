@@ -3,6 +3,9 @@ import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
 
+import 'ed25519_verifier.dart';
+import 'sodium_media_crypto.dart';
+
 class MediaDevicePublicIdentity {
   final String id;
   final String userId;
@@ -86,8 +89,9 @@ class MediaRoomState {
 
 class MediaRoomStateVerifier {
   static const _protocol = 'yappa-media-room-v1';
-  final Ed25519 _signatures = Ed25519();
-  final Sha256 _hash = Sha256();
+  final Ed25519Verifier _signatures = Ed25519Verifier();
+  final Sha256 _fallbackHash = Sha256();
+  final SodiumMediaCrypto? _native = SodiumMediaCrypto.tryLoad();
 
   Future<void> verify(
     MediaRoomState state, {
@@ -142,8 +146,10 @@ class MediaRoomStateVerifier {
           authorization.length != 64) {
         throw const FormatException('Invalid media device key material.');
       }
-      final digest = await _hash.hash(yuidPublicKey);
-      final expectedYuid = _encodeBase64Url(digest.bytes).substring(0, 20);
+      final digest =
+          _native?.sha256(yuidPublicKey) ??
+          (await _fallbackHash.hash(yuidPublicKey)).bytes;
+      final expectedYuid = _encodeBase64Url(digest).substring(0, 20);
       if (device.yuid != expectedYuid) {
         throw const FormatException('Media device YUID does not match.');
       }
@@ -152,11 +158,9 @@ class MediaRoomStateVerifier {
         '${device.authorizationNonce}|${device.publicKey}|${device.id}',
       );
       final verified = await _signatures.verify(
-        message,
-        signature: Signature(
-          authorization,
-          publicKey: SimplePublicKey(yuidPublicKey, type: KeyPairType.ed25519),
-        ),
+        message: message,
+        signature: authorization,
+        publicKey: yuidPublicKey,
       );
       if (!verified) {
         throw const FormatException('Media device authorization is invalid.');

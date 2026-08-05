@@ -1,0 +1,53 @@
+# Dependencies
+node_modules/
+
+# Flutter and Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+**/build/
+client/dist/
+
+# Generated release and test output
+dist/
+coverage/
+.artifacts/
+*.lcov
+*.log
+*.tmp
+*.temp
+*.zip.part
+*.tar.gz.part
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.cer
+server/livekit.yaml
+server/server-identity.json
+
+# Persistent/local deployment state
+server/data/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.age
+
+# Editors and operating systems
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+Desktop.ini
